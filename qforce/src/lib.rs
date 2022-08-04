@@ -1,25 +1,35 @@
 extern crate pretty_env_logger;
 #[macro_use] extern crate log;
 
+
+#[allow(dead_code)]
 pub mod enums{
     use ash;
     use ash::vk;
+    use flume;
+
     pub enum EngineMessage{}
     pub enum MemoryMessage{
 
     }
+    pub enum MemorySector{
+        //(Object, create info, start offset, ..., memory requirements, channel)
+        Buffer(vk::Buffer, vk::BufferCreateInfo, vk::DeviceSize, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
+        Image(vk::Image, vk::ImageCreateInfo, vk::DeviceSize, vk::ImageLayout, vk::ImageSubresourceLayers, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
+    }
+
 }
 
+#[allow(dead_code)]
 pub mod traits{
     use flume;
     use ash;
     use ash::vk;
-    use crate::{core, enums};
+    use crate::{core};
 
     pub trait WindowEventCallback{
         fn window_event_callback(&mut self, event: &winit::event::WindowEvent);
     }
-
     pub trait IWindowEventsChannelGroup<T> {
         fn new_event(&self) -> &(flume::Sender<T>, flume::Receiver<T>);
         fn window_event(&self) -> &(flume::Sender<T>, flume::Receiver<T>);
@@ -55,8 +65,8 @@ pub mod traits{
 #[allow(dead_code)]
 pub mod core{
     use ash;
+    use ash::vk::MemoryRequirements;
     use ash::{vk, Entry};
-    use std::f32::consts::E;
     use std::{ffi::CStr, os::raw::c_char};
     use std::borrow::{Cow, Borrow};
     use crate::traits;
@@ -610,7 +620,7 @@ pub mod core{
         }
 
         fn surface(&self) -> ash::vk::SurfaceKHR {
-            self.surface().clone()
+            self.surface.clone()
         }
 
         fn swapchain_loader(&self) -> ash::extensions::khr::Swapchain {
@@ -817,8 +827,10 @@ pub mod core{
     pub struct Memory{
         device: ash::Device,
         type_index: u32,
-        channels: (flume::Sender<enums::EngineMessage>, flume::Receiver<enums::EngineMessage>),
-        semaphore: vk::Semaphore,
+        channels: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
+        sectors: Vec<enums::MemorySector>,
+        //Alloc Info, Cursor, Allocation Handle
+        allocations: Vec<(vk::MemoryAllocateInfo, vk::DeviceSize, vk::DeviceMemory)>
     }
     impl Memory{
         pub fn new<T: traits::IEngineData>(engine: &T, required_type: vk::MemoryPropertyFlags) -> Memory{
@@ -853,13 +865,12 @@ pub mod core{
     
                 debug!("Memory targeting heap: {} using type: {}", mem_props.memory_types[selected_type].heap_index, selected_type);
                 
-                let semaphore = device.create_semaphore(&vk::SemaphoreCreateInfo::builder().build(), None).unwrap();
-    
                 Memory{ 
                     device, 
                     type_index: selected_type as u32, 
                     channels,
-                    semaphore,
+                    sectors: vec![],
+                    allocations: vec![]
                  }
             }
 
@@ -867,16 +878,50 @@ pub mod core{
         }
         pub fn get_buffer(&mut self, c_info: vk::BufferCreateInfo){
             let buffer: vk::Buffer;
-            unsafe{
-                
+            let mem_reqs: vk::MemoryRequirements;
+            unsafe {
+                buffer = self.device.create_buffer(&c_info, None).unwrap();
+                mem_reqs = self.device.get_buffer_memory_requirements(buffer);
             }
+            debug!("New buffer memory reqs: {:?}", mem_reqs)
+
+
+
+        }
+        fn sectorize(&mut self, mem_reqs: vk::MemoryRequirements) -> &mut enums::MemorySector{
+            debug!("Finding sector of size {}", mem_reqs.size);
+
+            //We try to find a pre-existing sector to take over
+            for (index,sector) in self.sectors.iter_mut().enumerate(){
+                let sector_size: vk::DeviceSize;
+                let alignment_check: bool;
+                match sector {
+                    enums::MemorySector::Buffer(_, _, _, reqs, _) => {sector_size = reqs.size; alignment_check = reqs.alignment == mem_reqs.alignment},
+                    enums::MemorySector::Image(_, _, _, _, _, reqs, _) => {sector_size = reqs.size; alignment_check = reqs.alignment == mem_reqs.alignment},
+                }
+                if sector_size <= mem_reqs.size && alignment_check {
+                    debug!("Using sector {} of size {}", index, sector_size);
+                    return sector
+                }
+            }
+
+            //Now we try to find an unused chunk of memory to take over
+            for (alloc_info, cursor, mem) in self.allocations.iter_mut(){
+                let remaining_size = alloc_info.allocation_size - cursor;
+            }
+
+            f
+
+
         }
     }
     impl Drop for Memory{
         fn drop(&mut self) {
         debug!("Dropping Memory");
         unsafe{
-            self.device.destroy_semaphore(self.semaphore, None);
+            for (_,_,mem) in self.allocations.iter(){
+                self.device.free_memory(*mem, None);
+            }
         }
     }
     }

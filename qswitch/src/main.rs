@@ -24,7 +24,7 @@ fn get_vulkan_validate() -> bool {
     pretty_env_logger::init();
     let (event_loop, window, mut engine) = qforce::core::Engine::init(get_vulkan_validate());
     let mut mem = qforce::core::Memory::new(&engine, vk::MemoryPropertyFlags::HOST_COHERENT);
-
+    mem.get_buffer(vk::BufferCreateInfo::builder().size(10000).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
     {
 
         event_loop.run(move |event, _, control_flow| {
