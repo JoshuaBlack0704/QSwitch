@@ -10,12 +10,17 @@ pub mod enums{
 
     pub enum EngineMessage{}
     pub enum MemoryMessage{
-
+        //Sector index, layout, layers
+        ImageInfoUpdate(usize, vk::ImageCreateInfo, vk::ImageSubresourceLayers),
+        BindingUpdate(MemorySector),
     }
+    #[derive(Clone)]
     pub enum MemorySector{
-        //(Object, create info, start offset, ..., memory requirements, channel)
-        Buffer(vk::Buffer, vk::BufferCreateInfo, vk::DeviceSize, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
-        Image(vk::Image, vk::ImageCreateInfo, vk::DeviceSize, vk::ImageLayout, vk::ImageSubresourceLayers, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
+        //Allocation index, sector index, StartOffset, allocated reqs
+        Empty(usize, usize, vk::DeviceSize, vk::MemoryRequirements),
+        //(Allocation index, sector index, Object, create info, start offset, ..., memory requirements, channel)
+        Buffer(usize, usize, vk::Buffer, vk::BufferCreateInfo, vk::DeviceSize, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
+        Image(usize, usize, vk::Image, vk::ImageCreateInfo, vk::DeviceSize, vk::ImageSubresourceLayers, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
     }
 
 }
@@ -59,17 +64,15 @@ pub mod traits{
         fn swapchain_info(&self) -> vk::SwapchainCreateInfoKHR;
         fn swapchain_images(&self) -> Vec<vk::Image>;
     }
-
 }
 
 #[allow(dead_code)]
 pub mod core{
     use ash;
-    use ash::vk::MemoryRequirements;
     use ash::{vk, Entry};
     use std::{ffi::CStr, os::raw::c_char};
-    use std::borrow::{Cow, Borrow};
-    use crate::traits;
+    use std::borrow::{Cow, Borrow, BorrowMut};
+    use crate::traits::{self, IEngineData};
     use crate::enums;
 
     unsafe extern "system" fn vulkan_debug_callback(
@@ -315,7 +318,6 @@ pub mod core{
             self.loop_destroyed.borrow()
         }
     }
-
     #[derive(Clone)]
     pub struct QueueCache{
         pub graphics: (vk::Queue, u32),
@@ -323,7 +325,6 @@ pub mod core{
         pub compute: (vk::Queue, u32),
         
     }
-
     pub struct Engine{
         entry: ash::Entry,
         instance: ash::Instance,
@@ -383,7 +384,8 @@ pub mod core{
                     .application_version(0)
                     .engine_name(app_name)
                     .engine_version(0)
-                    .api_version(vk::API_VERSION_1_3);
+                    .api_version(vk::API_VERSION_1_3)
+                    .build();
 
                 let create_flags = if cfg!(any(target_os = "macos", target_os = "ios")) {
                     vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR
@@ -434,9 +436,11 @@ pub mod core{
                 let surface_loader = ash::extensions::khr::Surface::new(&entry, &instance);
 
                 let pdevice = get_physical_device_surface(instance.clone(), surface_loader.clone(), surface.clone()).unwrap();
-                
                 let device_extension_names_raw = [
                     ash::extensions::khr::Swapchain::name().as_ptr(),
+                    ash::extensions::khr::AccelerationStructure::name().as_ptr(),
+                    ash::extensions::khr::DeferredHostOperations::name().as_ptr(),
+                    ash::extensions::khr::RayTracingPipeline::name().as_ptr(),
                     #[cfg(any(target_os = "macos", target_os = "ios"))]
                         KhrPortabilitySubsetFn::name().as_ptr(),
                 ];
@@ -639,7 +643,6 @@ pub mod core{
             self.swapchain_images.clone()
         }
     }
-    
     pub struct WindowlessEngine{
         entry: ash::Entry,
         instance: ash::Instance,
@@ -830,7 +833,8 @@ pub mod core{
         channels: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
         sectors: Vec<enums::MemorySector>,
         //Alloc Info, Cursor, Allocation Handle
-        allocations: Vec<(vk::MemoryAllocateInfo, vk::DeviceSize, vk::DeviceMemory)>
+        allocations: Vec<(vk::MemoryAllocateInfo, vk::DeviceSize, vk::DeviceMemory)>,
+        sector_count: usize,
     }
     impl Memory{
         pub fn new<T: traits::IEngineData>(engine: &T, required_type: vk::MemoryPropertyFlags) -> Memory{
@@ -870,49 +874,302 @@ pub mod core{
                     type_index: selected_type as u32, 
                     channels,
                     sectors: vec![],
-                    allocations: vec![]
+                    allocations: vec![],
+                    sector_count: 0,
                  }
             }
 
 
         }
-        pub fn get_buffer(&mut self, c_info: vk::BufferCreateInfo){
+        pub fn get_buffer(&mut self, mut c_info: vk::BufferCreateInfo) -> Buffer {
             let buffer: vk::Buffer;
+            let channel = flume::unbounded();
             let mem_reqs: vk::MemoryRequirements;
+            c_info.usage = c_info.usage | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST;
             unsafe {
                 buffer = self.device.create_buffer(&c_info, None).unwrap();
                 mem_reqs = self.device.get_buffer_memory_requirements(buffer);
             }
-            debug!("New buffer memory reqs: {:?}", mem_reqs)
-
-
+            debug!("New buffer memory reqs: {:?}", mem_reqs);
+            let index = self.sectorize(&mem_reqs);
+            let target_sector = self.sectors[index].borrow_mut();
+            match target_sector {
+                enums::MemorySector::Empty(allocation, index, offset, reqs) => {
+                    unsafe{
+                        self.device.bind_buffer_memory(buffer, self.allocations[*allocation].2, *offset).unwrap();
+                    }
+                    *target_sector = enums::MemorySector::Buffer(*allocation, *index, buffer, c_info, *offset, *reqs, channel.0.clone());
+                    
+                },
+                _ => unimplemented!()
+            }
+            Buffer { device: self.device.clone(), channel, sector: target_sector.clone() }
 
         }
-        fn sectorize(&mut self, mem_reqs: vk::MemoryRequirements) -> &mut enums::MemorySector{
+        pub fn get_image(&mut self, mut c_info: vk::ImageCreateInfo) -> Image{
+            let image: vk::Image;
+            let mem_reqs: vk::MemoryRequirements;
+            let channel = flume::unbounded();
+            c_info.usage = c_info.usage | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST;
+            unsafe {
+                image = self.device.create_image(&c_info, None).unwrap();
+                mem_reqs = self.device.get_image_memory_requirements(image);
+            }
+            debug!("New image memory reqs: {:?}", mem_reqs);
+            let index = self.sectorize(&mem_reqs);
+            let target_sector = self.sectors[index].borrow_mut();
+            match target_sector {
+                enums::MemorySector::Empty(allocation, index, offset, reqs) => {
+                    unsafe {
+                        self.device.bind_image_memory(image, self.allocations[*allocation].2, *offset).unwrap();
+                    }
+                    *target_sector = enums::MemorySector::Image(*allocation, *index, image, c_info, *offset, vk::ImageSubresourceLayers::builder().aspect_mask(vk::ImageAspectFlags::COLOR).mip_level(0).base_array_layer(0).layer_count(1).build(), *reqs, channel.0.clone());
+                },
+                _ => unimplemented!()
+            }
+            Image{ device: self.device.clone(), image, channel, sector: target_sector.clone() }
+        }
+        fn sectorize(&mut self, mem_reqs: &vk::MemoryRequirements) -> usize{
             debug!("Finding sector of size {}", mem_reqs.size);
 
             //We try to find a pre-existing sector to take over
             for (index,sector) in self.sectors.iter_mut().enumerate(){
-                let sector_size: vk::DeviceSize;
-                let alignment_check: bool;
+                let extracted_data: enums::MemorySector;
+                let extracted_channel: flume::Sender<enums::MemoryMessage>;
                 match sector {
-                    enums::MemorySector::Buffer(_, _, _, reqs, _) => {sector_size = reqs.size; alignment_check = reqs.alignment == mem_reqs.alignment},
-                    enums::MemorySector::Image(_, _, _, _, _, reqs, _) => {sector_size = reqs.size; alignment_check = reqs.alignment == mem_reqs.alignment},
+                    enums::MemorySector::Buffer(ai, si,_, _, o, reqs, c) => {extracted_data = enums::MemorySector::Empty(*ai, *si, *o, *reqs);extracted_channel = c.clone();},
+                    enums::MemorySector::Image(ai, si, _, _, o, _, reqs, c) => {extracted_data = enums::MemorySector::Empty(*ai, *si,  *o, *reqs);extracted_channel = c.clone();},
+                    _ => unimplemented!(),
                 }
-                if sector_size <= mem_reqs.size && alignment_check {
-                    debug!("Using sector {} of size {}", index, sector_size);
-                    return sector
+                match extracted_data {
+                    enums::MemorySector::Empty(ai, si, o, r) => {
+                        if extracted_channel.is_disconnected() && r.size >= mem_reqs.size && r.alignment == mem_reqs.alignment {
+                            debug!("Using sector {} of size {}", si, r.size);
+                            *sector = extracted_data;
+                            debug!("Found pre-exsisting sector {} allocated on {} at {} with requirements {:?}", si, ai, o, r);
+                            return index;
+                        }
+                    },
+                    _ => unimplemented!()
                 }
+                
             }
 
             //Now we try to find an unused chunk of memory to take over
-            for (alloc_info, cursor, mem) in self.allocations.iter_mut(){
-                let remaining_size = alloc_info.allocation_size - cursor;
+            for (index, (alloc_info, cursor, _)) in self.allocations.iter_mut().enumerate(){
+                let offset = (*cursor / mem_reqs.alignment + 1) * mem_reqs.alignment;
+                let remaining_size = alloc_info.allocation_size - offset;
+
+                if remaining_size >= mem_reqs.size{
+                    self.sectors.push(enums::MemorySector::Empty(index, self.sector_count, offset, mem_reqs.clone()));
+                    self.sector_count += 1;
+                    *cursor += mem_reqs.size;
+                    debug!("Created sector {} on allocation {} at {} with requirements {:?}", self.sectors.len()-1, index, offset, mem_reqs);
+                    return self.sectors.len() - 1;
+                }
             }
 
-            f
+            //If we get here we need to create a new allocation. Size is either 1MB or 2x the size of the request
+            //1 MB
+            let allocation_size:u64;
+            if 1024*1024 <= mem_reqs.size{
+                allocation_size = mem_reqs.size * 2;
+            }
+            else{
+                allocation_size = 1024*1024;
+            }
+            let aloc_info = vk::MemoryAllocateInfo::builder().allocation_size(allocation_size).memory_type_index(self.type_index).build();
+            let allocation: vk::DeviceMemory;
+            unsafe{
+                allocation = self.device.allocate_memory(&aloc_info, None).unwrap();
+            }
+            self.sectors.push(enums::MemorySector::Empty(self.allocations.len(), self.sector_count, 0, mem_reqs.clone()));
+            self.sector_count += 1;
+            self.allocations.push((aloc_info, mem_reqs.size, allocation));
+            debug!("Created allocation {} with size {} and sector {}", self.allocations.len()-1, aloc_info.allocation_size, self.sectors.len()-1);
+            self.sectors.len() -1
 
 
+        }
+        pub fn consolidate(&mut self, cmd: &vk::CommandBuffer){
+            //We first process all messages in the message stream and apply the updates to the sectors
+            for message in self.channels.1.try_iter(){
+                match message {
+                    enums::MemoryMessage::ImageInfoUpdate(si, c_info, layers) => {
+                        match self.sectors.iter_mut().find(|sector| {
+                            let found = match sector {
+                                enums::MemorySector::Buffer(_, _si, _, _, _, _, _) => *_si == si,
+                                enums::MemorySector::Image(_, _si, _, _, _, _, _, _) => *_si == si,
+                                _ => unimplemented!()
+                            };
+                            found
+                        }).unwrap() {
+                            enums::MemorySector::Image(_, _, _, c, _, s, _, _) => {
+                                 *s = layers;
+                                 *c = c_info;
+                                 debug!("Updates found for iamge sector {}", si);
+                            },
+                            _ => unimplemented!()
+                        }
+                    },
+                    _ => todo!()
+                }
+            }
+            //We must first build a new sector layout
+            let mut cursor: vk::DeviceSize = 0;
+            let mut sectors = Vec::with_capacity(self.sectors.len());
+            for sector in self.sectors.iter(){
+                match sector {
+                    enums::MemorySector::Buffer(_, si, b, c, _, r, f) => {
+                        if !f.is_disconnected() {
+                            cursor = ((cursor / r.alignment) + 1) * r.alignment;
+                            sectors.push(enums::MemorySector::Buffer(0, *si, *b, *c, cursor, *r, f.clone()));
+                            cursor += r.size;
+                            debug!("Sector {} accepted. Cursor is at {}", si, cursor);
+                        }
+                        else {
+                            debug!("Sector {} disconnected", si);
+                        }
+                        
+                    },
+                    enums::MemorySector::Image(_, si, i, c, _, s, r, f) => {
+                        if !f.is_disconnected(){
+                            cursor = ((cursor / r.alignment) + 1) * r.alignment;
+                            sectors.push(enums::MemorySector::Image(0, *si, *i, *c, cursor, *s, *r, f.clone()));
+                            cursor += r.size;
+                            debug!("Sector {} accepted. Cursor is at {}", si, cursor);
+                        }
+                        else {
+                            debug!("Sector {} disconnected", si);
+                        }
+                    },
+                    _ => unimplemented!()
+                }
+            }
+            //Then we create an allocation to hold all sectors
+            let allocation: vk::DeviceMemory;
+            let aloc_info = vk::MemoryAllocateInfo::builder().allocation_size(cursor * 2).memory_type_index(self.type_index).build();
+            unsafe{
+                allocation = self.device.allocate_memory(&aloc_info, None).unwrap();
+                debug!("New allocation of size {} created", aloc_info.allocation_size);
+            }
+            //Then we need to record the transfer operations
+            //During this phase we also create the new buffer and image objects
+            let mut old_data = Vec::with_capacity(sectors.len());
+            for sector in sectors.iter_mut(){
+                match sector {
+                    enums::MemorySector::Buffer(_, si, b, c, o, _, _) => {
+                        let target_buffer: vk::Buffer;
+                        let copy = vk::BufferCopy::builder().dst_offset(0).src_offset(0).size(c.size).build();
+                        unsafe {
+                            target_buffer = self.device.create_buffer(c, None).unwrap();
+                            self.device.bind_buffer_memory(target_buffer, allocation, *o).unwrap();
+                            self.device.cmd_copy_buffer(*cmd, *b, target_buffer, &vec![copy]);
+                        }
+                        debug!("Recorded copy from buffer {:?} to new buffer {:?} for sector {}", *b, target_buffer, si);
+                        old_data.push((Some(*b), None, None));
+                        *b = target_buffer;
+                    },
+                    enums::MemorySector::Image(_, si, i, c, o, s, _, _) => {
+                        let target_image: vk::Image;
+                        let copy = vk::ImageCopy::builder().src_subresource(*s).dst_subresource(*s).src_offset(vk::Offset3D::builder().build()).dst_offset(vk::Offset3D::builder().build()).extent(c.extent).build();
+                        unsafe{
+                            target_image = self.device.create_image(c, None).unwrap();
+                            self.device.bind_image_memory(target_image, allocation, *o).unwrap();
+                            self.device.cmd_copy_image(*cmd, *i, c.initial_layout, target_image, c.initial_layout, &vec![copy]);
+                        }
+                        debug!("Recorded copy from image {:?} to new image {:?} for sector {}", *i, target_image, si);
+                        old_data.push((None, Some(*i), None));
+                        *i = target_image;
+                    },
+                    _ => unimplemented!()
+                }
+            }
+            for old_allocation in self.allocations.iter(){
+                old_data.push((None, None, Some(old_allocation.2)));
+            }
+            self.allocations = vec![(aloc_info, cursor, allocation)];
+
+            //Now we send updates through channels
+            for sector in self.sectors.iter(){
+                match sector {
+                    enums::MemorySector::Buffer(_, _, _, _, _, _, f) => {
+                        f.send(enums::MemoryMessage::BindingUpdate(sector.clone())).unwrap();
+                    },
+                    enums::MemorySector::Image(_, _, _, _, _, _, _, f) => {
+                        f.send(enums::MemoryMessage::BindingUpdate(sector.clone())).unwrap();
+                    },
+                    _ => unimplemented!()
+                }
+            }
+
+        }
+        pub fn copy_from_ram(&self, src: *const u8, byte_count: usize, target_sector: &enums::MemorySector, dst_offset: isize){
+            let target_allocation: vk::DeviceMemory;
+            let target_offset: isize;
+            let target_index: usize;
+            match target_sector {
+                enums::MemorySector::Buffer(ai, si, _, _, o, _, _) => {
+                    target_allocation = self.allocations[*ai].2;
+                    target_offset = *o as isize + dst_offset;
+                    target_index = *si;
+                },
+                enums::MemorySector::Image(ai, si, _, _, o, _, _, _) => {
+                    target_allocation = self.allocations[*ai].2;
+                    target_offset = *o as isize + dst_offset;
+                    target_index = *si;
+                },
+                _ => unimplemented!()
+            }
+
+
+
+            let mapped_range = vk::MappedMemoryRange::builder()
+                .memory(target_allocation)
+                .offset(0)
+                .size(vk::WHOLE_SIZE)
+                .build();
+    
+            unsafe {
+                let dst = (self.device.map_memory(target_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *mut u8).offset(target_offset);
+                debug!("Copying {} bytes from {:?} to sector {} on allocation {:?} at {}", byte_count, src, target_index, target_allocation, target_offset);
+                std::ptr::copy_nonoverlapping(src, dst, byte_count);
+                self.device.flush_mapped_memory_ranges(&vec![mapped_range]).unwrap();
+                self.device.unmap_memory(target_allocation);
+            }
+        }
+        pub fn copy_to_ram(&self, dst: *mut u8, byte_count: usize, src_sector: &enums::MemorySector, _src_offset: isize){
+            let src_allocation: vk::DeviceMemory;
+            let src_offset: isize;
+            let src_index: usize;
+            match src_sector {
+                enums::MemorySector::Buffer(ai, si, _, _, o, _, _) => {
+                    src_allocation = self.allocations[*ai].2;
+                    src_offset = *o as isize + _src_offset;
+                    src_index = *si;
+                },
+                enums::MemorySector::Image(ai, si, _, _, o, _, _, _) => {
+                    src_allocation = self.allocations[*ai].2;
+                    src_offset = *o as isize + _src_offset;
+                    src_index = *si;
+                },
+                _ => unimplemented!()
+            }
+    
+            let mapped_range = vk::MappedMemoryRange::builder()
+            .memory(src_allocation)
+            .offset(0)
+            .size(vk::WHOLE_SIZE)
+            .build();
+    
+            unsafe {
+                let src = (self.device.map_memory(src_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *const u8).offset(src_offset);
+                self.device.invalidate_mapped_memory_ranges(&vec![mapped_range]).unwrap();
+                debug!("Copying {} bytes to {:?} from sector {} on allocation {:?} at {}", byte_count, dst, src_index, src_allocation, _src_offset);
+                std::ptr::copy_nonoverlapping(src, dst, byte_count);
+                self.device.unmap_memory(src_allocation);
+            }
+    
         }
     }
     impl Drop for Memory{
@@ -925,5 +1182,98 @@ pub mod core{
         }
     }
     }
-}
+    pub struct Image{
+        device: ash::Device,
+        image: vk::Image,
+        channel: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
+        sector: enums::MemorySector
+    }
+    impl Image{
+    }
+    pub struct Buffer{
+        device: ash::Device,
+        channel: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
+        sector: enums::MemorySector
+    }
+    impl Buffer{
+         pub fn get_sector(&mut self) -> &enums::MemorySector{
+            for message in self.channel.1.try_iter(){
+                match message {
+                    enums::MemoryMessage::BindingUpdate(s) => {
+                        match s {
+                            enums::MemorySector::Buffer(_, _, _, _, _, _, _) => {
+                                self.sector = s;
+                            },
+                            _ => unimplemented!()
+                        }
+                    },
+                    _ => unimplemented!()
+                }
+            }
 
+            &self.sector
+         }
+         pub fn get_buffer(&mut self) -> vk::Buffer{
+            let buffer: vk::Buffer;
+            match self.get_sector() {
+                enums::MemorySector::Buffer(_, _, b, _, _, _, _) => {buffer = *b},
+                _ => unimplemented!()
+            }
+            buffer
+         }
+         pub fn transfer_from_buffer(&mut self, cmd: vk::CommandBuffer, src: &mut Buffer, src_offset: vk::DeviceSize, size: vk::DeviceSize, dst_offset: vk::DeviceSize){
+            let copy = vk::BufferCopy::builder().src_offset(src_offset).dst_offset(dst_offset).size(size).build();
+            unsafe{
+                let self_buffer = self.get_buffer();
+                self.device.cmd_copy_buffer(cmd, src.get_buffer(), self_buffer, &vec![copy]);
+            }
+         }
+         pub fn transfer_to_buffer(&mut self, cmd: vk::CommandBuffer, dst: &mut Buffer, dst_offset: vk::DeviceSize, size: vk::DeviceSize, src_offset: vk::DeviceSize){
+            let copy = vk::BufferCopy::builder().src_offset(src_offset).dst_offset(dst_offset).size(size).build();
+            unsafe{
+                let self_buffer = self.get_buffer();
+                self.device.cmd_copy_buffer(cmd, self_buffer, dst.get_buffer(), &vec![copy]);
+            }
+         }
+    }
+    
+    
+    pub struct CommandPool{
+        device: ash::Device,
+        command_pool: ash::vk::CommandPool,
+        c_info: ash::vk::CommandPoolCreateInfo
+    }
+    impl CommandPool{
+        pub fn new<T: IEngineData>(engine: &T, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool {
+    
+            unsafe {
+                let command_pool = engine.device().create_command_pool(&c_info, None).unwrap();
+                CommandPool{
+                    device: engine.device(),
+                    command_pool,
+                    c_info
+                }
+            }
+    
+        }
+        pub fn get_command_buffers(&self, mut a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer> {
+            a_info.command_pool = self.command_pool;
+            unsafe {
+                self.device.allocate_command_buffers(&a_info).unwrap()
+            }
+        }
+        pub fn reset(&self){
+            unsafe {
+                self.device.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty()).unwrap();
+            }
+        }
+    }
+    impl Drop for CommandPool {
+        fn drop(&mut self) {
+            unsafe {
+                debug!("Command Pool destroyed");
+                self.device.destroy_command_pool(self.command_pool, None);
+            }
+        }
+    }
+}

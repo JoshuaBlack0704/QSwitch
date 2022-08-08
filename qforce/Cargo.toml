@@ -9,7 +9,7 @@ lto = "fat"
 [dependencies]
 ash = {version = "0.37.0", features = ["linked"]}
 flume = "0.10.14"
-winit = "0.26.1"
+winit = "0.26.0"
 log = "0.4.17"
 pretty_env_logger = "0.4.0"
-ash-window = "0.10.0"
+ash-window = "0.11.0"
