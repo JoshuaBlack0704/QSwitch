@@ -4,6 +4,7 @@
  extern crate log;
  use qforce::traits::IEngineData;
 use winit;
+use shaderc;
  
 
 #[cfg(debug_assertions)]
@@ -27,14 +28,21 @@ fn get_vulkan_validate() -> bool {
     let mut cpu_mem = qforce::core::Memory::new(&engine, vk::MemoryPropertyFlags::HOST_COHERENT);
     let mut gpu_mem = qforce::core::Memory::new(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL);
 
+    let shader = qforce::core::Shader::new(&engine, String::from("#version 460\n void main() {}"), shaderc::ShaderKind::Compute, "main", None);
+
     let pool = qforce::core::CommandPool::new(&engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.queue_data().transfer.1).build());
     let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().level(vk::CommandBufferLevel::PRIMARY).command_buffer_count(1).build())[0];
 
     let mut data:Vec<u64> = (0..100).collect();
-    println!("{:?}",data);
     let mut b1 = cpu_mem.get_buffer(vk::BufferCreateInfo::builder().size((std::mem::size_of::<u64>() * data.len()) as u64).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
     let mut b2 = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size((std::mem::size_of::<u64>() * data.len()) as u64).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
     let mut b3 = cpu_mem.get_buffer(vk::BufferCreateInfo::builder().size((std::mem::size_of::<u64>() * data.len()) as u64).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
+
+    let mut d_sys = qforce::core::DescriptorSystem::new(&engine);
+    let s1 = d_sys.create_new_set();
+    d_sys.set_active_set(s1);
+    b2.add_descriptor_block(0, (std::mem::size_of::<u64>() * data.len()) as u64, vk::ShaderStageFlags::ALL, &mut d_sys);
+    println!("Pulled set {:?}", d_sys.get_set(s1));
 
     cpu_mem.copy_from_ram(data.as_ptr() as *const u8, std::mem::size_of::<u64>() * data.len(), b1.get_sector(), 0);
 
@@ -49,11 +57,9 @@ fn get_vulkan_validate() -> bool {
         engine.device().queue_submit(engine.queue_data().transfer.0, &[submit], vk::Fence::null()).unwrap();
         engine.device().queue_wait_idle(engine.queue_data().transfer.0).unwrap();
     }
-
     
     data = vec![100;100];
     cpu_mem.copy_to_ram(data.as_mut_ptr() as *mut u8, std::mem::size_of::<u64>() * data.len(), b3.get_sector(), 0);
-    println!("{:?}",data);
 
     {
 
@@ -66,8 +72,13 @@ fn get_vulkan_validate() -> bool {
                         winit::event::WindowEvent::CloseRequested => {
                         *control_flow = winit::event_loop::ControlFlow::Exit;
                         drop(&pool);
+                        drop(&d_sys);
+                        drop(&b1);
+                        drop(&b2);
+                        drop(&b3);
                         drop(&cpu_mem);
                         drop(&gpu_mem);
+                        drop(&shader)
                         },
                         winit::event::WindowEvent::Resized(_) => {
                             engine.refresh_swapchain();

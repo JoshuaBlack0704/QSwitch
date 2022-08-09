@@ -7,6 +7,7 @@ pub mod enums{
     use ash;
     use ash::vk;
     use flume;
+    use crate::core;
 
     pub enum EngineMessage{}
     pub enum MemoryMessage{
@@ -22,7 +23,13 @@ pub mod enums{
         Buffer(usize, usize, vk::Buffer, vk::BufferCreateInfo, vk::DeviceSize, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
         Image(usize, usize, vk::Image, vk::ImageCreateInfo, vk::DeviceSize, vk::ImageSubresourceLayers, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
     }
-
+    pub enum DescriptorMessage{
+        WriteInfoUpdate(core::DescriptorBindingReceipt, DescriptorInfoType),
+    }
+    pub enum DescriptorInfoType{
+        Image(vk::DescriptorImageInfo),
+        Buffer(vk::DescriptorBufferInfo),
+    }
 }
 
 #[allow(dead_code)]
@@ -30,7 +37,7 @@ pub mod traits{
     use flume;
     use ash;
     use ash::vk;
-    use crate::{core};
+    use crate::{core, enums};
 
     pub trait WindowEventCallback{
         fn window_event_callback(&mut self, event: &winit::event::WindowEvent);
@@ -64,13 +71,18 @@ pub mod traits{
         fn swapchain_info(&self) -> vk::SwapchainCreateInfoKHR;
         fn swapchain_images(&self) -> Vec<vk::Image>;
     }
+    pub trait IDescriptorEntryPoint {
+        fn add_binding(&mut self, descriptor_type: vk::DescriptorType, stage: vk::ShaderStageFlags, info: enums::DescriptorInfoType, subscriber: flume::Sender<enums::DescriptorMessage>) -> (core::DescriptorBindingReceipt, flume::Sender<enums::DescriptorMessage>);
+    }
 }
 
 #[allow(dead_code)]
 pub mod core{
+    use ash::vk::DescriptorSetLayout;
+    use shaderc;
     use ash;
     use ash::{vk, Entry};
-    use std::{ffi::CStr, os::raw::c_char};
+    use std::{string::String, ffi::CStr, os::raw::c_char};
     use std::borrow::{Cow, Borrow, BorrowMut};
     use crate::traits::{self, IEngineData};
     use crate::enums;
@@ -903,7 +915,7 @@ pub mod core{
                 },
                 _ => unimplemented!()
             }
-            Buffer { device: self.device.clone(), channel, sector: target_sector.clone() }
+            Buffer { device: self.device.clone(), channel, sector: target_sector.clone(), descriptor_channel: flume::unbounded(), descriptor_blocks: vec![] }
 
         }
         pub fn get_image(&mut self, mut c_info: vk::ImageCreateInfo) -> Image{
@@ -1193,10 +1205,12 @@ pub mod core{
     pub struct Buffer{
         device: ash::Device,
         channel: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
-        sector: enums::MemorySector
+        sector: enums::MemorySector,
+        descriptor_channel: (flume::Sender<enums::DescriptorMessage>, flume::Receiver<enums::DescriptorMessage>),
+        descriptor_blocks: Vec<(vk::DeviceSize, vk::DeviceSize, vk::ShaderStageFlags, flume::Sender<enums::DescriptorMessage>)>
     }
     impl Buffer{
-         pub fn get_sector(&mut self) -> &enums::MemorySector{
+        pub fn get_sector(&mut self) -> &enums::MemorySector{
             for message in self.channel.1.try_iter(){
                 match message {
                     enums::MemoryMessage::BindingUpdate(s) => {
@@ -1213,7 +1227,7 @@ pub mod core{
 
             &self.sector
          }
-         pub fn get_buffer(&mut self) -> vk::Buffer{
+        pub fn get_buffer(&mut self) -> vk::Buffer{
             let buffer: vk::Buffer;
             match self.get_sector() {
                 enums::MemorySector::Buffer(_, _, b, _, _, _, _) => {buffer = *b},
@@ -1221,23 +1235,55 @@ pub mod core{
             }
             buffer
          }
-         pub fn transfer_from_buffer(&mut self, cmd: vk::CommandBuffer, src: &mut Buffer, src_offset: vk::DeviceSize, size: vk::DeviceSize, dst_offset: vk::DeviceSize){
+        pub fn transfer_from_buffer(&mut self, cmd: vk::CommandBuffer, src: &mut Buffer, src_offset: vk::DeviceSize, size: vk::DeviceSize, dst_offset: vk::DeviceSize){
             let copy = vk::BufferCopy::builder().src_offset(src_offset).dst_offset(dst_offset).size(size).build();
             unsafe{
                 let self_buffer = self.get_buffer();
                 self.device.cmd_copy_buffer(cmd, src.get_buffer(), self_buffer, &vec![copy]);
             }
          }
-         pub fn transfer_to_buffer(&mut self, cmd: vk::CommandBuffer, dst: &mut Buffer, dst_offset: vk::DeviceSize, size: vk::DeviceSize, src_offset: vk::DeviceSize){
+        pub fn transfer_to_buffer(&mut self, cmd: vk::CommandBuffer, dst: &mut Buffer, dst_offset: vk::DeviceSize, size: vk::DeviceSize, src_offset: vk::DeviceSize){
             let copy = vk::BufferCopy::builder().src_offset(src_offset).dst_offset(dst_offset).size(size).build();
             unsafe{
                 let self_buffer = self.get_buffer();
                 self.device.cmd_copy_buffer(cmd, self_buffer, dst.get_buffer(), &vec![copy]);
             }
          }
+        pub fn add_descriptor_block<T: traits::IDescriptorEntryPoint>(&mut self, offset: vk::DeviceSize, range: vk::DeviceSize, stages: vk::ShaderStageFlags, descriptor_system: &mut T){
+            let (_, _) = descriptor_system
+            .add_binding(
+                self.get_descriptor_type(), 
+                stages, 
+            enums::DescriptorInfoType::Buffer(vk::DescriptorBufferInfo::builder().buffer(self.get_buffer()).offset(offset).range(range).build()),
+            self.descriptor_channel.0.clone());
+        }
+        fn get_descriptor_type(&mut self) -> vk::DescriptorType{
+            let d_type: vk::DescriptorType;
+            match self.get_sector() {
+                enums::MemorySector::Buffer(_, _, _, c, _, _, _) => {
+                    let usage = c.usage;
+                    if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
+                        d_type = vk::DescriptorType::STORAGE_BUFFER;
+                    }
+                    else {
+                        unimplemented!();
+                    }
+                },
+                _ => unimplemented!()
+            }
+            d_type
+         }
+         
     }
-    
-    
+    impl Drop for Buffer{
+        fn drop(&mut self) {
+        match self.sector{
+            enums::MemorySector::Buffer(_, _, b, _, _, _, _) => unsafe {debug!("Destroying Buffer {:?}", b); self.device.destroy_buffer(b, None);},
+            _ => unimplemented!()
+        }
+    }
+    }
+
     pub struct CommandPool{
         device: ash::Device,
         command_pool: ash::vk::CommandPool,
@@ -1275,5 +1321,263 @@ pub mod core{
                 self.device.destroy_command_pool(self.command_pool, None);
             }
         }
+    }
+    pub struct Shader{
+        device: ash::Device,
+        source: String,
+        module: vk::ShaderModule,       
+    }
+    impl Shader{
+        pub fn new<T: IEngineData>(engine: &T, source: String, kind: shaderc::ShaderKind, ep_name: &str, options: Option<&shaderc::CompileOptions>) -> Shader{
+            let module: vk::ShaderModule;
+            let compiler = shaderc::Compiler::new().unwrap();
+            let byte_source = compiler.compile_into_spirv(source.as_str(), kind, "shader.glsl", ep_name, options).unwrap();
+            debug!("Compiled shader {} to binary {:?}", source, byte_source.as_binary());
+            unsafe{
+                let c_info = vk::ShaderModuleCreateInfo::builder().code(byte_source.as_binary()).build();
+                module = engine.device().create_shader_module(&c_info, None).unwrap();
+            }
+            Shader { device: engine.device(), source, module }
+        }
+    }
+    impl Drop for Shader{
+        fn drop(&mut self) {
+        unsafe{
+            debug!("Destroying Shader");
+            self.device.destroy_shader_module(self.module, None);
+        }
+        }
+    }
+    
+    pub struct DescriptorBindingReceipt{
+        set_index: usize,
+        binding_index: usize,
+    }
+    struct DescriptorSet{
+        pub set: Option<vk::DescriptorSet>,
+        pub layout: Option<vk::DescriptorSetLayout>,
+        pub  bindings: Vec<(vk::DescriptorType, vk::ShaderStageFlags, enums::DescriptorInfoType, flume::Sender<enums::DescriptorMessage>)>
+    }
+    pub struct DescriptorSystem{
+        device: ash::Device,
+        pool: Option<vk::DescriptorPool>,
+        sets: Vec<DescriptorSet>,
+        active_set: usize,
+        channel: (flume::Sender<enums::DescriptorMessage>, flume::Receiver<enums::DescriptorMessage>)
+    }
+    impl DescriptorSystem{
+        pub fn new<T: IEngineData>(engine: &T) -> DescriptorSystem{
+            DescriptorSystem { device: engine.device(), pool: None, sets: vec![], active_set: 0, channel: flume::unbounded() }
+        }
+        pub fn set_active_set(&mut self, index: usize){
+            self.active_set = index;
+        }
+        pub fn create_new_set(&mut self) -> usize{
+            let set = DescriptorSet{ set: None, layout: None, bindings: vec![] };
+            self.sets.push(set);
+            self.sets.len()-1
+        }
+        pub fn update(&mut self){
+
+            match self.pool{
+                Some(_) => {},
+                None => {
+                    debug!("Updating pool");
+                    //First we need to produce all of the set layouts while keeping track of the desc types
+                    let mut sizes: Vec<vk::DescriptorPoolSize> = vec![];
+                    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
+                    for (index, set_data) in self.sets.iter_mut().enumerate(){
+                        debug!("Analyzing set {}", index);
+                        set_data.set = None;
+                        let mut bindings: Vec<vk::DescriptorSetLayoutBinding> = vec![];
+                        for (b_index, (descriptor_type, stages, _, f)) in set_data.bindings.iter().enumerate(){
+                            //Here we add the size out of the disconnect check because we must ensure the pool can carry old layouts
+                            match sizes.iter_mut().find(|size| size.ty == *descriptor_type) {
+                                Some(s) => {
+                                    s.descriptor_count += 1;
+                                    debug!("Type {:?} count set to {}", s.ty, s.descriptor_count);
+                                },
+                                None => {
+                                    sizes.push(vk::DescriptorPoolSize::builder().ty(*descriptor_type).descriptor_count(1).build());
+                                    debug!("New type added to sizes {:?}", *descriptor_type);
+                                },
+                            }
+                            if !f.is_disconnected(){
+                                //Here we gen a new binding
+                                let binding = vk::DescriptorSetLayoutBinding::builder()
+                                .binding(bindings.len() as u32)
+                                .descriptor_type(*descriptor_type)
+                                .descriptor_count(1)
+                                .stage_flags(*stages)
+                                .build();
+                                debug!("Binding slot {} of set {} is active generated binding {:?}", b_index, index, binding);
+                                bindings.push(binding);
+                            }
+                        }
+
+
+                        match set_data.layout {
+                            Some(l) => {
+                                layouts.push(l)
+                            },
+                            None => {
+                                let c_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(bindings.as_slice()).build();
+                                unsafe{
+                                    set_data.layout = Some(self.device.create_descriptor_set_layout(&c_info, None).unwrap());
+                                }
+                                debug!("Created set layout {:?} for set {}", set_data.layout, index);
+                                layouts.push(set_data.layout.unwrap());
+                            },
+                        }
+                    }
+                    //Then we need to create the pool
+                    let c_info = vk::DescriptorPoolCreateInfo::builder()
+                    .max_sets(self.sets.len() as u32)
+                    .pool_sizes(sizes.as_slice())
+                    .build();
+                    unsafe{
+                        self.pool = Some(self.device.create_descriptor_pool(&c_info, None).unwrap());
+                        debug!("Generated new pool {:?}", self.pool);
+                    }
+                    //Then we need to allocate the sets
+                    let a_info = vk::DescriptorSetAllocateInfo::builder().descriptor_pool(self.pool.unwrap()).set_layouts(layouts.as_slice()).build();
+                    unsafe{
+                        for (index, set) in self.device.allocate_descriptor_sets(&a_info).unwrap(). iter().enumerate(){
+                            self.sets[index].set = Some(*set);
+                        }
+                    }
+                    debug!("Allocated {} sets", a_info.descriptor_set_count);
+                    //Then we need to write all sets
+                    self.write_sets();
+                },
+            }
+
+
+            //We need to read the write update messages and apply the data changes and write into the sets
+            for message in self.channel.1.try_iter(){
+                match message {
+                    enums::DescriptorMessage::WriteInfoUpdate(r, t) => {
+                        let target_set = self.sets.get_mut(r.set_index).unwrap();
+                        let (_,_,i,_) = target_set.bindings.get_mut(r.binding_index).unwrap();
+                        *i = t;
+                    },
+                }
+            }
+            self.write_sets();
+
+
+        }
+        pub fn get_set_layout(&mut self, set_index: usize) -> DescriptorSetLayout {
+            self.update();
+            let target_set = self.sets.get_mut(set_index).unwrap();
+            let layout = match target_set.layout {
+                Some(l) => l,
+                None => panic!(),
+            };
+            layout
+        }
+        pub fn get_set(&mut self, set_index: usize) -> vk::DescriptorSet{
+            self.update();
+            let target_set = self.sets.get_mut(set_index).unwrap();
+            let set = match target_set.set {
+                Some(s) => s,
+                None => panic!(),
+            };
+            set
+        }
+        fn write_sets(&mut self){
+            let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
+                    for (index, set_data) in self.sets.iter().enumerate(){
+                        let mut binding_count = 0;
+                        writes.append(
+                            &mut set_data.bindings.iter()
+                            .enumerate()
+                            .filter(|(_, (_,_,_,f))| !f.is_disconnected())
+                            .map(|(b_index, (t,_,info,_))| {
+                                let mut b_infos = vec![];
+                                let mut i_infos = vec![];
+                                match info {
+                                    enums::DescriptorInfoType::Image(i) => i_infos.push(*i),
+                                    enums::DescriptorInfoType::Buffer(b) => b_infos.push(*b),
+                                };
+                                let builder = vk::WriteDescriptorSet::builder()
+                                .dst_set(set_data.set.unwrap())
+                                .dst_binding(binding_count as  u32)
+                                .descriptor_type(*t)
+                                .image_info(i_infos.as_slice())
+                                .buffer_info(b_infos.as_slice());
+
+                                let write = builder.build();
+                                debug!("Generted write {:?} on set {} for binding {}", write, index, b_index);
+                                binding_count += 1;
+                                write
+                            })
+                            .collect()
+                        );
+                    }
+                    unsafe{
+                        self.device.update_descriptor_sets(writes.as_slice(), &[]);
+                        debug!("Made {} Descriptor Set Writes", writes.len());
+                    }
+        }
+    }
+    impl traits::IDescriptorEntryPoint for DescriptorSystem {
+        fn add_binding(&mut self, descriptor_type: vk::DescriptorType, stage: vk::ShaderStageFlags, info: enums::DescriptorInfoType, subscriber: flume::Sender<enums::DescriptorMessage>) -> (self::DescriptorBindingReceipt, flume::Sender<enums::DescriptorMessage>) {
+            let target_set = self.sets.get_mut(self.active_set).unwrap();
+            let mut binding_receipt = DescriptorBindingReceipt{ set_index: self.active_set, binding_index: target_set.bindings.len() };
+            let mut empty_slot: Option<usize> = None;
+            for (index, (_,_,_,f)) in target_set.bindings.iter().enumerate(){
+                if f.is_disconnected(){
+                    empty_slot = Some(index);
+                    break;
+                }
+            }
+            match empty_slot {
+                Some(i) => {
+                    debug!("Binding slot {} on set {} used for new binding", i, self.active_set);
+                    binding_receipt.binding_index = i;
+                    target_set.bindings[i] = (descriptor_type, stage, info, subscriber);
+                },
+                None => {
+                    debug!("Adding new binding slot for set {}", self.active_set);
+                    target_set.bindings.push((descriptor_type, stage, info, subscriber));
+                },
+            }
+            match target_set.layout {
+                Some(l) => {
+                    unsafe{
+                        debug!("Destroying Descriptor Set Layout {:?}", l);
+                        self.device.destroy_descriptor_set_layout(l, None);
+                        target_set.layout = None;
+                    }
+                },
+                None => {},
+            }
+            match self.pool {
+                Some(p) => {
+                    unsafe{
+                        debug!("Destroying Descriptor Pool {:?}", p);
+                        self.device.destroy_descriptor_pool(p, None);
+                        self.pool = None;
+                    }
+                },
+                None => {},
+            }
+            (binding_receipt, self.channel.0.clone())
+        }
+    }
+    impl Drop for DescriptorSystem{
+        fn drop(&mut self) {
+            match self.pool {
+                Some(p) => unsafe {debug!("Destroying Descriptor Pool {:?}", p); self.device.destroy_descriptor_pool(p, None);},
+                None => {},
+            }
+            for layout in self.sets.iter().map(|set| set.layout){
+            match layout {
+                Some(l) => unsafe {debug!("Destroying Descriptor Set Layout {:?}", l) ;self.device.destroy_descriptor_set_layout(l, None);},
+                None => {},
+            } 
+        }
+    }
     }
 }
