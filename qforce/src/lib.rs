@@ -26,6 +26,7 @@ pub mod enums{
     pub enum DescriptorMessage{
         WriteInfoUpdate(core::DescriptorBindingReceipt, DescriptorInfoType),
     }
+    #[derive(Clone)]
     pub enum DescriptorInfoType{
         Image(vk::DescriptorImageInfo),
         Buffer(vk::DescriptorBufferInfo),
@@ -797,7 +798,7 @@ pub mod core{
             dubug: self.dubug.clone(), 
             debug_loader: self.debug_loader.clone(),
          }
-    }
+        }
     }
     impl Drop for WindowlessEngine{
         fn drop(&mut self) {
@@ -1349,10 +1350,12 @@ pub mod core{
         }
     }
     
+    #[derive(Clone)]
     pub struct DescriptorBindingReceipt{
         set_index: usize,
         binding_index: usize,
     }
+    #[derive(Clone)]
     struct DescriptorSet{
         pub set: Option<vk::DescriptorSet>,
         pub layout: Option<vk::DescriptorSetLayout>,
@@ -1448,24 +1451,25 @@ pub mod core{
                     }
                     debug!("Allocated {} sets", a_info.descriptor_set_count);
                     //Then we need to write all sets
-                    self.write_sets();
+                    self.rewrite_sets();
                 },
             }
 
 
             //We need to read the write update messages and apply the data changes and write into the sets
+            let mut writes_needed = vec![];
             for message in self.channel.1.try_iter(){
                 match message {
                     enums::DescriptorMessage::WriteInfoUpdate(r, t) => {
                         let target_set = self.sets.get_mut(r.set_index).unwrap();
                         let (_,_,i,_) = target_set.bindings.get_mut(r.binding_index).unwrap();
                         *i = t;
+                        writes_needed.push(target_set.clone());
+                        debug!("Write update read for binding {} on set {}", r.binding_index, r.set_index);
                     },
                 }
             }
-            self.write_sets();
-
-
+            self.write_sets(writes_needed.as_slice());
         }
         pub fn get_set_layout(&mut self, set_index: usize) -> DescriptorSetLayout {
             self.update();
@@ -1485,7 +1489,8 @@ pub mod core{
             };
             set
         }
-        fn write_sets(&mut self){
+        #[doc = "Writes all sets"]
+        fn rewrite_sets(&mut self){
             let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
                     for (index, set_data) in self.sets.iter().enumerate(){
                         let mut binding_count = 0;
@@ -1519,6 +1524,43 @@ pub mod core{
                         self.device.update_descriptor_sets(writes.as_slice(), &[]);
                         debug!("Made {} Descriptor Set Writes", writes.len());
                     }
+        }
+        fn write_sets(&mut self, sets: &[DescriptorSet]){
+            let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
+            for (index, set_data) in sets.iter().enumerate(){
+                let mut binding_count = 0;
+                writes.append(
+                    &mut set_data.bindings.iter()
+                    .enumerate()
+                    .filter(|(_, (_,_,_,f))| !f.is_disconnected())
+                    .map(|(b_index, (t,_,info,_))| {
+                        let mut b_infos = vec![];
+                        let mut i_infos = vec![];
+                        match info {
+                            enums::DescriptorInfoType::Image(i) => i_infos.push(*i),
+                            enums::DescriptorInfoType::Buffer(b) => b_infos.push(*b),
+                        };
+                        let builder = vk::WriteDescriptorSet::builder()
+                        .dst_set(set_data.set.unwrap())
+                        .dst_binding(binding_count as  u32)
+                        .descriptor_type(*t)
+                        .image_info(i_infos.as_slice())
+                        .buffer_info(b_infos.as_slice());
+
+                        let write = builder.build();
+                        debug!("Generted write {:?} on set {} for binding {}", write, index, b_index);
+                        binding_count += 1;
+                        write
+                    })
+                    .collect()
+                );
+            }
+            if writes.len() > 0{
+                unsafe{
+                    self.device.update_descriptor_sets(writes.as_slice(), &[]);
+                    debug!("Made {} Descriptor Set Writes", writes.len());
+                }
+            }
         }
     }
     impl traits::IDescriptorEntryPoint for DescriptorSystem {
