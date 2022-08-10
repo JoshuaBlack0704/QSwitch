@@ -47,13 +47,14 @@ fn get_vulkan_validate() -> bool {
     cpu_mem.copy_from_ram(data.as_ptr() as *const u8, std::mem::size_of::<u64>() * data.len(), b1.get_sector(), 0);
 
     unsafe{
+        let cmds = vec![cmd];
         engine.device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().build()).unwrap();
         b2.transfer_from_buffer(cmd, &mut b1, 0, (std::mem::size_of::<u64>() * data.len()) as u64, 0);
         let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::NONE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
         engine.device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
         b3.transfer_from_buffer(cmd, &mut b2, 0, (std::mem::size_of::<u64>() * data.len()) as u64, 0);
         engine.device().end_command_buffer(cmd).unwrap();
-        let submit = vk::SubmitInfo::builder().command_buffers(&vec![cmd]).build();
+        let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
         engine.device().queue_submit(engine.queue_data().transfer.0, &[submit], vk::Fence::null()).unwrap();
         engine.device().queue_wait_idle(engine.queue_data().transfer.0).unwrap();
     }

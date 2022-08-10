@@ -848,6 +848,7 @@ pub mod core{
         //Alloc Info, Cursor, Allocation Handle
         allocations: Vec<(vk::MemoryAllocateInfo, vk::DeviceSize, vk::DeviceMemory)>,
         sector_count: usize,
+        physical_device_properties: vk::PhysicalDeviceProperties,
     }
     impl Memory{
         pub fn new<T: traits::IEngineData>(engine: &T, required_type: vk::MemoryPropertyFlags) -> Memory{
@@ -855,11 +856,10 @@ pub mod core{
             let physical_device = engine.physical_device();
             let device = engine.device();
             let channels = flume::unbounded();
-
             unsafe {
                 let mem_props = instance.get_physical_device_memory_properties(physical_device);
                 let mut selected_type: usize = 0;
-    
+                let properties = engine.instance().get_physical_device_properties(engine.physical_device());
                 //Selecting the corrent memory type
                 for type_index in 0..mem_props.memory_types.len(){
                     let mem_type = &mem_props.memory_types[type_index];
@@ -889,6 +889,7 @@ pub mod core{
                     sectors: vec![],
                     allocations: vec![],
                     sector_count: 0,
+                    physical_device_properties: properties,
                  }
             }
 
@@ -916,7 +917,7 @@ pub mod core{
                 },
                 _ => unimplemented!()
             }
-            Buffer { device: self.device.clone(), channel, sector: target_sector.clone(), descriptor_channel: flume::unbounded(), descriptor_blocks: vec![] }
+            Buffer { device: self.device.clone(), channel, sector: target_sector.clone(), descriptor_channel: flume::unbounded(), descriptor_blocks: vec![], limits: self.physical_device_properties.limits }
 
         }
         pub fn get_image(&mut self, mut c_info: vk::ImageCreateInfo) -> Image{
@@ -1208,7 +1209,8 @@ pub mod core{
         channel: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
         sector: enums::MemorySector,
         descriptor_channel: (flume::Sender<enums::DescriptorMessage>, flume::Receiver<enums::DescriptorMessage>),
-        descriptor_blocks: Vec<(vk::DeviceSize, vk::DeviceSize, vk::ShaderStageFlags, flume::Sender<enums::DescriptorMessage>)>
+        descriptor_blocks: Vec<(vk::DeviceSize, vk::DeviceSize, vk::ShaderStageFlags, flume::Sender<enums::DescriptorMessage>)>,
+        limits: vk::PhysicalDeviceLimits,
     }
     impl Buffer{
         pub fn get_sector(&mut self) -> &enums::MemorySector{
@@ -1218,6 +1220,7 @@ pub mod core{
                         match s {
                             enums::MemorySector::Buffer(_, _, _, _, _, _, _) => {
                                 self.sector = s;
+                                debug!("Binding update processed")
                             },
                             _ => unimplemented!()
                         }
@@ -1234,6 +1237,7 @@ pub mod core{
                 enums::MemorySector::Buffer(_, _, b, _, _, _, _) => {buffer = *b},
                 _ => unimplemented!()
             }
+            debug!("Buffer {:?} returned", buffer);
             buffer
          }
         pub fn transfer_from_buffer(&mut self, cmd: vk::CommandBuffer, src: &mut Buffer, src_offset: vk::DeviceSize, size: vk::DeviceSize, dst_offset: vk::DeviceSize){
@@ -1251,6 +1255,21 @@ pub mod core{
             }
          }
         pub fn add_descriptor_block<T: traits::IDescriptorEntryPoint>(&mut self, offset: vk::DeviceSize, range: vk::DeviceSize, stages: vk::ShaderStageFlags, descriptor_system: &mut T){
+            
+            let alignment = 0;
+            match self.get_sector() {
+                enums::MemorySector::Buffer(_, _, _, c, _, _, _) => {
+                    if c.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
+                        debug!("Descriptor alignment requirement {}\n   Requriement met {}", self.limits.min_storage_buffer_offset_alignment, offset % self.limits.min_storage_buffer_offset_alignment == 0);
+                    }
+                    else{
+                        todo!()
+                    }
+                },
+                _ => unimplemented!()
+            }
+
+
             let (_, _) = descriptor_system
             .add_binding(
                 self.get_descriptor_type(), 
@@ -1491,6 +1510,8 @@ pub mod core{
         }
         #[doc = "Writes all sets"]
         fn rewrite_sets(&mut self){
+            let mut b_infos = vec![];
+            let mut i_infos = vec![];
             let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
                     for (index, set_data) in self.sets.iter().enumerate(){
                         let mut binding_count = 0;
@@ -1499,22 +1520,35 @@ pub mod core{
                             .enumerate()
                             .filter(|(_, (_,_,_,f))| !f.is_disconnected())
                             .map(|(b_index, (t,_,info,_))| {
-                                let mut b_infos = vec![];
-                                let mut i_infos = vec![];
-                                match info {
-                                    enums::DescriptorInfoType::Image(i) => i_infos.push(*i),
-                                    enums::DescriptorInfoType::Buffer(b) => b_infos.push(*b),
-                                };
-                                let builder = vk::WriteDescriptorSet::builder()
-                                .dst_set(set_data.set.unwrap())
-                                .dst_binding(binding_count as  u32)
-                                .descriptor_type(*t)
-                                .image_info(i_infos.as_slice())
-                                .buffer_info(b_infos.as_slice());
+                                
+                                let write = match info {
+                                    enums::DescriptorInfoType::Image(i) => {
+                                        i_infos.push(vec![*i]);
+                                        let write = vk::WriteDescriptorSet::builder()
+                                            .dst_set(set_data.set.unwrap())
+                                            .dst_binding(binding_count as  u32)
+                                            .descriptor_type(*t)
+                                            .image_info(i_infos.last().unwrap().as_slice())
+                                            .build();
+                                        debug!("Generted write {:?} on set {} for binding {}, target is image view {:?}", write, index, b_index, i.image_view);
+                                        binding_count += 1;
+                                        write
 
-                                let write = builder.build();
-                                debug!("Generted write {:?} on set {} for binding {}", write, index, b_index);
-                                binding_count += 1;
+                                    },
+                                    enums::DescriptorInfoType::Buffer(b) => {
+                                         b_infos.push(vec![*b]);
+                                         let write = vk::WriteDescriptorSet::builder()
+                                            .dst_set(set_data.set.unwrap())
+                                            .dst_binding(binding_count as  u32)
+                                            .descriptor_type(*t)
+                                            .buffer_info(b_infos.last().unwrap().as_slice())
+                                            .build();
+                                        debug!("Generted write {:?} on set {} for binding {}, target is buffer {:?}", write, index, b_index, b.buffer);
+                                        binding_count += 1;
+                                        write
+                                        },
+                                        
+                                };
                                 write
                             })
                             .collect()
@@ -1526,35 +1560,50 @@ pub mod core{
                     }
         }
         fn write_sets(&mut self, sets: &[DescriptorSet]){
+            let mut b_infos = vec![];
+            let mut i_infos = vec![];
             let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
-            for (index, set_data) in sets.iter().enumerate(){
-                let mut binding_count = 0;
-                writes.append(
-                    &mut set_data.bindings.iter()
-                    .enumerate()
-                    .filter(|(_, (_,_,_,f))| !f.is_disconnected())
-                    .map(|(b_index, (t,_,info,_))| {
-                        let mut b_infos = vec![];
-                        let mut i_infos = vec![];
-                        match info {
-                            enums::DescriptorInfoType::Image(i) => i_infos.push(*i),
-                            enums::DescriptorInfoType::Buffer(b) => b_infos.push(*b),
-                        };
-                        let builder = vk::WriteDescriptorSet::builder()
-                        .dst_set(set_data.set.unwrap())
-                        .dst_binding(binding_count as  u32)
-                        .descriptor_type(*t)
-                        .image_info(i_infos.as_slice())
-                        .buffer_info(b_infos.as_slice());
+                    for (index, set_data) in sets.iter().enumerate(){
+                        let mut binding_count = 0;
+                        writes.append(
+                            &mut set_data.bindings.iter()
+                            .enumerate()
+                            .filter(|(_, (_,_,_,f))| !f.is_disconnected())
+                            .map(|(b_index, (t,_,info,_))| {
+                                
+                                let write = match info {
+                                    enums::DescriptorInfoType::Image(i) => {
+                                        i_infos.push(vec![*i]);
+                                        let write = vk::WriteDescriptorSet::builder()
+                                            .dst_set(set_data.set.unwrap())
+                                            .dst_binding(binding_count as  u32)
+                                            .descriptor_type(*t)
+                                            .image_info(i_infos.last().unwrap().as_slice())
+                                            .build();
+                                        debug!("Generted write {:?} on set {} for binding {}, target is image view {:?}", write, index, b_index, i.image_view);
+                                        binding_count += 1;
+                                        write
 
-                        let write = builder.build();
-                        debug!("Generted write {:?} on set {} for binding {}", write, index, b_index);
-                        binding_count += 1;
-                        write
-                    })
-                    .collect()
-                );
-            }
+                                    },
+                                    enums::DescriptorInfoType::Buffer(b) => {
+                                         b_infos.push(vec![*b]);
+                                         let write = vk::WriteDescriptorSet::builder()
+                                            .dst_set(set_data.set.unwrap())
+                                            .dst_binding(binding_count as  u32)
+                                            .descriptor_type(*t)
+                                            .buffer_info(b_infos.last().unwrap().as_slice())
+                                            .build();
+                                        debug!("Generted write {:?} on set {} for binding {}, target is buffer {:?}", write, index, b_index, b.buffer);
+                                        binding_count += 1;
+                                        write
+                                        },
+                                        
+                                };
+                                write
+                            })
+                            .collect()
+                        );
+                    }
             if writes.len() > 0{
                 unsafe{
                     self.device.update_descriptor_sets(writes.as_slice(), &[]);
