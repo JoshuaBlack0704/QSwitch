@@ -96,6 +96,7 @@ pub mod core{
     use std::borrow::{Cow, Borrow, BorrowMut};
     use crate::traits::{self, IEngineData};
     use crate::enums;
+    use cgmath;
 
     unsafe extern "system" fn vulkan_debug_callback(
         message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -596,7 +597,7 @@ pub mod core{
             swapchain_info: self.swapchain_info.clone(), 
             swapchain_images: self.swapchain_images.clone(),
         }
-    }
+        }
     }
     impl Drop for Engine{
         fn drop(&mut self) {
@@ -996,7 +997,7 @@ pub mod core{
             //1 MB
             let allocation_size:u64;
             if 1024*1024 <= mem_reqs.size{
-                allocation_size = mem_reqs.size + 1024*1024;
+                allocation_size = mem_reqs.size * 2;
             }
             else{
                 allocation_size = 1024*1024;
@@ -1740,7 +1741,18 @@ pub mod core{
     }
     }
 
+    #[repr(C)]
+    pub struct Vertex{
+        pos: cgmath::Vector4<f32>
+    }
+    impl traits::IVulkanVertex for Vertex{
+        fn get_format(&self) {
 
+        }
+        fn get_pos(&self){
+        todo!()
+        }
+    }
     struct AcceleratedObject<V: traits::IVulkanVertex>{
         vertices: Vec<V>,
         indecies: Vec<u32>,
@@ -1753,18 +1765,34 @@ pub mod core{
         shader_group: (Option<vk::ShaderModule>, Option<vk::ShaderModule>, Option<vk::ShaderModule>)
     }
 
-    pub struct ObjectStore<C: traits::ICommandPool, V: traits::IVulkanVertex>{
+    pub struct ObjectStore<V: traits::IVulkanVertex, C: traits::ICommandPool>{
         device: ash::Device,
         cmd: (vk::CommandBuffer, C),
         vertex_buffer: Buffer,
         index_buffer: Buffer,
         blas_buffer: Buffer,
-        memory: Memory,
+        scratch_buffer: Buffer,
+        gpu_mem: Memory,
+        cpu_mem: Memory,
         objects: Vec<AcceleratedObject<V>>,
     }
-    impl<C: traits::ICommandPool,V: traits::IVulkanVertex> ObjectStore<C,V>{
-        pub fn new<T: IEngineData>(engine: &T){
-
+    impl<C: traits::ICommandPool,V: traits::IVulkanVertex> ObjectStore<V,C>{
+        pub fn new<T: IEngineData>(engine: &T, cmd_pool: C) -> ObjectStore<V,C>{
+            let device = engine.device();
+            let cmd = (cmd_pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0], cmd_pool);
+            let mut gpu_mem = Memory::new(engine, vk::MemoryPropertyFlags::DEVICE_LOCAL);
+            let vertex_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR).build());
+            let index_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR).build());
+            let blas_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR).build());
+            let scratch_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
+            let cpu_mem = Memory::new(engine, vk::MemoryPropertyFlags::HOST_COHERENT);
+            ObjectStore { device, cmd, vertex_buffer, index_buffer, blas_buffer, scratch_buffer, gpu_mem, cpu_mem, objects: vec![]}
+        }
+        #[doc = "We are just assuming a flat shaded object for right now"]
+        pub fn add_object(&mut self, object_vertices: Vec<V>){
+            let index_data: Vec<u32> = object_vertices.iter().enumerate().map(|(index, _)| index as u32).collect();
+            vk::AccelerationStructureCreateInfoKHR
+            
         }
     }
 

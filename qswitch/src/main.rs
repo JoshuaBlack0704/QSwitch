@@ -24,7 +24,7 @@ fn get_vulkan_validate() -> bool {
 
     pretty_env_logger::init();
     let (event_loop, _window, mut engine) = qforce::core::Engine::init(get_vulkan_validate());
-    let mut data:Vec<u32> = (0..1000000000).collect();
+    let mut data:Vec<u32> = (0..100).collect();
     let mut cpu_mem = qforce::core::Memory::new(&engine, vk::MemoryPropertyFlags::HOST_COHERENT);
     let mut gpu_mem = qforce::core::Memory::new(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL);
     let mut b1 = cpu_mem.get_buffer(vk::BufferCreateInfo::builder().size((std::mem::size_of::<u32>() * data.len()) as u64).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
@@ -54,7 +54,7 @@ fn get_vulkan_validate() -> bool {
     let set_layout = vec![d_sys.get_set_layout(s1)];
     let compute = qforce::core::ComputePipeline::new(&engine, &push, &set_layout, shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
     cpu_mem.copy_from_ram(data.as_ptr() as *const u8, std::mem::size_of::<u32>() * data.len(), b1.get_sector(), 0);
-    
+    let store:qforce::core::ObjectStore<qforce::core::Vertex, qforce::core::CommandPool> = qforce::core::ObjectStore::new(&engine, qforce::core::CommandPool::new(&engine, vk::CommandPoolCreateInfo::builder().build()));
 
 
     unsafe{
@@ -100,6 +100,7 @@ fn get_vulkan_validate() -> bool {
                         drop(&gpu_mem);
                         drop(&shader);
                         drop(&compute);
+                        drop(&store);
                         },
                         winit::event::WindowEvent::Resized(_) => {
                             engine.refresh_swapchain();
