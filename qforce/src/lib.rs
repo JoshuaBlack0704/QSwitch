@@ -1,5 +1,3 @@
-extern crate pretty_env_logger;
-#[macro_use] extern crate log;
 
 
 #[allow(dead_code)]
@@ -75,10 +73,21 @@ pub mod traits{
     pub trait IDescriptorEntryPoint {
         fn add_binding(&mut self, descriptor_type: vk::DescriptorType, stage: vk::ShaderStageFlags, info: enums::DescriptorInfoType, subscriber: flume::Sender<enums::DescriptorMessage>) -> (core::DescriptorBindingReceipt, flume::Sender<enums::DescriptorMessage>);
     }
+
+    pub trait ICommandPool{
+        fn get_command_buffers(&self, a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer>;
+        fn reset(&self);
+    }
+
+    pub trait IVulkanVertex {
+        fn get_format(&self);
+        fn get_pos(&self);
+    }
 }
 
 #[allow(dead_code)]
 pub mod core{
+    use log::debug;
     use ash::vk::DescriptorSetLayout;
     use shaderc;
     use ash;
@@ -987,7 +996,7 @@ pub mod core{
             //1 MB
             let allocation_size:u64;
             if 1024*1024 <= mem_reqs.size{
-                allocation_size = mem_reqs.size * 2;
+                allocation_size = mem_reqs.size + 1024*1024;
             }
             else{
                 allocation_size = 1024*1024;
@@ -1256,11 +1265,13 @@ pub mod core{
          }
         pub fn add_descriptor_block<T: traits::IDescriptorEntryPoint>(&mut self, offset: vk::DeviceSize, range: vk::DeviceSize, stages: vk::ShaderStageFlags, descriptor_system: &mut T){
             
-            let alignment = 0;
             match self.get_sector() {
                 enums::MemorySector::Buffer(_, _, _, c, _, _, _) => {
                     if c.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-                        debug!("Descriptor alignment requirement {}\n   Requriement met {}", self.limits.min_storage_buffer_offset_alignment, offset % self.limits.min_storage_buffer_offset_alignment == 0);
+                        let alignment = self.limits.min_storage_buffer_offset_alignment;
+                        let descriptor_storage_buffer_alignment_check = offset % alignment == 0;
+                        debug!("Descriptor alignment requirement {}\n   Requriement met {}", alignment, descriptor_storage_buffer_alignment_check);
+                        assert!(descriptor_storage_buffer_alignment_check);
                     }
                     else{
                         todo!()
@@ -1322,23 +1333,26 @@ pub mod core{
             }
     
         }
-        pub fn get_command_buffers(&self, mut a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer> {
-            a_info.command_pool = self.command_pool;
-            unsafe {
-                self.device.allocate_command_buffers(&a_info).unwrap()
-            }
-        }
-        pub fn reset(&self){
-            unsafe {
-                self.device.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty()).unwrap();
-            }
-        }
     }
     impl Drop for CommandPool {
         fn drop(&mut self) {
             unsafe {
                 debug!("Command Pool destroyed");
                 self.device.destroy_command_pool(self.command_pool, None);
+            }
+        }
+    }
+    impl traits::ICommandPool for CommandPool{
+        
+        fn get_command_buffers(&self, mut a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer> {
+            a_info.command_pool = self.command_pool;
+            unsafe {
+                self.device.allocate_command_buffers(&a_info).unwrap()
+            }
+        }
+        fn reset(&self){
+            unsafe {
+                self.device.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty()).unwrap();
             }
         }
     }
@@ -1358,6 +1372,13 @@ pub mod core{
                 module = engine.device().create_shader_module(&c_info, None).unwrap();
             }
             Shader { device: engine.device(), source, module }
+        }
+        pub fn get_stage(&self, stage: vk::ShaderStageFlags, ep: &CStr) -> vk::PipelineShaderStageCreateInfo{
+            vk::PipelineShaderStageCreateInfo::builder()
+            .stage(stage)
+            .module(self.module)
+            .name(ep)
+            .build()
         }
     }
     impl Drop for Shader{
@@ -1671,4 +1692,80 @@ pub mod core{
         }
     }
     }
+
+    pub struct ComputePipeline{
+        device: ash::Device,
+        layout: vk::PipelineLayout,
+        pipeline: vk::Pipeline,
+        c_info: vk::ComputePipelineCreateInfo,
+        push_ranges: Vec<vk::PushConstantRange>,
+        descriptor_sets: Vec<vk::DescriptorSetLayout>,
+    }
+    impl ComputePipeline{
+        pub fn new<T: IEngineData>(engine: &T, push_ranges: &[vk::PushConstantRange], descriptor_sets: &[vk::DescriptorSetLayout], shader: vk::PipelineShaderStageCreateInfo) -> ComputePipeline{
+            let device = engine.device();
+            let lc_info = vk::PipelineLayoutCreateInfo::builder()
+            .push_constant_ranges(push_ranges)
+            .set_layouts(descriptor_sets)
+            .build();
+            let layout: vk::PipelineLayout;
+            let c_infos: Vec<vk::ComputePipelineCreateInfo>;
+            let pipeline: vk::Pipeline;
+
+            unsafe{
+                layout = device.create_pipeline_layout(&lc_info, None).unwrap();
+                c_infos = vec![vk::ComputePipelineCreateInfo::builder()
+                .stage(shader)
+                .layout(layout)
+                .build()];
+                pipeline = device.create_compute_pipelines(vk::PipelineCache::null(), &c_infos, None).unwrap()[0];
+            }
+
+            ComputePipeline{ device, layout, pipeline, c_info: c_infos[0], push_ranges: push_ranges.to_vec(), descriptor_sets: descriptor_sets.to_vec() }
+        }
+        pub fn get_pipeline(&self) -> vk::Pipeline{
+            self.pipeline
+        }
+        pub fn get_layout(&self) -> vk::PipelineLayout{
+            self.layout
+        }
+    }
+    impl Drop for ComputePipeline{
+        fn drop(&mut self) {
+        unsafe{
+            debug!("Destroying pipline {:?} with layout {:?}", self.layout, self.pipeline);
+            self.device.destroy_pipeline(self.pipeline, None);
+            self.device.destroy_pipeline_layout(self.layout, None);
+        }
+    }
+    }
+
+
+    struct AcceleratedObject<V: traits::IVulkanVertex>{
+        vertices: Vec<V>,
+        indecies: Vec<u32>,
+        //Offset, size
+        vertex_buffer_data: (vk::DeviceSize, vk::DeviceSize),
+        //Offset, size
+        index_buffer_data: (vk::DeviceSize, vk::DeviceSize),
+        blas_buffer_data: (vk::DeviceSize, vk::DeviceSize),
+        blas: vk::AccelerationStructureKHR,
+        shader_group: (Option<vk::ShaderModule>, Option<vk::ShaderModule>, Option<vk::ShaderModule>)
+    }
+
+    pub struct ObjectStore<C: traits::ICommandPool, V: traits::IVulkanVertex>{
+        device: ash::Device,
+        cmd: (vk::CommandBuffer, C),
+        vertex_buffer: Buffer,
+        index_buffer: Buffer,
+        blas_buffer: Buffer,
+        memory: Memory,
+        objects: Vec<AcceleratedObject<V>>,
+    }
+    impl<C: traits::ICommandPool,V: traits::IVulkanVertex> ObjectStore<C,V>{
+        pub fn new<T: IEngineData>(engine: &T){
+
+        }
+    }
+
 }

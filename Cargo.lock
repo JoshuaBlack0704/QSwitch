@@ -720,7 +720,6 @@ dependencies = [
  "ash-window 0.11.0",
  "flume",
  "log",
- "pretty_env_logger",
  "shaderc",
  "winit",
 ]
@@ -732,7 +731,6 @@ dependencies = [
  "ash",
  "ash-window 0.10.0",
  "flume",
- "log",
  "pretty_env_logger",
  "qforce",
  "shaderc",
