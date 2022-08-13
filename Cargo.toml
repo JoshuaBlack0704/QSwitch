@@ -2,6 +2,7 @@
 members = [
     "qforce",
     "qswitch",
+    "windowed_tests",
 ]
 [profile.release]
 opt-level = 3

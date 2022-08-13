@@ -322,6 +322,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "examples"
+version = "0.0.0"
+dependencies = [
+ "ash",
+ "pretty_env_logger",
+ "qforce",
+ "winit",
+]
+
+[[package]]
 name = "flume"
 version = "0.10.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -749,6 +759,7 @@ dependencies = [
  "cgmath",
  "flume",
  "log",
+ "pretty_env_logger",
  "shaderc",
  "winit",
 ]

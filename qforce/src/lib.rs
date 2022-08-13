@@ -5,7 +5,6 @@ pub mod enums{
     use ash;
     use ash::vk;
     use flume;
-    use crate::core;
 
     pub enum EngineMessage{}
     pub enum MemoryMessage{
@@ -21,9 +20,9 @@ pub mod enums{
         Buffer(usize, usize, vk::Buffer, vk::BufferCreateInfo, vk::DeviceSize, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
         Image(usize, usize, vk::Image, vk::ImageCreateInfo, vk::DeviceSize, vk::ImageSubresourceLayers, vk::MemoryRequirements, flume::Sender<MemoryMessage>),
     }
-    pub enum DescriptorMessage{
-        WriteInfoUpdate(core::DescriptorBindingReceipt, DescriptorInfoType),
-    }
+    // pub enum DescriptorMessage{
+    //     WriteInfoUpdate(core::DescriptorBindingReceipt, DescriptorInfoType),
+    // }
     #[derive(Clone)]
     pub enum DescriptorInfoType{
         Image(vk::DescriptorImageInfo),
@@ -36,7 +35,7 @@ pub mod traits{
     use flume;
     use ash;
     use ash::vk;
-    use crate::{core, enums};
+    use crate::{core};
 
     pub trait WindowEventCallback{
         fn window_event_callback(&mut self, event: &winit::event::WindowEvent);
@@ -70,9 +69,9 @@ pub mod traits{
         fn swapchain_info(&self) -> vk::SwapchainCreateInfoKHR;
         fn swapchain_images(&self) -> Vec<vk::Image>;
     }
-    pub trait IDescriptorEntryPoint {
-        fn add_binding(&mut self, descriptor_type: vk::DescriptorType, stage: vk::ShaderStageFlags, info: enums::DescriptorInfoType, subscriber: flume::Sender<enums::DescriptorMessage>) -> (core::DescriptorBindingReceipt, flume::Sender<enums::DescriptorMessage>);
-    }
+    // pub trait IDescriptorEntryPoint {
+    //     fn add_binding(&mut self, descriptor_type: vk::DescriptorType, stage: vk::ShaderStageFlags, info: enums::DescriptorInfoType, subscriber: flume::Sender<enums::DescriptorMessage>) -> (core::DescriptorBindingReceipt, flume::Sender<enums::DescriptorMessage>);
+    // }
 
     pub trait ICommandPool{
         fn get_command_buffers(&self, a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer>;
@@ -88,15 +87,12 @@ pub mod traits{
 #[allow(dead_code)]
 pub mod core{
     use log::debug;
-    use ash::vk::DescriptorSetLayout;
     use shaderc;
     use ash;
     use ash::{vk, Entry};
     use std::{string::String, ffi::CStr, os::raw::c_char};
-    use std::borrow::{Cow, Borrow, BorrowMut};
+    use std::borrow::{Cow, Borrow};
     use crate::traits::{self, IEngineData};
-    use crate::enums;
-    use cgmath;
 
     unsafe extern "system" fn vulkan_debug_callback(
         message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
@@ -390,9 +386,6 @@ pub mod core{
                     .unwrap()
                     .to_vec();
                 extension_names.push(ash::extensions::ext::DebugUtils::name().as_ptr());
-                //extension_names.push(ash::extensions::khr::AccelerationStructure::name().as_ptr());
-                //extension_names.push(ash::extensions::khr::RayTracingPipeline::name().as_ptr());
-                //extension_names.push(ash::extensions::khr::DeferredHostOperations::name().as_ptr());
 
 
                 #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -464,11 +457,12 @@ pub mod core{
                     ash::extensions::khr::AccelerationStructure::name().as_ptr(),
                     ash::extensions::khr::DeferredHostOperations::name().as_ptr(),
                     ash::extensions::khr::RayTracingPipeline::name().as_ptr(),
+                    ash::extensions::khr::BufferDeviceAddress::name().as_ptr(),
                     #[cfg(any(target_os = "macos", target_os = "ios"))]
                         KhrPortabilitySubsetFn::name().as_ptr(),
                 ];
                 let mut features13 = vk::PhysicalDeviceVulkan13Features::builder().dynamic_rendering(true).build();
-                let mut features12 = vk::PhysicalDeviceVulkan12Features::builder().timeline_semaphore(true).build();
+                let mut features12 = vk::PhysicalDeviceVulkan12Features::builder().timeline_semaphore(true).buffer_device_address(true).build();
                 let mut features11 = vk::PhysicalDeviceVulkan11Features::builder().build();
                 let mut features = vk::PhysicalDeviceFeatures2::builder()
                     .push_next(&mut features11)
@@ -492,11 +486,12 @@ pub mod core{
                     compute: (device.get_device_queue(queue_families[2], 0), queue_families[2] )};
                 let swapchain_loader = ash::extensions::khr::Swapchain::new(&instance, &device);
                 let (swapchain_info, swapchain, swapchain_images) = Engine::get_swapchain(&pdevice, &surface, &surface_loader, &swapchain_loader, None);
+                
                 engine = Engine{ entry, 
                     instance, 
                     physical_device: pdevice, 
                     device, 
-                    queue_data: qcache, 
+                    queue_data: qcache,
                     dubug: debug_call_back, 
                     debug_loader: debug_utils_loader, 
                     surface_loader, 
@@ -587,7 +582,7 @@ pub mod core{
             instance: self.instance.clone(), 
             physical_device: self.physical_device.clone(), 
             device: self.device.clone(), 
-            queue_data: self.queue_data.clone(), 
+            queue_data: self.queue_data.clone(),
             dubug: self.dubug.clone(), 
             debug_loader: self.debug_loader.clone(), 
             surface_loader: self.surface_loader.clone(), 
@@ -755,16 +750,24 @@ pub mod core{
     
                 let pdevice = get_physical_device_nosurface(instance.clone()).unwrap();
                 let device_extension_names_raw = [
+                    ash::extensions::khr::AccelerationStructure::name().as_ptr(),
+                    ash::extensions::khr::DeferredHostOperations::name().as_ptr(),
+                    ash::extensions::khr::RayTracingPipeline::name().as_ptr(),
+                    ash::extensions::khr::BufferDeviceAddress::name().as_ptr(),
                     #[cfg(any(target_os = "macos", target_os = "ios"))]
                         KhrPortabilitySubsetFn::name().as_ptr(),
                 ];
+                let mut ray_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::builder().ray_tracing_pipeline(true);
+                let mut acc_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder().acceleration_structure(true);
                 let mut features13 = vk::PhysicalDeviceVulkan13Features::builder().dynamic_rendering(true).build();
-                let mut features12 = vk::PhysicalDeviceVulkan12Features::builder().timeline_semaphore(true).build();
+                let mut features12 = vk::PhysicalDeviceVulkan12Features::builder().timeline_semaphore(true).buffer_device_address(true).build();
                 let mut features11 = vk::PhysicalDeviceVulkan11Features::builder().build();
                 let mut features = vk::PhysicalDeviceFeatures2::builder()
                     .push_next(&mut features11)
                     .push_next(&mut features12)
-                    .push_next(&mut features13);
+                    .push_next(&mut features13)
+                    .push_next(&mut ray_features)
+                    .push_next(&mut acc_features);
                 let priorities = [1.0];
     
                 let (queue_infos, queue_families) = get_queue_info(instance.clone(), pdevice, &priorities);
@@ -781,7 +784,6 @@ pub mod core{
                 let qcache:QueueCache = QueueCache{ graphics: (device.get_device_queue(queue_families[0], 0), queue_families[0]),
                     transfer: (device.get_device_queue(queue_families[1], 0), queue_families[1]),
                      compute: (device.get_device_queue(queue_families[2], 0), queue_families[2] )};
-    
     
                 engine = WindowlessEngine{ entry, 
                     instance, 
@@ -804,7 +806,7 @@ pub mod core{
             instance: self.instance.clone(), 
             physical_device: self.physical_device.clone(), 
             device: self.device.clone(), 
-            queue_data: self.queue_data.clone(), 
+            queue_data: self.queue_data.clone(),
             dubug: self.dubug.clone(), 
             debug_loader: self.debug_loader.clone(),
          }
@@ -850,472 +852,865 @@ pub mod core{
         }
 
     }
-    pub struct Memory{
-        device: ash::Device,
-        type_index: u32,
-        channels: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
-        sectors: Vec<enums::MemorySector>,
-        //Alloc Info, Cursor, Allocation Handle
-        allocations: Vec<(vk::MemoryAllocateInfo, vk::DeviceSize, vk::DeviceMemory)>,
-        sector_count: usize,
-        physical_device_properties: vk::PhysicalDeviceProperties,
-    }
-    impl Memory{
-        pub fn new<T: traits::IEngineData>(engine: &T, required_type: vk::MemoryPropertyFlags) -> Memory{
-            let instance = engine.instance();
-            let physical_device = engine.physical_device();
-            let device = engine.device();
-            let channels = flume::unbounded();
-            unsafe {
-                let mem_props = instance.get_physical_device_memory_properties(physical_device);
+   
+    pub mod memory{
+    use std::{ffi::c_void};
+    use log::{self, debug};
+    use ash::vk::{self};
+    use crate::core;
+
+    use crate::traits::{IEngineData, ICommandPool};
+
+    #[derive(Clone)]
+        pub enum DescriptorWriteType{
+            Buffer(vk::DescriptorBufferInfo),
+            Image(vk::DescriptorImageInfo),
+        }
+
+        #[doc = "Safe clonable structure that provides helper functions and data needed to resolve different requirements"]
+        #[doc = "such as min offset alignments and such"]
+        #[derive(Clone)]
+        pub struct AllocationDataStore{
+            instance: ash::Instance,
+            physical_device: vk::PhysicalDevice,
+            device: ash::Device,
+            props: vk::PhysicalDeviceProperties,
+            mem_props: vk::PhysicalDeviceMemoryProperties,
+            destroy_allocation: Option<vk::DeviceMemory>,
+            destroy_buffer: Option<vk::Buffer>,
+            destroy_image: Option<vk::Image>,
+        }
+        pub struct Allocation{
+            store: AllocationDataStore,
+            allocation: vk::DeviceMemory,
+            alloc_info: vk::MemoryAllocateInfo,
+            cursor: u64,
+        }
+        pub struct Buffer{
+            store: AllocationDataStore,
+            buffer: vk::Buffer,
+            c_info: vk::BufferCreateInfo,
+            reqs: vk::MemoryRequirements,
+            alloc_info: vk::MemoryAllocateInfo,
+            allocation_offset: u64,
+            cursor: u64,
+            
+        }
+        pub struct BufferRegion{
+            store: AllocationDataStore,
+            buffer: vk::Buffer,
+            usage: vk::BufferUsageFlags,
+            alloc_info: vk::MemoryAllocateInfo,
+            allocation_offset: u64,
+            buffer_offset: u64,
+            size: u64,
+        }
+        pub struct Image{
+            store: AllocationDataStore,
+
+        }
+
+        impl AllocationDataStore{
+            pub fn new<T: IEngineData>(engine: &T) -> AllocationDataStore{
+                let instance = engine.instance();
+                let physical_device = engine.physical_device();
+                let device = engine.device();
+                
+                unsafe{
+                    let props = instance.get_physical_device_properties(physical_device);
+                    let mem_props = instance.get_physical_device_memory_properties(physical_device);
+                    AllocationDataStore { 
+                        instance, 
+                        physical_device, 
+                        device, 
+                        props, 
+                        mem_props, 
+                        destroy_allocation: None, 
+                        destroy_buffer: None, 
+                        destroy_image: None }
+                }
+            }
+            pub fn get_type(&self, properties: vk::MemoryPropertyFlags) -> u32{
                 let mut selected_type: usize = 0;
-                let properties = engine.instance().get_physical_device_properties(engine.physical_device());
-                //Selecting the corrent memory type
-                for type_index in 0..mem_props.memory_types.len(){
-                    let mem_type = &mem_props.memory_types[type_index];
-                    let heap = &mem_props.memory_heaps[mem_type.heap_index as usize];
-                    if mem_type.property_flags & required_type != vk::MemoryPropertyFlags::empty() {
-                        debug!("Found compatible memory");
-                        debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, mem_props.memory_types[type_index].property_flags, mem_props.memory_types[type_index].heap_index);
-                        if mem_props.memory_types[selected_type].property_flags & required_type != vk::MemoryPropertyFlags::empty() {
-                            if heap.size > mem_props.memory_heaps[mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
-                                debug!("  Selecting Memory Type");
+                    //Selecting the corrent memory type
+                    for type_index in 0..self.mem_props.memory_types.len(){
+                        let mem_type = &self.mem_props.memory_types[type_index];
+                        let heap = &self.mem_props.memory_heaps[mem_type.heap_index as usize];
+                        if mem_type.property_flags & properties != vk::MemoryPropertyFlags::empty() {
+                            debug!("Found compatible memory");
+                            debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.mem_props.memory_types[type_index].property_flags, self.mem_props.memory_types[type_index].heap_index);
+                            if self.mem_props.memory_types[selected_type].property_flags & properties != vk::MemoryPropertyFlags::empty() {
+                                if heap.size > self.mem_props.memory_heaps[self.mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
+                                    debug!("  Selecting Memory Type");
+                                    selected_type = type_index;
+                                }
+                            }
+                            else {
+                                debug!("Previously selected memory is of wrong type, selecting current memory type");
                                 selected_type = type_index;
                             }
                         }
-                        else {
-                            debug!("Previously selected memory is of wrong type, selecting current memory type");
-                            selected_type = type_index;
-                        }
                     }
+                    selected_type as u32
                 }
-    
-                debug!("Memory targeting heap: {} using type: {}", mem_props.memory_types[selected_type].heap_index, selected_type);
-                
-                Memory{ 
-                    device, 
-                    type_index: selected_type as u32, 
-                    channels,
-                    sectors: vec![],
-                    allocations: vec![],
-                    sector_count: 0,
-                    physical_device_properties: properties,
-                 }
+            #[doc = r"Allocates device memory accoring to inputs. **extened_aloc_info** is only used for a p_next chain."]
+            pub fn allocate(&self, type_index: u32, byte_size: vk::DeviceSize, a_m_next: *const c_void) -> Allocation{
+                let allocation: vk::DeviceMemory;
+                let mut aloc_info = vk::MemoryAllocateInfo::builder()
+                .allocation_size(byte_size)
+                .memory_type_index(type_index)
+                .build();
+                aloc_info.p_next = a_m_next;
+                unsafe{
+                    allocation = self.device.allocate_memory(&aloc_info, None).expect("Could not allocate memory");
+                    debug!("Allocated memory {:?} on type {} with size {}", allocation, type_index, byte_size);
+                }
+
+
+                let mut store = self.clone();
+                store.destroy_allocation = Some(allocation);
+                Allocation { store: store, allocation, alloc_info: aloc_info, cursor: 0 }
             }
-
-
+            #[doc = "Uses a type and count to determine byte size"]
+            pub fn allocate_typed<T>(&self, type_index: u32, count: usize, a_m_next: *const c_void) -> Allocation{
+                let size = std::mem::size_of::<T>() * count;
+                self.allocate(type_index, size as u64, a_m_next)
+            }
+            pub fn get_device_props(&self) -> vk::PhysicalDeviceProperties{
+                self.props
+            }
         }
-        pub fn get_buffer(&mut self, mut c_info: vk::BufferCreateInfo) -> Buffer {
-            let buffer: vk::Buffer;
-            let channel = flume::unbounded();
-            let mem_reqs: vk::MemoryRequirements;
-            c_info.usage = c_info.usage | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST;
-            unsafe {
-                buffer = self.device.create_buffer(&c_info, None).unwrap();
-                mem_reqs = self.device.get_buffer_memory_requirements(buffer);
-            }
-            debug!("New buffer memory reqs: {:?}", mem_reqs);
-            let index = self.sectorize(&mem_reqs);
-            let target_sector = self.sectors[index].borrow_mut();
-            match target_sector {
-                enums::MemorySector::Empty(allocation, index, offset, reqs) => {
-                    unsafe{
-                        self.device.bind_buffer_memory(buffer, self.allocations[*allocation].2, *offset).unwrap();
-                    }
-                    *target_sector = enums::MemorySector::Buffer(*allocation, *index, buffer, c_info, *offset, *reqs, channel.0.clone());
-                    
-                },
-                _ => unimplemented!()
-            }
-            Buffer { device: self.device.clone(), channel, sector: target_sector.clone(), descriptor_channel: flume::unbounded(), descriptor_blocks: vec![], limits: self.physical_device_properties.limits }
-
-        }
-        pub fn get_image(&mut self, mut c_info: vk::ImageCreateInfo) -> Image{
-            let image: vk::Image;
-            let mem_reqs: vk::MemoryRequirements;
-            let channel = flume::unbounded();
-            c_info.usage = c_info.usage | vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST;
-            unsafe {
-                image = self.device.create_image(&c_info, None).unwrap();
-                mem_reqs = self.device.get_image_memory_requirements(image);
-            }
-            debug!("New image memory reqs: {:?}", mem_reqs);
-            let index = self.sectorize(&mem_reqs);
-            let target_sector = self.sectors[index].borrow_mut();
-            match target_sector {
-                enums::MemorySector::Empty(allocation, index, offset, reqs) => {
-                    unsafe {
-                        self.device.bind_image_memory(image, self.allocations[*allocation].2, *offset).unwrap();
-                    }
-                    *target_sector = enums::MemorySector::Image(*allocation, *index, image, c_info, *offset, vk::ImageSubresourceLayers::builder().aspect_mask(vk::ImageAspectFlags::COLOR).mip_level(0).base_array_layer(0).layer_count(1).build(), *reqs, channel.0.clone());
-                },
-                _ => unimplemented!()
-            }
-            Image{ device: self.device.clone(), image, channel, sector: target_sector.clone() }
-        }
-        fn sectorize(&mut self, mem_reqs: &vk::MemoryRequirements) -> usize{
-            debug!("Finding sector of size {}", mem_reqs.size);
-
-            //We try to find a pre-existing sector to take over
-            for (index,sector) in self.sectors.iter_mut().enumerate(){
-                let extracted_data: enums::MemorySector;
-                let extracted_channel: flume::Sender<enums::MemoryMessage>;
-                match sector {
-                    enums::MemorySector::Buffer(ai, si,_, _, o, reqs, c) => {extracted_data = enums::MemorySector::Empty(*ai, *si, *o, *reqs);extracted_channel = c.clone();},
-                    enums::MemorySector::Image(ai, si, _, _, o, _, reqs, c) => {extracted_data = enums::MemorySector::Empty(*ai, *si,  *o, *reqs);extracted_channel = c.clone();},
-                    _ => unimplemented!(),
-                }
-                match extracted_data {
-                    enums::MemorySector::Empty(ai, si, o, r) => {
-                        if extracted_channel.is_disconnected() && r.size >= mem_reqs.size && r.alignment == mem_reqs.alignment {
-                            debug!("Using sector {} of size {}", si, r.size);
-                            *sector = extracted_data;
-                            debug!("Found pre-exsisting sector {} allocated on {} at {} with requirements {:?}", si, ai, o, r);
-                            return index;
-                        }
-                    },
-                    _ => unimplemented!()
-                }
-                
-            }
-
-            //Now we try to find an unused chunk of memory to take over
-            for (index, (alloc_info, cursor, _)) in self.allocations.iter_mut().enumerate(){
-                let offset = (*cursor / mem_reqs.alignment + 1) * mem_reqs.alignment;
-                let remaining_size = alloc_info.allocation_size - offset;
-
-                if remaining_size >= mem_reqs.size{
-                    self.sectors.push(enums::MemorySector::Empty(index, self.sector_count, offset, mem_reqs.clone()));
-                    self.sector_count += 1;
-                    *cursor += mem_reqs.size;
-                    debug!("Created sector {} on allocation {} at {} with requirements {:?}", self.sectors.len()-1, index, offset, mem_reqs);
-                    return self.sectors.len() - 1;
-                }
-            }
-
-            //If we get here we need to create a new allocation. Size is either 1MB or 2x the size of the request
-            //1 MB
-            let allocation_size:u64;
-            if 1024*1024 <= mem_reqs.size{
-                allocation_size = mem_reqs.size * 2;
-            }
-            else{
-                allocation_size = 1024*1024;
-            }
-            let aloc_info = vk::MemoryAllocateInfo::builder().allocation_size(allocation_size).memory_type_index(self.type_index).build();
-            let allocation: vk::DeviceMemory;
-            unsafe{
-                allocation = self.device.allocate_memory(&aloc_info, None).unwrap();
-            }
-            self.sectors.push(enums::MemorySector::Empty(self.allocations.len(), self.sector_count, 0, mem_reqs.clone()));
-            self.sector_count += 1;
-            self.allocations.push((aloc_info, mem_reqs.size, allocation));
-            debug!("Created allocation {} with size {} and sector {}", self.allocations.len()-1, aloc_info.allocation_size, self.sectors.len()-1);
-            self.sectors.len() -1
-
-
-        }
-        pub fn consolidate(&mut self, cmd: &vk::CommandBuffer){
-            //We first process all messages in the message stream and apply the updates to the sectors
-            for message in self.channels.1.try_iter(){
-                match message {
-                    enums::MemoryMessage::ImageInfoUpdate(si, c_info, layers) => {
-                        match self.sectors.iter_mut().find(|sector| {
-                            let found = match sector {
-                                enums::MemorySector::Buffer(_, _si, _, _, _, _, _) => *_si == si,
-                                enums::MemorySector::Image(_, _si, _, _, _, _, _, _) => *_si == si,
-                                _ => unimplemented!()
-                            };
-                            found
-                        }).unwrap() {
-                            enums::MemorySector::Image(_, _, _, c, _, s, _, _) => {
-                                 *s = layers;
-                                 *c = c_info;
-                                 debug!("Updates found for iamge sector {}", si);
-                            },
-                            _ => unimplemented!()
-                        }
-                    },
-                    _ => todo!()
-                }
-            }
-            //We must first build a new sector layout
-            let mut cursor: vk::DeviceSize = 0;
-            let mut sectors = Vec::with_capacity(self.sectors.len());
-            for sector in self.sectors.iter(){
-                match sector {
-                    enums::MemorySector::Buffer(_, si, b, c, _, r, f) => {
-                        if !f.is_disconnected() {
-                            cursor = ((cursor / r.alignment) + 1) * r.alignment;
-                            sectors.push(enums::MemorySector::Buffer(0, *si, *b, *c, cursor, *r, f.clone()));
-                            cursor += r.size;
-                            debug!("Sector {} accepted. Cursor is at {}", si, cursor);
-                        }
-                        else {
-                            debug!("Sector {} disconnected", si);
-                        }
-                        
-                    },
-                    enums::MemorySector::Image(_, si, i, c, _, s, r, f) => {
-                        if !f.is_disconnected(){
-                            cursor = ((cursor / r.alignment) + 1) * r.alignment;
-                            sectors.push(enums::MemorySector::Image(0, *si, *i, *c, cursor, *s, *r, f.clone()));
-                            cursor += r.size;
-                            debug!("Sector {} accepted. Cursor is at {}", si, cursor);
-                        }
-                        else {
-                            debug!("Sector {} disconnected", si);
-                        }
-                    },
-                    _ => unimplemented!()
-                }
-            }
-            //Then we create an allocation to hold all sectors
-            let allocation: vk::DeviceMemory;
-            let aloc_info = vk::MemoryAllocateInfo::builder().allocation_size(cursor * 2).memory_type_index(self.type_index).build();
-            unsafe{
-                allocation = self.device.allocate_memory(&aloc_info, None).unwrap();
-                debug!("New allocation of size {} created", aloc_info.allocation_size);
-            }
-            //Then we need to record the transfer operations
-            //During this phase we also create the new buffer and image objects
-            let mut old_data = Vec::with_capacity(sectors.len());
-            for sector in sectors.iter_mut(){
-                match sector {
-                    enums::MemorySector::Buffer(_, si, b, c, o, _, _) => {
-                        let target_buffer: vk::Buffer;
-                        let copy = vk::BufferCopy::builder().dst_offset(0).src_offset(0).size(c.size).build();
-                        unsafe {
-                            target_buffer = self.device.create_buffer(c, None).unwrap();
-                            self.device.bind_buffer_memory(target_buffer, allocation, *o).unwrap();
-                            self.device.cmd_copy_buffer(*cmd, *b, target_buffer, &vec![copy]);
-                        }
-                        debug!("Recorded copy from buffer {:?} to new buffer {:?} for sector {}", *b, target_buffer, si);
-                        old_data.push((Some(*b), None, None));
-                        *b = target_buffer;
-                    },
-                    enums::MemorySector::Image(_, si, i, c, o, s, _, _) => {
-                        let target_image: vk::Image;
-                        let copy = vk::ImageCopy::builder().src_subresource(*s).dst_subresource(*s).src_offset(vk::Offset3D::builder().build()).dst_offset(vk::Offset3D::builder().build()).extent(c.extent).build();
+        impl Drop for AllocationDataStore{
+            fn drop(&mut self) {
+                match self.destroy_allocation {
+                    Some(a) => {
+                        debug!("Destroying allocation {:?}", a);
                         unsafe{
-                            target_image = self.device.create_image(c, None).unwrap();
-                            self.device.bind_image_memory(target_image, allocation, *o).unwrap();
-                            self.device.cmd_copy_image(*cmd, *i, c.initial_layout, target_image, c.initial_layout, &vec![copy]);
+                            self.device.free_memory(a, None);
                         }
-                        debug!("Recorded copy from image {:?} to new image {:?} for sector {}", *i, target_image, si);
-                        old_data.push((None, Some(*i), None));
-                        *i = target_image;
                     },
-                    _ => unimplemented!()
+                    None => {},
                 }
-            }
-            for old_allocation in self.allocations.iter(){
-                old_data.push((None, None, Some(old_allocation.2)));
-            }
-            self.allocations = vec![(aloc_info, cursor, allocation)];
-
-            //Now we send updates through channels
-            for sector in self.sectors.iter(){
-                match sector {
-                    enums::MemorySector::Buffer(_, _, _, _, _, _, f) => {
-                        f.send(enums::MemoryMessage::BindingUpdate(sector.clone())).unwrap();
+                match self.destroy_buffer {
+                    Some(b) => {
+                        debug!("Destroying buffer {:?}", b);
+                        unsafe{
+                            self.device.destroy_buffer(b, None);
+                        }
                     },
-                    enums::MemorySector::Image(_, _, _, _, _, _, _, f) => {
-                        f.send(enums::MemoryMessage::BindingUpdate(sector.clone())).unwrap();
-                    },
-                    _ => unimplemented!()
+                    None => {},
                 }
-            }
-
+                match self.destroy_image {
+                    Some(i) => {
+                        debug!("Destroying image {:?}", i);
+                        unsafe{
+                            self.device.destroy_image(i, None);
+                        }
+                    },
+                    None => {},
+                }
+    }
         }
-        pub fn copy_from_ram(&self, src: *const u8, byte_count: usize, target_sector: &enums::MemorySector, dst_offset: isize){
-            let target_allocation: vk::DeviceMemory;
-            let target_offset: isize;
-            let target_index: usize;
-            match target_sector {
-                enums::MemorySector::Buffer(ai, si, _, _, o, _, _) => {
-                    target_allocation = self.allocations[*ai].2;
-                    target_offset = *o as isize + dst_offset;
-                    target_index = *si;
-                },
-                enums::MemorySector::Image(ai, si, _, _, o, _, _, _) => {
-                    target_allocation = self.allocations[*ai].2;
-                    target_offset = *o as isize + dst_offset;
-                    target_index = *si;
-                },
-                _ => unimplemented!()
+        impl Allocation{
+            pub fn get_buffer(&mut self, usage: vk::BufferUsageFlags, size: u64, queue_families: Option<&[u32]>, flags: vk::BufferCreateFlags, p_next: *const c_void) -> Buffer{
+                let buffer: vk::Buffer;
+                let reqs: vk::MemoryRequirements;
+                let mut c_info:vk::BufferCreateInfo;
+                let mut target_address: u64 = 0;
+                match queue_families{
+                    Some(q) => {
+                        c_info = vk::BufferCreateInfo::builder()
+                        .flags(flags)
+                        .size(size)
+                        .usage(usage)
+                        .sharing_mode(vk::SharingMode::CONCURRENT)
+                        .queue_family_indices(q)
+                        .build();
+                    },
+                    None => {
+                        c_info = vk::BufferCreateInfo::builder()
+                        .flags(flags)
+                        .size(size)
+                        .usage(usage)
+                        .build();
+                    },
+                }
+                c_info.p_next = p_next;
+                unsafe{
+                    buffer = self.store.device.create_buffer(&c_info, None).expect("Could not create buffer");
+                    reqs = self.store.device.get_buffer_memory_requirements(buffer);
+
+                    if self.cursor != 0{
+                        target_address = (self.cursor / reqs.alignment + 1) * reqs.alignment;
+                    }
+                    assert!(target_address + reqs.size <= self.alloc_info.allocation_size);
+                    self.cursor = target_address + size;
+                    self.store.device.bind_buffer_memory(buffer, self.allocation, target_address).expect("Could not bind buffer");
+                }
+
+
+                let mut store = self.store.clone();
+                store.destroy_allocation = None;
+                store.destroy_buffer = Some(buffer);
+
+                debug!("Created buffer {:?} on allocation {:?} at {} with size {}", buffer, self.allocation, target_address, reqs.size);
+
+                Buffer { store: store, buffer, c_info, cursor: 0, reqs, allocation_offset: target_address, alloc_info: self.alloc_info }
             }
+            pub fn get_buffer_typed<T>(&mut self, usage: vk::BufferUsageFlags, count: usize, queue_families: Option<&[u32]>, flags: vk::BufferCreateFlags, p_next: *const c_void) -> Buffer{
+                let size = std::mem::size_of::<T>() * count;
+                self.get_buffer(usage, size as u64, queue_families, flags, p_next)
+            }
+            pub fn copy_from_ram(&self, src: *const u8, byte_count: usize, dst: &BufferRegion){
+                let target_allocation = self.allocation;
+                let target_offset = dst.allocation_offset;
 
-
-
-            let mapped_range = vk::MappedMemoryRange::builder()
-                .memory(target_allocation)
+                let mapped_range = vk::MappedMemoryRange::builder()
+                    .memory(target_allocation)
+                    .offset(0)
+                    .size(vk::WHOLE_SIZE)
+                    .build();
+        
+                unsafe {
+                    debug!("Copying {} bytes from {:?} to allocation {:?} at {} targeting buffer {:?}", byte_count, src, target_allocation, target_offset, dst.buffer);
+                    let dst = (self.store.device.map_memory(target_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *mut u8).offset(target_offset as isize);
+                    std::ptr::copy_nonoverlapping(src, dst, byte_count);
+                    self.store.device.flush_mapped_memory_ranges(&vec![mapped_range]).unwrap();
+                    self.store.device.unmap_memory(target_allocation);
+                }
+            }
+            pub fn copy_from_ram_typed<T>(&self, src: *const T, count: usize, dst: &BufferRegion){
+                let byte_count = std::mem::size_of::<T>() * count;
+                let src = src as *const u8;
+                self.copy_from_ram(src, byte_count, dst);
+            }
+            pub fn copy_from_ram_slice<T>(&self, src: &[T], dst: &BufferRegion){
+                let count = src.len();
+                let src = src.as_ptr();
+                self.copy_from_ram_typed(src, count, dst);
+            }
+            pub fn copy_to_ram(&self, src: &BufferRegion, byte_count: usize, dst: *mut u8){
+                let src_allocation = self.allocation;
+                let src_offset = src.allocation_offset;
+                let mapped_range = vk::MappedMemoryRange::builder()
+                .memory(src_allocation)
                 .offset(0)
                 .size(vk::WHOLE_SIZE)
                 .build();
-    
-            unsafe {
-                let dst = (self.device.map_memory(target_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *mut u8).offset(target_offset);
-                debug!("Copying {} bytes from {:?} to sector {} on allocation {:?} at {}", byte_count, src, target_index, target_allocation, target_offset);
-                std::ptr::copy_nonoverlapping(src, dst, byte_count);
-                self.device.flush_mapped_memory_ranges(&vec![mapped_range]).unwrap();
-                self.device.unmap_memory(target_allocation);
-            }
-        }
-        pub fn copy_to_ram(&self, dst: *mut u8, byte_count: usize, src_sector: &enums::MemorySector, _src_offset: isize){
-            let src_allocation: vk::DeviceMemory;
-            let src_offset: isize;
-            let src_index: usize;
-            match src_sector {
-                enums::MemorySector::Buffer(ai, si, _, _, o, _, _) => {
-                    src_allocation = self.allocations[*ai].2;
-                    src_offset = *o as isize + _src_offset;
-                    src_index = *si;
-                },
-                enums::MemorySector::Image(ai, si, _, _, o, _, _, _) => {
-                    src_allocation = self.allocations[*ai].2;
-                    src_offset = *o as isize + _src_offset;
-                    src_index = *si;
-                },
-                _ => unimplemented!()
-            }
-    
-            let mapped_range = vk::MappedMemoryRange::builder()
-            .memory(src_allocation)
-            .offset(0)
-            .size(vk::WHOLE_SIZE)
-            .build();
-    
-            unsafe {
-                let src = (self.device.map_memory(src_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *const u8).offset(src_offset);
-                self.device.invalidate_mapped_memory_ranges(&vec![mapped_range]).unwrap();
-                debug!("Copying {} bytes to {:?} from sector {} on allocation {:?} at {}", byte_count, dst, src_index, src_allocation, _src_offset);
-                std::ptr::copy_nonoverlapping(src, dst, byte_count);
-                self.device.unmap_memory(src_allocation);
-            }
-    
-        }
-    }
-    impl Drop for Memory{
-        fn drop(&mut self) {
-        debug!("Dropping Memory");
-        unsafe{
-            for (_,_,mem) in self.allocations.iter(){
-                self.device.free_memory(*mem, None);
-            }
-        }
-    }
-    }
-    pub struct Image{
-        device: ash::Device,
-        image: vk::Image,
-        channel: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
-        sector: enums::MemorySector
-    }
-    impl Image{
-    }
-    pub struct Buffer{
-        device: ash::Device,
-        channel: (flume::Sender<enums::MemoryMessage>, flume::Receiver<enums::MemoryMessage>),
-        sector: enums::MemorySector,
-        descriptor_channel: (flume::Sender<enums::DescriptorMessage>, flume::Receiver<enums::DescriptorMessage>),
-        descriptor_blocks: Vec<(vk::DeviceSize, vk::DeviceSize, vk::ShaderStageFlags, flume::Sender<enums::DescriptorMessage>)>,
-        limits: vk::PhysicalDeviceLimits,
-    }
-    impl Buffer{
-        pub fn get_sector(&mut self) -> &enums::MemorySector{
-            for message in self.channel.1.try_iter(){
-                match message {
-                    enums::MemoryMessage::BindingUpdate(s) => {
-                        match s {
-                            enums::MemorySector::Buffer(_, _, _, _, _, _, _) => {
-                                self.sector = s;
-                                debug!("Binding update processed")
-                            },
-                            _ => unimplemented!()
-                        }
-                    },
-                    _ => unimplemented!()
+        
+                unsafe {
+                    debug!("Copying {} bytes to {:?} from allocation {:?} at {}", byte_count, dst, src_allocation, src.allocation_offset);
+                    let src = (self.store.device.map_memory(src_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *const u8).offset(src_offset as isize);
+                    self.store.device.invalidate_mapped_memory_ranges(&vec![mapped_range]).unwrap();
+                    std::ptr::copy_nonoverlapping(src, dst, byte_count);
+                    self.store.device.unmap_memory(src_allocation);
                 }
             }
-
-            &self.sector
-         }
-        pub fn get_buffer(&mut self) -> vk::Buffer{
-            let buffer: vk::Buffer;
-            match self.get_sector() {
-                enums::MemorySector::Buffer(_, _, b, _, _, _, _) => {buffer = *b},
-                _ => unimplemented!()
+            pub fn copy_to_ram_typed<T>(&self, src: &BufferRegion, count: usize, dst: *mut T){
+                let byte_count = std::mem::size_of::<T>() * count;
+                let dst = dst as *mut u8;
+                self.copy_to_ram(src, byte_count, dst);
             }
-            debug!("Buffer {:?} returned", buffer);
-            buffer
-         }
-        pub fn transfer_from_buffer(&mut self, cmd: vk::CommandBuffer, src: &mut Buffer, src_offset: vk::DeviceSize, size: vk::DeviceSize, dst_offset: vk::DeviceSize){
-            let copy = vk::BufferCopy::builder().src_offset(src_offset).dst_offset(dst_offset).size(size).build();
-            unsafe{
-                let self_buffer = self.get_buffer();
-                self.device.cmd_copy_buffer(cmd, src.get_buffer(), self_buffer, &vec![copy]);
-            }
-         }
-        pub fn transfer_to_buffer(&mut self, cmd: vk::CommandBuffer, dst: &mut Buffer, dst_offset: vk::DeviceSize, size: vk::DeviceSize, src_offset: vk::DeviceSize){
-            let copy = vk::BufferCopy::builder().src_offset(src_offset).dst_offset(dst_offset).size(size).build();
-            unsafe{
-                let self_buffer = self.get_buffer();
-                self.device.cmd_copy_buffer(cmd, self_buffer, dst.get_buffer(), &vec![copy]);
-            }
-         }
-        pub fn add_descriptor_block<T: traits::IDescriptorEntryPoint>(&mut self, offset: vk::DeviceSize, range: vk::DeviceSize, stages: vk::ShaderStageFlags, descriptor_system: &mut T){
-            
-            match self.get_sector() {
-                enums::MemorySector::Buffer(_, _, _, c, _, _, _) => {
-                    if c.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-                        let alignment = self.limits.min_storage_buffer_offset_alignment;
-                        let descriptor_storage_buffer_alignment_check = offset % alignment == 0;
-                        debug!("Descriptor alignment requirement {}\n   Requriement met {}", alignment, descriptor_storage_buffer_alignment_check);
-                        assert!(descriptor_storage_buffer_alignment_check);
-                    }
-                    else{
-                        todo!()
-                    }
-                },
-                _ => unimplemented!()
-            }
-
-
-            let (_, _) = descriptor_system
-            .add_binding(
-                self.get_descriptor_type(), 
-                stages, 
-            enums::DescriptorInfoType::Buffer(vk::DescriptorBufferInfo::builder().buffer(self.get_buffer()).offset(offset).range(range).build()),
-            self.descriptor_channel.0.clone());
         }
-        fn get_descriptor_type(&mut self) -> vk::DescriptorType{
-            let d_type: vk::DescriptorType;
-            match self.get_sector() {
-                enums::MemorySector::Buffer(_, _, _, c, _, _, _) => {
-                    let usage = c.usage;
-                    if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-                        d_type = vk::DescriptorType::STORAGE_BUFFER;
-                    }
-                    else {
-                        unimplemented!();
-                    }
-                },
-                _ => unimplemented!()
+        impl Buffer {
+            pub fn get_region(&mut self, size: u64, custom_alignment: Option<(bool, u64)>) -> BufferRegion{
+                let mut target_address = 0;
+                match custom_alignment {
+                    Some((b,a)) => {
+                        if b{
+                            //We are aligning to the allocation address for device address operations
+                            debug!("Region paritioner of buffer {:?} using custom offset alignment of {} based of the allocation address", self.buffer, a);
+                            target_address = (((self.allocation_offset + self.cursor) / a + 1) * a) - self.allocation_offset;
+                        }
+                        else{
+                            //We arent aligning to the allocation address
+                            if self.cursor != 0 {
+                                debug!("Region paritioner of buffer {:?} using custom offset alignment of {}", self.buffer, a);
+                                target_address = (self.cursor / a + 1) * a;    
+                            }
+                        }
+                        
+                        assert!(target_address + size <= self.c_info.size);
+                    },
+                    None => {
+                        if self.cursor != 0 {
+                            if self.c_info.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER) {
+                                debug!("Region paritioner of buffer {:?} using storage buffer offset alignment of {}", self.buffer, self.store.props.limits.min_storage_buffer_offset_alignment);
+                                target_address = (self.cursor / self.store.props.limits.min_storage_buffer_offset_alignment + 1) * self.store.props.limits.min_storage_buffer_offset_alignment;
+                            }
+                            else {
+                                target_address = self.cursor;
+                            }    
+                        }
+                        assert!(target_address + size <= self.c_info.size);
+                    },
+                };
+                self.cursor = target_address + size;
+
+
+                let mut store = self.store.clone();
+                store.destroy_buffer = None;
+                debug!("Partitioned region from buffer {:?} at {} of size {}", self.buffer, target_address, size);
+                BufferRegion { store: store, buffer: self.buffer, usage: self.c_info.usage, allocation_offset: self.allocation_offset + target_address, buffer_offset: target_address, size: size, alloc_info: self.alloc_info }
             }
-            d_type
-         }
-         
+            pub fn get_region_typed<T>(&mut self, count: usize, custom_alignment: Option<(bool, u64)>) -> BufferRegion{
+                let size = std::mem::size_of::<T>() * count;
+                self.get_region(size as u64, custom_alignment)
+            }
+            pub fn get_regions(&mut self, sizes: &[u64], custom_alignment: Option<(bool, u64)>) -> Vec<BufferRegion>{
+                let mut regions = vec![];
+                for size in sizes.iter(){
+                    regions.push(self.get_region(*size, custom_alignment));
+                }
+                regions
+            }
+            pub fn get_regions_typed<T>(&mut self, counts: &[usize], custom_alignment: Option<(bool, u64)>) -> Vec<BufferRegion>{
+                let mut regions = vec![];
+                for count in counts.iter(){
+                    regions.push(self.get_region_typed::<T>(*count, custom_alignment));
+                }
+                regions
+            }
+        }
+        impl BufferRegion{
+            pub fn get_binding(&self, stages: vk::ShaderStageFlags) -> (vk::DescriptorType, u32, vk::ShaderStageFlags, DescriptorWriteType) {
+                let ty: vk::DescriptorType;
+                let count = 1;
+                let write: DescriptorWriteType;
+
+                if self.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER) {
+                    ty = vk::DescriptorType::STORAGE_BUFFER;
+                }
+                else {
+                    panic!("No identifiable descriptor type")
+                }
+                
+                write = DescriptorWriteType::Buffer(vk::DescriptorBufferInfo::builder().buffer(self.buffer).offset(self.buffer_offset).range(self.size).build());
+
+                (ty, count, stages, write)
+
+            }
+            pub fn copy_to_region(&self, cmd: vk::CommandBuffer, dst: &BufferRegion){
+                let copy = [self.get_copy_info(dst)];
+                unsafe{
+                    self.store.device.cmd_copy_buffer(cmd, self.buffer, dst.buffer, &copy);
+                    debug!("Recorded copy of {} bytes from buffer {:?} at {} to buffer {:?} at {}", copy[0].size, self.buffer, copy[0].src_offset, dst.buffer, copy[0].dst_offset);
+                }
+            }
+            pub fn get_copy_info(&self, tgt: &BufferRegion) -> vk::BufferCopy {
+                assert!(tgt.size >= self.size);
+                vk::BufferCopy::builder().src_offset(self.buffer_offset).dst_offset(tgt.buffer_offset).size(self.size).build()
+            }
+            pub fn get_device_address_const(&self) -> vk::DeviceOrHostAddressConstKHR{
+                let base_address: vk::DeviceAddress;
+                let ba_info = vk::BufferDeviceAddressInfo::builder().buffer(self.buffer);
+                unsafe{
+                    base_address = self.store.device.get_buffer_device_address(&ba_info);
+                }
+                let region_address = base_address + self.buffer_offset;
+                debug!("buffer {:?} device address {}, region address: {}", self.buffer, base_address, region_address);
+
+                let address;
+                if self.store.get_type(vk::MemoryPropertyFlags::HOST_COHERENT) == self.alloc_info.memory_type_index {
+                    address = vk::DeviceOrHostAddressConstKHR{host_address: region_address as *const c_void};
+                }
+                else{
+                    address = vk::DeviceOrHostAddressConstKHR{device_address: region_address};
+                }
+                address
+            }
+            pub fn get_device_address(&self) -> vk::DeviceOrHostAddressKHR{
+                let base_address: vk::DeviceAddress;
+                let ba_info = vk::BufferDeviceAddressInfo::builder().buffer(self.buffer);
+                unsafe{
+                    base_address = self.store.device.get_buffer_device_address(&ba_info);
+                }
+                let region_address = base_address + self.buffer_offset;
+                debug!("buffer {:?} device address {}, region address: {}", self.buffer, base_address, region_address);
+
+                let address;
+                if self.store.get_type(vk::MemoryPropertyFlags::HOST_COHERENT) == self.alloc_info.memory_type_index {
+                    address = vk::DeviceOrHostAddressKHR{host_address: region_address as *mut c_void};
+                }
+                else{
+                    address = vk::DeviceOrHostAddressKHR{device_address: region_address};
+                }
+                address
+            }
+        }
+        #[derive(Clone)]
+        pub struct DescriptorDataStore{
+            device: ash::Device,
+            props: vk::PhysicalDeviceProperties,
+            destroy_pool: Option<vk::DescriptorPool>,
+            destroy_set_layouts: Option<Vec<vk::DescriptorSetLayout>>,
+        }
+        
+        #[derive(Clone)]
+        pub struct DescriptorSetOutline{
+            create_set_layout_flags: vk::DescriptorSetLayoutCreateFlags,
+            create_set_layout_next: *const c_void,
+            allocate_set_next: *const c_void,
+            bindings: Vec<(vk::DescriptorSetLayoutBinding, DescriptorWriteType)>
+        }
+        pub struct DescriptorSet{
+            store: DescriptorDataStore,
+            outline: DescriptorSetOutline,
+            set: vk::DescriptorSet,
+            layout: vk::DescriptorSetLayout,
+        }
+        pub struct DescriptorStack{
+            store: DescriptorDataStore,
+            pool: vk::DescriptorPool,
+            sets: Vec<DescriptorSet>,
+        }
+        impl DescriptorDataStore{
+            pub fn new<T: IEngineData>(engine: &T) -> DescriptorDataStore{
+                unsafe{
+                    let device = engine.device();
+                    let props = engine.instance().get_physical_device_properties(engine.physical_device());
+                    DescriptorDataStore { 
+                        device, 
+                        props, 
+                        destroy_pool: None, 
+                        destroy_set_layouts: None }
+                        
+                }
+            }
+            pub fn get_descriptor_stack(&self, outlines: &[DescriptorSetOutline], c_p_flags: vk::DescriptorPoolCreateFlags, c_p_next: *const c_void, a_s_next: *const c_void) -> DescriptorStack{
+
+                let mut pool_sizes: Vec<vk::DescriptorPoolSize> = Vec::with_capacity(outlines.len());
+                let pool: vk::DescriptorPool;
+                let mut layouts: Vec<vk::DescriptorSetLayout> = Vec::with_capacity(outlines.len());
+                let allocated_sets: Vec<vk::DescriptorSet>;
+                let mut sets: Vec<DescriptorSet> = Vec::with_capacity(outlines.len());
+
+                for outline in outlines.iter(){
+                    for (binding, _) in outline.bindings.iter(){
+                        let found = pool_sizes.iter().enumerate().find(|(_,s)| s.ty == binding.descriptor_type);
+                        match found {
+                            Some((i, _)) => {pool_sizes[i].descriptor_count += 1;},
+                            None => {pool_sizes.push(vk::DescriptorPoolSize::builder().ty(binding.descriptor_type).descriptor_count(1).build());},
+                        }
+                    }
+                    let bindings:Vec<vk::DescriptorSetLayoutBinding> = outline.bindings.iter().map(|(b,_)| *b).collect();
+                    let mut c_l_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                    .flags(outline.create_set_layout_flags)
+                    .bindings(&bindings)
+                    .build();
+                    c_l_info.p_next = outline.create_set_layout_next;
+                    unsafe{
+                        layouts.push(self.device.create_descriptor_set_layout(&c_l_info, None).expect("Could not create descriptor set"));
+                        debug!("Created descriptor set layout {:?}", layouts.last());
+                    }
+
+                }
+
+                let mut c_p_info = vk::DescriptorPoolCreateInfo::builder()
+                .flags(c_p_flags)
+                .max_sets(outlines.len() as u32)
+                .pool_sizes(&pool_sizes)
+                .build();
+                c_p_info.p_next = c_p_next;
+                unsafe{
+                    pool = self.device.create_descriptor_pool(&c_p_info, None).expect("Could not create descriptor pool");
+                    debug!("Created descriptor pool {:?}", pool);
+                }
+
+                let mut a_info = vk::DescriptorSetAllocateInfo::builder()
+                .descriptor_pool(pool)
+                .set_layouts(&layouts)
+                .build();
+                a_info.p_next = a_s_next;
+                unsafe{
+                    allocated_sets = self.device.allocate_descriptor_sets(&a_info).expect("Could not allocate descriptor sets");
+                    debug!("Created descriptor sets {:?}", allocated_sets);
+                }
+
+                let mut writes:Vec<vk::WriteDescriptorSet> = Vec::with_capacity(outlines.len()*2);
+                let mut b_infos:Vec<[vk::DescriptorBufferInfo;1]> = Vec::with_capacity(outlines.len()*2);
+                let mut i_infos:Vec<[vk::DescriptorImageInfo;1]> = Vec::with_capacity(outlines.len()*2);
+
+                for (index,set) in allocated_sets.iter().enumerate(){
+                    let outline = outlines.get(index).unwrap().clone();
+                    let layout = layouts.get(index).unwrap().clone();
+
+                    for binding in outline.bindings.iter(){
+                        match binding.1 {
+                            DescriptorWriteType::Buffer(b) => {
+                                b_infos.push([b]);
+                                let write = vk::WriteDescriptorSet::builder()
+                                .dst_set(*set)
+                                .dst_array_element(0)
+                                .dst_binding(binding.0.binding)
+                                .descriptor_type(binding.0.descriptor_type)
+                                .buffer_info(b_infos.last().unwrap())
+                                .build();
+                                debug!("Generated descriptor set write {:?}", write);
+                                writes.push(write);
+                            },
+                            DescriptorWriteType::Image(i) => {
+                                i_infos.push([i]);
+                                let write = vk::WriteDescriptorSet::builder()
+                                .dst_set(*set)
+                                .dst_array_element(0)
+                                .dst_binding(binding.0.binding)
+                                .descriptor_type(binding.0.descriptor_type)
+                                .image_info(i_infos.last().unwrap())
+                                .build();
+                                debug!("Generated descriptor set write {:?}", write);
+                                writes.push(write);
+                            },
+                        }
+                    }
+                    let data = DescriptorSet{ 
+                        store: self.clone(), 
+                        outline, 
+                        set: *set, 
+                        layout };
+                    sets.push(data);
+                }
+
+                unsafe{
+                    self.device.update_descriptor_sets(&writes, &[]);
+                    debug!("Wrote descriptor sets");
+                }
+
+                let mut store = self.clone();
+                store.destroy_pool = Some(pool);
+                store.destroy_set_layouts = Some(layouts);
+
+                DescriptorStack{ store: store, pool, sets }
+
+            }
+        }        
+        impl Drop for DescriptorDataStore{
+            fn drop(&mut self) {
+                match self.destroy_pool {
+                    Some(p) => {
+                        debug!("Destroying descriptor pool {:?}", p);
+                        unsafe{
+                            self.device.destroy_descriptor_pool(p, None);
+                        }
+                    },
+                    None => {},
+                }
+                match self.destroy_set_layouts.clone() {
+                    Some(l) => {
+                        for layout in l.iter(){
+                            debug!("Destroying descritor set layout {:?}", l);
+                            unsafe{
+                                self.device.destroy_descriptor_set_layout(*layout, None);
+                            }
+                        }
+                    },
+                    None => {},
+                }
     }
-    impl Drop for Buffer{
-        fn drop(&mut self) {
-        match self.sector{
-            enums::MemorySector::Buffer(_, _, b, _, _, _, _) => unsafe {debug!("Destroying Buffer {:?}", b); self.device.destroy_buffer(b, None);},
-            _ => unimplemented!()
+        }
+        impl DescriptorSetOutline{
+            pub fn new(c_l_flags: vk::DescriptorSetLayoutCreateFlags, c_l_next: *const c_void, a_s_next: *const c_void) -> DescriptorSetOutline{
+                DescriptorSetOutline { create_set_layout_flags: c_l_flags, create_set_layout_next: c_l_next, allocate_set_next: a_s_next, bindings: vec![] }
+            }
+            pub fn add_binding(&mut self, bindable_data: (vk::DescriptorType, u32, vk::ShaderStageFlags, DescriptorWriteType)) -> u32{
+                let (ty, count, stage, write) = bindable_data;
+                let binding = vk::DescriptorSetLayoutBinding::builder()
+                .binding(self.bindings.len() as u32)
+                .descriptor_type(ty)
+                .descriptor_count(count)
+                .stage_flags(stage)
+                .build();
+                let binding_index = binding.binding;
+                self.bindings.push((binding, write));
+                binding_index
+            }
+        }
+        impl DescriptorStack{
+            pub fn get_set_layout(&self, set_index: usize) -> vk::DescriptorSetLayout{
+                self.sets[set_index].layout
+            }
+            pub fn get_set(&self, set_index:usize) -> vk::DescriptorSet{
+                self.sets[set_index].set
+            }
+        }
+        
+        #[doc = "Must survive as long as the create blas store command buffer is executing"]
+        pub struct BlasStoreCreateRecipt{
+            cpu_mem: Allocation,
+            v_copy: Buffer,
+            i_copy: Buffer,
+            s_buffer: Buffer,
+        }
+        pub struct BlasStore{
+            allocator: AllocationDataStore,
+            gpu_mem: Allocation,
+            acc_loader: ash::extensions::khr::AccelerationStructure,
+            vertex_buffer: Buffer,
+            index_buffer: Buffer,
+            blas_buffer: Buffer,
+            acceleration_structures: Vec<vk::AccelerationStructureKHR>,
+        }
+
+        enum BlasGeometeryType {
+            Triangles(vk::GeometryFlagsKHR, vk::BuildAccelerationStructureFlagsKHR, *const c_void, *const c_void, *const c_void)
+        }
+        pub struct BlasOutline<V>{
+            vertex_data: Vec<V>,
+            vertex_format: vk::Format,
+            index_data: Vec<u32>,
+            transform: Option<vk::DeviceOrHostAddressConstKHR>,
+            geo_type: BlasGeometeryType,
+        }
+
+        impl<V: Clone> BlasOutline<V>{
+            pub fn new_triangle(vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32], transform: Option<vk::DeviceOrHostAddressConstKHR>, geo_flags: vk::GeometryFlagsKHR, build_flags: vk::BuildAccelerationStructureFlagsKHR, t_d_next: *const c_void, g_i_next: *const c_void, g_b_next: *const c_void) -> BlasOutline<V>{
+                BlasOutline { 
+                    vertex_data: vertex_data.to_vec(), 
+                    vertex_format, 
+                    index_data: index_data.to_vec(), 
+                    transform,
+                    geo_type: BlasGeometeryType::Triangles(geo_flags, build_flags, t_d_next, g_i_next, g_b_next)
+                }
+            }
+            fn get_size_info(&self, acc_loader: &ash::extensions::khr::AccelerationStructure) -> (vk::AccelerationStructureBuildSizesInfoKHR, u64, u64){
+                let geo_data = match self.geo_type{
+                    BlasGeometeryType::Triangles(geo_flags, build_flags, t_d_next, g_i_next, g_b_next) => {
+                        let mut triangles_data = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
+                        .vertex_format(self.vertex_format)
+                        .vertex_stride(std::mem::size_of_val(&self.vertex_data[0]) as u64)
+                        .max_vertex(self.vertex_data.len() as u32)
+                        .index_type(vk::IndexType::UINT32)
+                        .build();
+                        triangles_data.p_next = t_d_next;
+                        let mut geo_data = vk::AccelerationStructureGeometryDataKHR::default();
+                        geo_data.triangles = triangles_data;
+                        let mut geo_info = vk::AccelerationStructureGeometryKHR::builder()
+                        .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
+                        .geometry(geo_data)
+                        .flags(geo_flags)
+                        .build();
+                        geo_info.p_next = g_i_next;
+                        let geo_info_array = vec![geo_info];
+                        let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
+                        .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
+                        .flags(build_flags)
+                        .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+                        .geometries(&geo_info_array)
+                        .build();
+                        build_info.p_next = g_b_next;
+                        let primatives = [(self.index_data.len()/3) as u32];
+                        let vertex_data_size = (std::mem::size_of_val(&self.vertex_data[0]) as u64) * self.vertex_data.len() as u64;
+                        let index_data_size = (std::mem::size_of_val(&self.index_data[0]) as u64) * self.index_data.len() as u64;
+                        unsafe{
+                            (acc_loader.get_acceleration_structure_build_sizes(vk::AccelerationStructureBuildTypeKHR::DEVICE, &build_info, &primatives), vertex_data_size, index_data_size)
+                        }
+                    },
+                };
+                geo_data
+            }
+            fn record_build(&self, acc_loader: &ash::extensions::khr::AccelerationStructure, cmd: vk::CommandBuffer, vertex_region: &BufferRegion, index_region: &BufferRegion, blas_region: &BufferRegion, scratch_region: &BufferRegion) -> vk::AccelerationStructureKHR {
+                let acc_struct = match self.geo_type { BlasGeometeryType::Triangles(geo_flags, build_flags, t_d_next, g_i_next, g_b_next) => {
+                    
+                    
+                    let mut triangles_data = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
+                    .vertex_format(self.vertex_format)
+                    .vertex_data(vertex_region.get_device_address_const())
+                    .vertex_stride(std::mem::size_of_val(&self.vertex_data[0]) as u64)
+                    .max_vertex(self.vertex_data.len() as u32)
+                    .index_type(vk::IndexType::UINT32)
+                    .index_data(index_region.get_device_address_const())
+                    .build();
+                    triangles_data.p_next = t_d_next;
+
+
+                    let mut geo_data = vk::AccelerationStructureGeometryDataKHR::default();
+                    geo_data.triangles = triangles_data;
+
+
+                    let mut geo_info = vk::AccelerationStructureGeometryKHR::builder()
+                    .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
+                    .geometry(geo_data)
+                    .flags(geo_flags)
+                    .build();
+                    geo_info.p_next = g_i_next;
+                    let geo_info_array = vec![geo_info];
+
+                    let acceleration_structure;
+                    let ac_info = vk::AccelerationStructureCreateInfoKHR::builder()
+                    .buffer(blas_region.buffer)
+                    .offset(blas_region.buffer_offset)
+                    .size(blas_region.size)
+                    .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
+                    .build();
+                    unsafe{
+                        acceleration_structure = acc_loader.create_acceleration_structure(&ac_info, None).expect("Could not create acceleration structure");
+                        debug!("Created acceleration structure {:?}", acceleration_structure);
+                    }
+                    
+                    
+                    let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
+                    .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
+                    .flags(build_flags)
+                    .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+                    .dst_acceleration_structure(acceleration_structure)
+                    .geometries(&geo_info_array)
+                    .scratch_data(scratch_region.get_device_address())
+                    .build();
+                    build_info.p_next = g_b_next;
+
+
+
+                    let primatives = [(self.index_data.len()/3) as u32];
+                    let build_range = [vk::AccelerationStructureBuildRangeInfoKHR::builder().primitive_count(primatives[0]).build()];
+
+
+                    let build_infos = [build_info];
+                    let build_ranges = [build_range.as_slice()];
+                    
+
+                    unsafe{
+                        acc_loader.cmd_build_acceleration_structures(cmd, &build_infos, &build_ranges);
+                    }
+                    acceleration_structure
+                },};
+                acc_struct
+            }
+        }
+        impl BlasStore{
+            pub fn new<T: IEngineData, V: Clone>(engine: &T, cmd: vk::CommandBuffer, outlines: &[BlasOutline<V>]) -> (BlasStore, BlasStoreCreateRecipt){
+                let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.instance(), &engine.device());
+                let mut requested_vertex_data_regions: Vec<u64> = Vec::with_capacity(outlines.len());
+                let mut requested_index_data_regions : Vec<u64> = Vec::with_capacity(outlines.len());
+                let mut requested_blas_regions : Vec<u64> = Vec::with_capacity(outlines.len());
+                let mut requested_scratch_regions : Vec<u64> = Vec::with_capacity(outlines.len());
+                //We need to pull sizing info from all of our blas outlines
+                for (index, outline) in outlines.iter().enumerate(){
+                    let (sizing_info, v_size, i_size) = outline.get_size_info(&acc_loader);
+                    let blas_size = sizing_info.acceleration_structure_size;
+                    let scratch_size = sizing_info.build_scratch_size;
+                    requested_vertex_data_regions.push(v_size);
+                    requested_index_data_regions.push(i_size);
+                    requested_blas_regions.push(blas_size);
+                    requested_scratch_regions.push(scratch_size);
+                    debug!("Sizing info for blas {}\n   Vertex data: {}\n   index_data: {}\n   blas_data: {}\n   scratch_data: {}", index, v_size, i_size, blas_size, scratch_size);
+                }
+
+                let mut total_size = 0;
+                let mut vertex_size = 0;
+                let mut index_size= 0;
+                let mut blas_size= 0;
+                let mut scratch_size= 0;
+                let mut copy_size = 0;
+                for (i,_) in requested_vertex_data_regions.iter().enumerate(){
+                    vertex_size += requested_vertex_data_regions[i];
+                    index_size += requested_index_data_regions[i];
+                    blas_size += requested_blas_regions[i];
+                    scratch_size += requested_scratch_regions[i];
+
+                    copy_size += requested_vertex_data_regions[i];
+                    copy_size += requested_index_data_regions[i];
+
+                    total_size += requested_vertex_data_regions[i];
+                    total_size += requested_index_data_regions[i];
+                    total_size += requested_blas_regions[i];
+                    total_size += requested_scratch_regions[i];
+                }
+                debug!("Total blas store size: {}\nNeeded copy size: {}\nSub part sizes:\n   Vertex data: {}\n   index_data: {}\n   blas_data: {}\n   scratch_data: {}", total_size, copy_size, vertex_size, index_size, blas_size, scratch_size);
+
+                let allocator = AllocationDataStore::new(engine);
+
+                let mut acc_props = vk::PhysicalDeviceAccelerationStructurePropertiesKHR::builder().build();
+                let mut default_props = vk::PhysicalDeviceProperties2::builder().push_next(&mut acc_props);
+                unsafe{
+                    engine.instance().get_physical_device_properties2(engine.physical_device(), &mut default_props);
+                }
+
+                let mut alloc_flags = vk::MemoryAllocateFlagsInfo::builder()
+                .flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS)
+                .build();
+                let a_m_next = vk::MemoryAllocateInfo::builder().push_next(&mut alloc_flags).build().p_next;
+
+                let mut gpu_mem = allocator.allocate(allocator.get_type(vk::MemoryPropertyFlags::DEVICE_LOCAL), total_size + 1024*1024, a_m_next);
+                let mut cpu_mem = allocator.allocate(allocator.get_type(vk::MemoryPropertyFlags::HOST_COHERENT), copy_size + 1024*1024, 0 as *const c_void);
+
+                let mut vertex_copy = cpu_mem.get_buffer(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC, vertex_size + 1024, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+                let mut index_copy = cpu_mem.get_buffer(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC, index_size + 1024, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+
+                let vertex_copy_regions = vertex_copy.get_regions(&requested_vertex_data_regions, None);
+                let index_copy_regions = index_copy.get_regions(&requested_index_data_regions, None);
+
+                let mut vertex_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, vertex_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+                let mut index_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, index_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+                let mut blas_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, blas_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+                let mut scratch_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, scratch_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+
+                let vertex_regions = vertex_buffer.get_regions(&requested_vertex_data_regions, None);
+                let index_regions = index_buffer.get_regions(&requested_index_data_regions, None);
+                let blas_regions = blas_buffer.get_regions(&requested_vertex_data_regions, Some((false, 256 as u64)));
+                let scratch_regions = scratch_buffer.get_regions(&requested_index_data_regions, Some((true, acc_props.min_acceleration_structure_scratch_offset_alignment as u64)));
+
+                for (index, outline) in outlines.iter().enumerate(){
+                    cpu_mem.copy_from_ram_slice(&outline.vertex_data, &vertex_copy_regions[index]);
+                    cpu_mem.copy_from_ram_slice(&outline.index_data, &index_copy_regions[index]);
+                }
+                for (index, region) in vertex_copy_regions.iter().enumerate(){
+                    region.copy_to_region(cmd, &vertex_regions[index]);
+                    index_copy_regions[index].copy_to_region(cmd, &index_regions[index]);
+                }
+                let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::NONE).dst_access_mask(vk::AccessFlags::MEMORY_WRITE).build();
+                
+                unsafe {engine.device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);}
+                
+                let mut acc_structs = vec![];
+                //Now we attempt to build the command buffers
+                for (index, outline) in outlines.iter().enumerate(){
+                    acc_structs.push(outline.record_build(&acc_loader, cmd, &vertex_regions[index], &index_regions[index], &blas_regions[index], &scratch_regions[index]));
+                }
+                
+                
+                
+                let recipt = BlasStoreCreateRecipt{ cpu_mem, v_copy: vertex_copy, i_copy: index_copy, s_buffer: scratch_buffer };
+                (BlasStore{ 
+                    allocator, 
+                    gpu_mem, 
+                    vertex_buffer, 
+                    index_buffer, 
+                    blas_buffer,
+                    acceleration_structures: acc_structs,
+                    acc_loader, }, recipt)
+
+            }
+            pub fn new_immediate<T: IEngineData, V: Clone>(engine: &T, outlines: &[BlasOutline<V>]){
+                let pool = core::CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.queue_data().graphics.1).build());
+                let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+                unsafe{
+                    engine.device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().build()).unwrap();
+                }
+                let data = BlasStore::new(engine, cmd, outlines);
+                unsafe{
+                    engine.device().end_command_buffer(cmd).unwrap();
+                }
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder().command_buffers(&cmds).build()];
+                unsafe{
+                    engine.device().queue_submit(engine.queue_data().graphics.0, &submit, vk::Fence::null()).unwrap();
+                    engine.device().queue_wait_idle(engine.queue_data().graphics.0).unwrap();
+                }
+                
+            }
+    
+        }
+        impl Drop for BlasStore{
+            fn drop(&mut self) {
+                unsafe{
+                    for acc in self.acceleration_structures.iter(){
+                        debug!("Destroying acceleration structure {:?}", *acc);
+                        self.acc_loader.destroy_acceleration_structure(*acc, None);
+                    }
+                }
+    }
         }
     }
-    }
-
     pub struct CommandPool{
         device: ash::Device,
         command_pool: ash::vk::CommandPool,
@@ -1390,309 +1785,6 @@ pub mod core{
         }
         }
     }
-    
-    #[derive(Clone)]
-    pub struct DescriptorBindingReceipt{
-        set_index: usize,
-        binding_index: usize,
-    }
-    #[derive(Clone)]
-    struct DescriptorSet{
-        pub set: Option<vk::DescriptorSet>,
-        pub layout: Option<vk::DescriptorSetLayout>,
-        pub  bindings: Vec<(vk::DescriptorType, vk::ShaderStageFlags, enums::DescriptorInfoType, flume::Sender<enums::DescriptorMessage>)>
-    }
-    pub struct DescriptorSystem{
-        device: ash::Device,
-        pool: Option<vk::DescriptorPool>,
-        sets: Vec<DescriptorSet>,
-        active_set: usize,
-        channel: (flume::Sender<enums::DescriptorMessage>, flume::Receiver<enums::DescriptorMessage>)
-    }
-    impl DescriptorSystem{
-        pub fn new<T: IEngineData>(engine: &T) -> DescriptorSystem{
-            DescriptorSystem { device: engine.device(), pool: None, sets: vec![], active_set: 0, channel: flume::unbounded() }
-        }
-        pub fn set_active_set(&mut self, index: usize){
-            self.active_set = index;
-        }
-        pub fn create_new_set(&mut self) -> usize{
-            let set = DescriptorSet{ set: None, layout: None, bindings: vec![] };
-            self.sets.push(set);
-            self.sets.len()-1
-        }
-        pub fn update(&mut self){
-
-            match self.pool{
-                Some(_) => {},
-                None => {
-                    debug!("Updating pool");
-                    //First we need to produce all of the set layouts while keeping track of the desc types
-                    let mut sizes: Vec<vk::DescriptorPoolSize> = vec![];
-                    let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
-                    for (index, set_data) in self.sets.iter_mut().enumerate(){
-                        debug!("Analyzing set {}", index);
-                        set_data.set = None;
-                        let mut bindings: Vec<vk::DescriptorSetLayoutBinding> = vec![];
-                        for (b_index, (descriptor_type, stages, _, f)) in set_data.bindings.iter().enumerate(){
-                            //Here we add the size out of the disconnect check because we must ensure the pool can carry old layouts
-                            match sizes.iter_mut().find(|size| size.ty == *descriptor_type) {
-                                Some(s) => {
-                                    s.descriptor_count += 1;
-                                    debug!("Type {:?} count set to {}", s.ty, s.descriptor_count);
-                                },
-                                None => {
-                                    sizes.push(vk::DescriptorPoolSize::builder().ty(*descriptor_type).descriptor_count(1).build());
-                                    debug!("New type added to sizes {:?}", *descriptor_type);
-                                },
-                            }
-                            if !f.is_disconnected(){
-                                //Here we gen a new binding
-                                let binding = vk::DescriptorSetLayoutBinding::builder()
-                                .binding(bindings.len() as u32)
-                                .descriptor_type(*descriptor_type)
-                                .descriptor_count(1)
-                                .stage_flags(*stages)
-                                .build();
-                                debug!("Binding slot {} of set {} is active generated binding {:?}", b_index, index, binding);
-                                bindings.push(binding);
-                            }
-                        }
-
-
-                        match set_data.layout {
-                            Some(l) => {
-                                layouts.push(l)
-                            },
-                            None => {
-                                let c_info = vk::DescriptorSetLayoutCreateInfo::builder().bindings(bindings.as_slice()).build();
-                                unsafe{
-                                    set_data.layout = Some(self.device.create_descriptor_set_layout(&c_info, None).unwrap());
-                                }
-                                debug!("Created set layout {:?} for set {}", set_data.layout, index);
-                                layouts.push(set_data.layout.unwrap());
-                            },
-                        }
-                    }
-                    //Then we need to create the pool
-                    let c_info = vk::DescriptorPoolCreateInfo::builder()
-                    .max_sets(self.sets.len() as u32)
-                    .pool_sizes(sizes.as_slice())
-                    .build();
-                    unsafe{
-                        self.pool = Some(self.device.create_descriptor_pool(&c_info, None).unwrap());
-                        debug!("Generated new pool {:?}", self.pool);
-                    }
-                    //Then we need to allocate the sets
-                    let a_info = vk::DescriptorSetAllocateInfo::builder().descriptor_pool(self.pool.unwrap()).set_layouts(layouts.as_slice()).build();
-                    unsafe{
-                        for (index, set) in self.device.allocate_descriptor_sets(&a_info).unwrap(). iter().enumerate(){
-                            self.sets[index].set = Some(*set);
-                        }
-                    }
-                    debug!("Allocated {} sets", a_info.descriptor_set_count);
-                    //Then we need to write all sets
-                    self.rewrite_sets();
-                },
-            }
-
-
-            //We need to read the write update messages and apply the data changes and write into the sets
-            let mut writes_needed = vec![];
-            for message in self.channel.1.try_iter(){
-                match message {
-                    enums::DescriptorMessage::WriteInfoUpdate(r, t) => {
-                        let target_set = self.sets.get_mut(r.set_index).unwrap();
-                        let (_,_,i,_) = target_set.bindings.get_mut(r.binding_index).unwrap();
-                        *i = t;
-                        writes_needed.push(target_set.clone());
-                        debug!("Write update read for binding {} on set {}", r.binding_index, r.set_index);
-                    },
-                }
-            }
-            self.write_sets(writes_needed.as_slice());
-        }
-        pub fn get_set_layout(&mut self, set_index: usize) -> DescriptorSetLayout {
-            self.update();
-            let target_set = self.sets.get_mut(set_index).unwrap();
-            let layout = match target_set.layout {
-                Some(l) => l,
-                None => panic!(),
-            };
-            layout
-        }
-        pub fn get_set(&mut self, set_index: usize) -> vk::DescriptorSet{
-            self.update();
-            let target_set = self.sets.get_mut(set_index).unwrap();
-            let set = match target_set.set {
-                Some(s) => s,
-                None => panic!(),
-            };
-            set
-        }
-        #[doc = "Writes all sets"]
-        fn rewrite_sets(&mut self){
-            let mut b_infos = vec![];
-            let mut i_infos = vec![];
-            let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
-                    for (index, set_data) in self.sets.iter().enumerate(){
-                        let mut binding_count = 0;
-                        writes.append(
-                            &mut set_data.bindings.iter()
-                            .enumerate()
-                            .filter(|(_, (_,_,_,f))| !f.is_disconnected())
-                            .map(|(b_index, (t,_,info,_))| {
-                                
-                                let write = match info {
-                                    enums::DescriptorInfoType::Image(i) => {
-                                        i_infos.push(vec![*i]);
-                                        let write = vk::WriteDescriptorSet::builder()
-                                            .dst_set(set_data.set.unwrap())
-                                            .dst_binding(binding_count as  u32)
-                                            .descriptor_type(*t)
-                                            .image_info(i_infos.last().unwrap().as_slice())
-                                            .build();
-                                        debug!("Generted write {:?} on set {} for binding {}, target is image view {:?}", write, index, b_index, i.image_view);
-                                        binding_count += 1;
-                                        write
-
-                                    },
-                                    enums::DescriptorInfoType::Buffer(b) => {
-                                         b_infos.push(vec![*b]);
-                                         let write = vk::WriteDescriptorSet::builder()
-                                            .dst_set(set_data.set.unwrap())
-                                            .dst_binding(binding_count as  u32)
-                                            .descriptor_type(*t)
-                                            .buffer_info(b_infos.last().unwrap().as_slice())
-                                            .build();
-                                        debug!("Generted write {:?} on set {} for binding {}, target is buffer {:?}", write, index, b_index, b.buffer);
-                                        binding_count += 1;
-                                        write
-                                        },
-                                        
-                                };
-                                write
-                            })
-                            .collect()
-                        );
-                    }
-                    unsafe{
-                        self.device.update_descriptor_sets(writes.as_slice(), &[]);
-                        debug!("Made {} Descriptor Set Writes", writes.len());
-                    }
-        }
-        fn write_sets(&mut self, sets: &[DescriptorSet]){
-            let mut b_infos = vec![];
-            let mut i_infos = vec![];
-            let mut writes: Vec<vk::WriteDescriptorSet> = vec![];
-                    for (index, set_data) in sets.iter().enumerate(){
-                        let mut binding_count = 0;
-                        writes.append(
-                            &mut set_data.bindings.iter()
-                            .enumerate()
-                            .filter(|(_, (_,_,_,f))| !f.is_disconnected())
-                            .map(|(b_index, (t,_,info,_))| {
-                                
-                                let write = match info {
-                                    enums::DescriptorInfoType::Image(i) => {
-                                        i_infos.push(vec![*i]);
-                                        let write = vk::WriteDescriptorSet::builder()
-                                            .dst_set(set_data.set.unwrap())
-                                            .dst_binding(binding_count as  u32)
-                                            .descriptor_type(*t)
-                                            .image_info(i_infos.last().unwrap().as_slice())
-                                            .build();
-                                        debug!("Generted write {:?} on set {} for binding {}, target is image view {:?}", write, index, b_index, i.image_view);
-                                        binding_count += 1;
-                                        write
-
-                                    },
-                                    enums::DescriptorInfoType::Buffer(b) => {
-                                         b_infos.push(vec![*b]);
-                                         let write = vk::WriteDescriptorSet::builder()
-                                            .dst_set(set_data.set.unwrap())
-                                            .dst_binding(binding_count as  u32)
-                                            .descriptor_type(*t)
-                                            .buffer_info(b_infos.last().unwrap().as_slice())
-                                            .build();
-                                        debug!("Generted write {:?} on set {} for binding {}, target is buffer {:?}", write, index, b_index, b.buffer);
-                                        binding_count += 1;
-                                        write
-                                        },
-                                        
-                                };
-                                write
-                            })
-                            .collect()
-                        );
-                    }
-            if writes.len() > 0{
-                unsafe{
-                    self.device.update_descriptor_sets(writes.as_slice(), &[]);
-                    debug!("Made {} Descriptor Set Writes", writes.len());
-                }
-            }
-        }
-    }
-    impl traits::IDescriptorEntryPoint for DescriptorSystem {
-        fn add_binding(&mut self, descriptor_type: vk::DescriptorType, stage: vk::ShaderStageFlags, info: enums::DescriptorInfoType, subscriber: flume::Sender<enums::DescriptorMessage>) -> (self::DescriptorBindingReceipt, flume::Sender<enums::DescriptorMessage>) {
-            let target_set = self.sets.get_mut(self.active_set).unwrap();
-            let mut binding_receipt = DescriptorBindingReceipt{ set_index: self.active_set, binding_index: target_set.bindings.len() };
-            let mut empty_slot: Option<usize> = None;
-            for (index, (_,_,_,f)) in target_set.bindings.iter().enumerate(){
-                if f.is_disconnected(){
-                    empty_slot = Some(index);
-                    break;
-                }
-            }
-            match empty_slot {
-                Some(i) => {
-                    debug!("Binding slot {} on set {} used for new binding", i, self.active_set);
-                    binding_receipt.binding_index = i;
-                    target_set.bindings[i] = (descriptor_type, stage, info, subscriber);
-                },
-                None => {
-                    debug!("Adding new binding slot for set {}", self.active_set);
-                    target_set.bindings.push((descriptor_type, stage, info, subscriber));
-                },
-            }
-            match target_set.layout {
-                Some(l) => {
-                    unsafe{
-                        debug!("Destroying Descriptor Set Layout {:?}", l);
-                        self.device.destroy_descriptor_set_layout(l, None);
-                        target_set.layout = None;
-                    }
-                },
-                None => {},
-            }
-            match self.pool {
-                Some(p) => {
-                    unsafe{
-                        debug!("Destroying Descriptor Pool {:?}", p);
-                        self.device.destroy_descriptor_pool(p, None);
-                        self.pool = None;
-                    }
-                },
-                None => {},
-            }
-            (binding_receipt, self.channel.0.clone())
-        }
-    }
-    impl Drop for DescriptorSystem{
-        fn drop(&mut self) {
-            match self.pool {
-                Some(p) => unsafe {debug!("Destroying Descriptor Pool {:?}", p); self.device.destroy_descriptor_pool(p, None);},
-                None => {},
-            }
-            for layout in self.sets.iter().map(|set| set.layout){
-            match layout {
-                Some(l) => unsafe {debug!("Destroying Descriptor Set Layout {:?}", l) ;self.device.destroy_descriptor_set_layout(l, None);},
-                None => {},
-            } 
-        }
-    }
-    }
 
     pub struct ComputePipeline{
         device: ash::Device,
@@ -1741,59 +1833,92 @@ pub mod core{
     }
     }
 
-    #[repr(C)]
-    pub struct Vertex{
-        pos: cgmath::Vector4<f32>
-    }
-    impl traits::IVulkanVertex for Vertex{
-        fn get_format(&self) {
 
-        }
-        fn get_pos(&self){
-        todo!()
-        }
-    }
-    struct AcceleratedObject<V: traits::IVulkanVertex>{
-        vertices: Vec<V>,
-        indecies: Vec<u32>,
-        //Offset, size
-        vertex_buffer_data: (vk::DeviceSize, vk::DeviceSize),
-        //Offset, size
-        index_buffer_data: (vk::DeviceSize, vk::DeviceSize),
-        blas_buffer_data: (vk::DeviceSize, vk::DeviceSize),
-        blas: vk::AccelerationStructureKHR,
-        shader_group: (Option<vk::ShaderModule>, Option<vk::ShaderModule>, Option<vk::ShaderModule>)
-    }
+}
 
-    pub struct ObjectStore<V: traits::IVulkanVertex, C: traits::ICommandPool>{
-        device: ash::Device,
-        cmd: (vk::CommandBuffer, C),
-        vertex_buffer: Buffer,
-        index_buffer: Buffer,
-        blas_buffer: Buffer,
-        scratch_buffer: Buffer,
-        gpu_mem: Memory,
-        cpu_mem: Memory,
-        objects: Vec<AcceleratedObject<V>>,
+#[cfg(test)]
+mod tests{
+    #[cfg(debug_assertions)]
+    fn get_vulkan_validate() -> bool{
+        println!("Validation Layers Active");
+        true
     }
-    impl<C: traits::ICommandPool,V: traits::IVulkanVertex> ObjectStore<V,C>{
-        pub fn new<T: IEngineData>(engine: &T, cmd_pool: C) -> ObjectStore<V,C>{
-            let device = engine.device();
-            let cmd = (cmd_pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0], cmd_pool);
-            let mut gpu_mem = Memory::new(engine, vk::MemoryPropertyFlags::DEVICE_LOCAL);
-            let vertex_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR).build());
-            let index_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR).build());
-            let blas_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR).build());
-            let scratch_buffer = gpu_mem.get_buffer(vk::BufferCreateInfo::builder().size(1024*1024).usage(vk::BufferUsageFlags::STORAGE_BUFFER).build());
-            let cpu_mem = Memory::new(engine, vk::MemoryPropertyFlags::HOST_COHERENT);
-            ObjectStore { device, cmd, vertex_buffer, index_buffer, blas_buffer, scratch_buffer, gpu_mem, cpu_mem, objects: vec![]}
-        }
-        #[doc = "We are just assuming a flat shaded object for right now"]
-        pub fn add_object(&mut self, object_vertices: Vec<V>){
-            let index_data: Vec<u32> = object_vertices.iter().enumerate().map(|(index, _)| index as u32).collect();
-            vk::AccelerationStructureCreateInfoKHR
-            
-        }
+    #[cfg(not(debug_assertions))]
+    fn get_vulkan_validate() -> bool {
+        println!("Validation Layers Inactive");
+        false
     }
+    
+    use crate::{core::{self, memory}, traits::IEngineData};
+    use ash::{self, vk};
+    use std::ffi::c_void;
+    use log::{self, debug};
 
+
+
+    #[test]
+    fn memory_round_trip_and_compute(){
+        pretty_env_logger::init();
+        let engine = core::WindowlessEngine::init(get_vulkan_validate());
+        let allocator = memory::AllocationDataStore::new(&engine);
+        let mut data:Vec<u32> = (0..100).collect();
+        let check: Vec<u32> = data.iter().map(|v| v + 100).collect();
+        let mut cpu_mem = allocator.allocate_typed::<u32>(allocator.get_type(vk::MemoryPropertyFlags::HOST_COHERENT), data.len()*3, 0 as *const c_void);
+        let mut gpu_mem = allocator.allocate_typed::<u32>(allocator.get_type(vk::MemoryPropertyFlags::DEVICE_LOCAL), data.len(), 0 as *const c_void);
+        let mut b1 = cpu_mem.get_buffer_typed::<u32>(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len() * 2 + 10, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+        let mut b2 = gpu_mem.get_buffer_typed::<u32>(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+        let shader = core::Shader::new(&engine, String::from(r#"
+        #version 460
+        #extension GL_KHR_vulkan_glsl : enable
+
+        layout(local_size_x = 1) in;
+
+        layout(set = 0, binding = 0) buffer Data {
+            uint[] values;
+        } data;
+
+        void main(){
+            data.values[gl_GlobalInvocationID.x] += 100;
+        }"#), shaderc::ShaderKind::Compute, "main", None);
+
+        let descriptor_store = memory::DescriptorDataStore::new(&engine);
+        let start_region = b1.get_region_typed::<u32>(data.len(), None);
+        cpu_mem.copy_from_ram_typed(data.as_ptr(), data.len(), &start_region);
+        let gpu_region = b2.get_region_typed::<u32>(data.len(), None);
+        let end_region = b1.get_region_typed::<u32>(data.len(), None);
+        let mut outline = core::memory::DescriptorSetOutline::new(vk::DescriptorSetLayoutCreateFlags::empty(), 0 as *const c_void, 0 as *const c_void);
+        outline.add_binding(gpu_region.get_binding(vk::ShaderStageFlags::COMPUTE));
+        let descriptor_stack = descriptor_store.get_descriptor_stack(&[outline], vk::DescriptorPoolCreateFlags::empty(), 0 as *const c_void, 0 as *const c_void);
+
+        let compute = core::ComputePipeline::new(&engine, &[], &[descriptor_stack.get_set_layout(0)], shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
+
+        let pool = core::CommandPool::new(&engine, vk::CommandPoolCreateInfo::builder().build());
+        let cmd = crate::traits::ICommandPool::get_command_buffers(&pool, vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+
+        unsafe{
+            let cmds = vec![cmd];
+            engine.device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().build()).unwrap();
+            start_region.copy_to_region(cmd, &gpu_region);
+            let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::NONE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
+            engine.device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            engine.device().cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_pipeline());
+            engine.device().cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_layout(), 0, &vec![descriptor_stack.get_set(0)], &[]);
+            engine.device().cmd_dispatch(cmd, data.len() as u32, 1, 1);
+            engine.device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            gpu_region.copy_to_region(cmd, &end_region);
+            engine.device().end_command_buffer(cmd).unwrap();
+            let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
+            engine.device().queue_submit(engine.queue_data().graphics.0, &[submit], vk::Fence::null()).unwrap();
+            engine.device().queue_wait_idle(engine.queue_data().graphics.0).unwrap();
+        }
+        
+
+
+
+        data = vec![100;data.len()];
+        cpu_mem.copy_to_ram_typed(&end_region, data.len(), data.as_mut_ptr());
+        debug!("{}", data.last().unwrap());
+        assert!(check == data);
+    }
+    
 }

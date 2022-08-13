@@ -7,6 +7,26 @@
         {
             "type": "lldb",
             "request": "launch",
+            "name": "Debug unit tests in library 'qforce'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=qforce"
+                ],
+                "filter": {
+                    "name": "qforce",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace"},
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
             "name": "Debug executable 'qswitch'",
             "cargo": {
                 "args": [
@@ -21,7 +41,66 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}",
-            "env": {"RUST_LOG":"trace"}
+            "env": {"RUST_LOG":"trace"},
         },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'qswitch'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=qswitch",
+                    "--package=qswitch"
+                ],
+                "filter": {
+                    "name": "qswitch",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace"},
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'ray-trace'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ray-trace",
+                    "--package=examples"
+                ],
+                "filter": {
+                    "name": "ray-trace",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace"},
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'ray-trace'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=ray-trace",
+                    "--package=examples"
+                ],
+                "filter": {
+                    "name": "ray-trace",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace"},
+        }
     ]
 }
