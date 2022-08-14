@@ -84,7 +84,7 @@ pub mod traits{
     }
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, unused)]
 pub mod core{
     use log::debug;
     use shaderc;
@@ -820,7 +820,7 @@ pub mod core{
                 self.instance.destroy_instance(None);
             }
             debug!("Engine Destroyed");
-    }
+        }
     }
     impl traits::IEngineData for WindowlessEngine {
         fn entry(&self) -> ash::Entry {
@@ -937,16 +937,16 @@ pub mod core{
                         let mem_type = &self.mem_props.memory_types[type_index];
                         let heap = &self.mem_props.memory_heaps[mem_type.heap_index as usize];
                         if mem_type.property_flags & properties != vk::MemoryPropertyFlags::empty() {
-                            debug!("Found compatible memory");
-                            debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.mem_props.memory_types[type_index].property_flags, self.mem_props.memory_types[type_index].heap_index);
+                            //debug!("Found compatible memory");
+                            //debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.mem_props.memory_types[type_index].property_flags, self.mem_props.memory_types[type_index].heap_index);
                             if self.mem_props.memory_types[selected_type].property_flags & properties != vk::MemoryPropertyFlags::empty() {
                                 if heap.size > self.mem_props.memory_heaps[self.mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
-                                    debug!("  Selecting Memory Type");
+                                    //debug!("  Selecting Memory Type");
                                     selected_type = type_index;
                                 }
                             }
                             else {
-                                debug!("Previously selected memory is of wrong type, selecting current memory type");
+                                //debug!("Previously selected memory is of wrong type, selecting current memory type");
                                 selected_type = type_index;
                             }
                         }
@@ -1692,11 +1692,11 @@ pub mod core{
                 }
                 let cmds = [cmd];
                 let submit = [vk::SubmitInfo::builder().command_buffers(&cmds).build()];
+                let fence = core::sync::Fence::new(engine, false);
                 unsafe{
-                    engine.device().queue_submit(engine.queue_data().graphics.0, &submit, vk::Fence::null()).unwrap();
-                    engine.device().queue_wait_idle(engine.queue_data().graphics.0).unwrap();
+                    engine.device().queue_submit(engine.queue_data().graphics.0, &submit, fence.get_fence()).unwrap();
                 }
-                
+                fence.wait();                
             }
     
         }
@@ -1711,6 +1711,56 @@ pub mod core{
     }
         }
     }
+    pub mod sync{
+        use ash::{self, vk};
+        use crate::core;
+        use crate::traits::IEngineData;
+        use log::debug;
+        pub struct Fence{
+            device: ash::Device,
+            fence: ash::vk::Fence,
+        }
+        impl Fence{
+            pub fn new<T: IEngineData>(engine: &T, start_signaled: bool) -> Fence{
+                let fence;
+                let c_info;
+                if start_signaled{
+                    c_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
+                }
+                else {
+                    c_info = vk::FenceCreateInfo::builder().build();
+                }
+
+                unsafe{
+                    fence = engine.device().create_fence(&c_info, None).expect("Could not create fence");
+                }
+                Fence{ device: engine.device(), fence }
+            }
+            pub fn wait(&self){
+                unsafe{
+                    self.device.wait_for_fences(&[self.fence], true, u64::max_value()).expect("Could not wait on fence");
+                }
+            }
+            pub fn wait_reset(&self){
+                self.wait();
+                unsafe{
+                    self.device.reset_fences(&[self.fence]).expect("Could not reset fence");
+                }
+            }
+            pub fn get_fence(&self) -> vk::Fence{
+                self.fence
+            }
+        }
+        impl Drop for Fence{
+            fn drop(&mut self) {
+                debug!("Destroying fence {:?}", self.fence);
+                unsafe{
+                    self.device.destroy_fence(self.fence, None);
+                }
+            }
+        }
+    }
+    
     pub struct CommandPool{
         device: ash::Device,
         command_pool: ash::vk::CommandPool,
