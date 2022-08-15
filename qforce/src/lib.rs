@@ -896,6 +896,7 @@ pub mod core{
             cursor: u64,
             
         }
+        #[derive(Clone)]
         pub struct BufferRegion{
             store: AllocationDataStore,
             buffer: vk::Buffer,
@@ -1009,7 +1010,7 @@ pub mod core{
                     },
                     None => {},
                 }
-    }
+        }
         }
         impl Allocation{
             pub fn get_buffer(&mut self, usage: vk::BufferUsageFlags, size: u64, queue_families: Option<&[u32]>, flags: vk::BufferCreateFlags, p_next: *const c_void) -> Buffer{
@@ -1436,24 +1437,26 @@ pub mod core{
         
         #[doc = "Must survive as long as the create blas store command buffer is executing"]
         pub struct BlasStoreCreateRecipt{
+            scratch_gpu_mem: Allocation,
             cpu_mem: Allocation,
             v_copy: Buffer,
             i_copy: Buffer,
             s_buffer: Buffer,
         }
-        pub struct BlasStore{
+        pub struct BlasStore<V>{
             allocator: AllocationDataStore,
             gpu_mem: Allocation,
             acc_loader: ash::extensions::khr::AccelerationStructure,
             vertex_buffer: Buffer,
             index_buffer: Buffer,
             blas_buffer: Buffer,
-            acceleration_structures: Vec<vk::AccelerationStructureKHR>,
+            constucted_structures: Vec<ConstructedBlas<V>>,
         }
-
+        #[derive(Clone)]
         enum BlasGeometeryType {
             Triangles(vk::GeometryFlagsKHR, vk::BuildAccelerationStructureFlagsKHR, *const c_void, *const c_void, *const c_void)
         }
+        #[derive(Clone)]
         pub struct BlasOutline<V>{
             vertex_data: Vec<V>,
             vertex_format: vk::Format,
@@ -1462,6 +1465,22 @@ pub mod core{
             geo_type: BlasGeometeryType,
         }
 
+        pub struct Tlas{
+            device: ash::Device,
+            tlas: vk::AccelerationStructureKHR,
+
+        }
+
+        pub struct ConstructedBlas<V>{
+            acc_structure: vk::AccelerationStructureKHR,
+            outline: BlasOutline<V>,
+            vertex_region: BufferRegion,
+            index_region: BufferRegion,
+            blas_region: BufferRegion,
+            size_info: vk::AccelerationStructureBuildGeometryInfoKHR,
+            acc_struct_address: vk::DeviceOrHostAddressConstKHR,
+        }
+        
         impl<V: Clone> BlasOutline<V>{
             pub fn new_triangle(vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32], transform: Option<vk::DeviceOrHostAddressConstKHR>, geo_flags: vk::GeometryFlagsKHR, build_flags: vk::BuildAccelerationStructureFlagsKHR, t_d_next: *const c_void, g_i_next: *const c_void, g_b_next: *const c_void) -> BlasOutline<V>{
                 BlasOutline { 
@@ -1576,22 +1595,24 @@ pub mod core{
                 acc_struct
             }
         }
-        impl BlasStore{
-            pub fn new<T: IEngineData, V: Clone>(engine: &T, cmd: vk::CommandBuffer, outlines: &[BlasOutline<V>]) -> (BlasStore, BlasStoreCreateRecipt){
+        impl<V: Clone> BlasStore<V>{
+            pub fn new<T: IEngineData>(engine: &T, cmd: vk::CommandBuffer, outlines: &[BlasOutline<V>]) -> (BlasStore<V>, BlasStoreCreateRecipt){
                 let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.instance(), &engine.device());
                 let mut requested_vertex_data_regions: Vec<u64> = Vec::with_capacity(outlines.len());
                 let mut requested_index_data_regions : Vec<u64> = Vec::with_capacity(outlines.len());
                 let mut requested_blas_regions : Vec<u64> = Vec::with_capacity(outlines.len());
                 let mut requested_scratch_regions : Vec<u64> = Vec::with_capacity(outlines.len());
+                let mut size_info: Vec<vk::AccelerationStructureBuildGeometryInfoKHR> = Vec::with_capacity(outlines.len());
                 //We need to pull sizing info from all of our blas outlines
                 for (index, outline) in outlines.iter().enumerate(){
-                    let (sizing_info, v_size, i_size) = outline.get_size_info(&acc_loader);
+                    let (sizing_info, v_size, i_size, sizing_build_info) = outline.get_size_info(&acc_loader);
                     let blas_size = sizing_info.acceleration_structure_size;
                     let scratch_size = sizing_info.build_scratch_size;
                     requested_vertex_data_regions.push(v_size);
                     requested_index_data_regions.push(i_size);
                     requested_blas_regions.push(blas_size);
                     requested_scratch_regions.push(scratch_size);
+                    size_info.push(sizing_info);
                     debug!("Sizing info for blas {}\n   Vertex data: {}\n   index_data: {}\n   blas_data: {}\n   scratch_data: {}", index, v_size, i_size, blas_size, scratch_size);
                 }
 
@@ -1631,6 +1652,7 @@ pub mod core{
                 let a_m_next = vk::MemoryAllocateInfo::builder().push_next(&mut alloc_flags).build().p_next;
 
                 let mut gpu_mem = allocator.allocate(allocator.get_type(vk::MemoryPropertyFlags::DEVICE_LOCAL), total_size + 1024*1024, a_m_next);
+                let mut scratch_gpu_mem = allocator.allocate(allocator.get_type(vk::MemoryPropertyFlags::DEVICE_LOCAL), scratch_size + 1024*1024, a_m_next);
                 let mut cpu_mem = allocator.allocate(allocator.get_type(vk::MemoryPropertyFlags::HOST_COHERENT), copy_size + 1024*1024, 0 as *const c_void);
 
                 let mut vertex_copy = cpu_mem.get_buffer(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC, vertex_size + 1024, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
@@ -1642,7 +1664,7 @@ pub mod core{
                 let mut vertex_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, vertex_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
                 let mut index_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, index_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
                 let mut blas_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, blas_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
-                let mut scratch_buffer = gpu_mem.get_buffer(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, scratch_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+                let mut scratch_buffer = scratch_gpu_mem.get_buffer(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, scratch_size, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
 
                 let vertex_regions = vertex_buffer.get_regions(&requested_vertex_data_regions, None);
                 let index_regions = index_buffer.get_regions(&requested_index_data_regions, None);
@@ -1667,20 +1689,30 @@ pub mod core{
                     acc_structs.push(outline.record_build(&acc_loader, cmd, &vertex_regions[index], &index_regions[index], &blas_regions[index], &scratch_regions[index]));
                 }
                 
+                let recipt = BlasStoreCreateRecipt{ scratch_gpu_mem, cpu_mem, v_copy: vertex_copy, i_copy: index_copy, s_buffer: scratch_buffer };
+                let mut constructed_blas_data = Vec::with_capacity(outlines.len());
+                for (index, acc_struct) in acc_structs.iter().enumerate(){
+                    let data = ConstructedBlas{ 
+                        acc_structure: *acc_struct, 
+                        outline: outlines[index].clone(), 
+                        vertex_region: vertex_regions[index].clone(), 
+                        index_region: index_regions[index].clone(), 
+                        blas_region: blas_regions[index].clone() };
+                    constructed_blas_data.push(data);
+                }
                 
-                
-                let recipt = BlasStoreCreateRecipt{ cpu_mem, v_copy: vertex_copy, i_copy: index_copy, s_buffer: scratch_buffer };
                 (BlasStore{ 
                     allocator, 
                     gpu_mem, 
                     vertex_buffer, 
                     index_buffer, 
                     blas_buffer,
-                    acceleration_structures: acc_structs,
-                    acc_loader, }, recipt)
+                    acc_loader,
+                    constucted_structures: constructed_blas_data},
+                recipt)
 
             }
-            pub fn new_immediate<T: IEngineData, V: Clone>(engine: &T, outlines: &[BlasOutline<V>]){
+            pub fn new_immediate<T: IEngineData>(engine: &T, outlines: &[BlasOutline<V>]){
                 let pool = core::CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.queue_data().graphics.1).build());
                 let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
                 unsafe{
@@ -1700,16 +1732,22 @@ pub mod core{
             }
     
         }
-        impl Drop for BlasStore{
+        impl<V> Drop for BlasStore<V>{
             fn drop(&mut self) {
                 unsafe{
-                    for acc in self.acceleration_structures.iter(){
-                        debug!("Destroying acceleration structure {:?}", *acc);
-                        self.acc_loader.destroy_acceleration_structure(*acc, None);
+                    for acc in self.constucted_structures.iter(){
+                        debug!("Destroying acceleration structure {:?}", (*acc).acc_structure);
+                        self.acc_loader.destroy_acceleration_structure((*acc).acc_structure, None);
                     }
                 }
     }
         }
+        impl Tlas{
+            pub fn new<V>(acc_structs: &[ConstructedBlas<V>]){
+                vk::AccelerationStructureBuildGeometryInfoKHR
+            }
+        }
+    
     }
     pub mod sync{
         use ash::{self, vk};
