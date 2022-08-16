@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 use ash::{self, vk};
 use qforce::core::{self, memory};
+use cgmath;
 
 
 #[cfg(debug_assertions)]
@@ -32,37 +33,13 @@ fn main(){
     ];
     let null = 0 as *const c_void;
     let i_data = [1,2,3];
-    let blas = [memory::BlasOutline::new_triangle(
-        &v_data, 
-        vk::Format::R32G32B32_SFLOAT, 
-        &i_data, 
-        None, 
-        vk::GeometryFlagsKHR::empty(), 
-        vk::BuildAccelerationStructureFlagsKHR::empty(), 
-        null, 
-        null, 
-        null)
-        ,
-        memory::BlasOutline::new_triangle(
-            &v_data, 
-            vk::Format::R32G32B32_SFLOAT, 
-            &i_data, 
-            None, 
-            vk::GeometryFlagsKHR::empty(), 
-            vk::BuildAccelerationStructureFlagsKHR::empty(), 
-            null, 
-            null, 
-            null),
-        memory::BlasOutline::new_triangle(
-            &v_data, 
-            vk::Format::R32G32B32_SFLOAT, 
-            &i_data, 
-            None, 
-            vk::GeometryFlagsKHR::empty(), 
-            vk::BuildAccelerationStructureFlagsKHR::empty(), 
-            null, 
-            null, 
-            null),];
-    
-    let blas_store = memory::BlasStore::new_immediate(&engine, &blas);    
+    let objects = [core::ray_tracing::acceleration_structures::ObjectOutline{ 
+        vertex_data: v_data.to_vec(), 
+        vertex_format: vk::Format::R32G32B32_SFLOAT, 
+        index_data: i_data.to_vec(), 
+        inital_pos_data: vec![cgmath::vec4(0.0, 0.0, 1.0, 0.0)],
+        sbt_hit_group_offset: 0, }];
+    let store = core::ray_tracing::acceleration_structures::ObjectStore::new(&engine, &objects);
+
+    let tlas = core::ray_tracing::acceleration_structures::Tlas::new_immediate::<core::WindowlessEngine,Vertex>(&engine, store.0.get_instance_count(), store.0.get_instance_address());
 }
