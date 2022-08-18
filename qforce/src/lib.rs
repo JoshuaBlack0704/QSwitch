@@ -358,6 +358,7 @@ pub mod core{
         swapchain:ash::vk::SwapchainKHR,
         swapchain_info: vk::SwapchainCreateInfoKHR,
         swapchain_images: Vec<vk::Image>,
+        surface_format: vk::Format,
     }
     impl Engine{
         pub fn init(validate: bool) -> (winit::event_loop::EventLoop<()>, winit::window::Window, Engine){
@@ -489,7 +490,7 @@ pub mod core{
                     transfer: (device.get_device_queue(queue_families[1], 0), queue_families[1]),
                     compute: (device.get_device_queue(queue_families[2], 0), queue_families[2] )};
                 let swapchain_loader = ash::extensions::khr::Swapchain::new(&instance, &device);
-                let (swapchain_info, swapchain, swapchain_images) = Engine::get_swapchain(&pdevice, &surface, &surface_loader, &swapchain_loader, None);
+                let (swapchain_info, swapchain, swapchain_images ,surface_format) = Engine::get_swapchain(&pdevice, &surface, &surface_loader, &swapchain_loader, None);
                 
                 engine = Engine{ entry, 
                     instance, 
@@ -504,6 +505,7 @@ pub mod core{
                     swapchain: swapchain, 
                     swapchain_info: swapchain_info, 
                     swapchain_images: swapchain_images,
+                    surface_format,
                     
                  }
             }
@@ -511,13 +513,14 @@ pub mod core{
             (event_loop, window, engine)
         }
         pub fn refresh_swapchain(&mut self){
-            let (swapchain_info, swapchain, swapchain_images) = Engine::get_swapchain(&&self.physical_device, &self.surface, &self.surface_loader, &self.swapchain_loader, Some(self.swapchain));
+            let (swapchain_info, swapchain, swapchain_images, format) = Engine::get_swapchain(&&self.physical_device, &self.surface, &self.surface_loader, &self.swapchain_loader, Some(self.swapchain));
             self.swapchain = swapchain;
             self.swapchain_info = swapchain_info;
             self.swapchain_images = swapchain_images;
+            self.surface_format = format;
             debug!("Refreshed swapchain to size: {} x {}", swapchain_info.image_extent.width, swapchain_info.image_extent.height);
         }
-        pub fn get_swapchain(physical_device: &vk::PhysicalDevice, surface: &vk::SurfaceKHR, surface_loader: &ash::extensions::khr::Surface, swapchain_loader: &ash::extensions::khr::Swapchain, old_swapchain: Option<ash::vk::SwapchainKHR>)-> (ash::vk::SwapchainCreateInfoKHR, ash::vk::SwapchainKHR, Vec<vk::Image>){
+        pub fn get_swapchain(physical_device: &vk::PhysicalDevice, surface: &vk::SurfaceKHR, surface_loader: &ash::extensions::khr::Surface, swapchain_loader: &ash::extensions::khr::Swapchain, old_swapchain: Option<ash::vk::SwapchainKHR>)-> (ash::vk::SwapchainCreateInfoKHR, ash::vk::SwapchainKHR, Vec<vk::Image>, vk::Format){
             unsafe {
                 
                 //clearing the swapchain
@@ -525,10 +528,11 @@ pub mod core{
                     Some(swapchain) => {swapchain_loader.destroy_swapchain(swapchain, None);},
                     None => {}
                 }
-    
-                let surface_format = surface_loader
-                    .get_physical_device_surface_formats(*physical_device, *surface)
-                    .unwrap()[0];
+                let possible_formats = surface_loader
+                .get_physical_device_surface_formats(*physical_device, *surface)
+                .unwrap();
+                debug!("{:?}", possible_formats);
+                let surface_format = possible_formats[0];
     
                 let surface_capabilities = surface_loader
                     .get_physical_device_surface_capabilities(*physical_device, *surface)
@@ -575,9 +579,12 @@ pub mod core{
                 let swapchain = swapchain_loader
                     .create_swapchain(&swapchain_create_info, None);
                 let images = swapchain_loader.get_swapchain_images(swapchain.unwrap()).unwrap();
-                (swapchain_create_info.build(), swapchain.unwrap(), images)
+                (swapchain_create_info.build(), swapchain.unwrap(), images, surface_format.format)
         }
     }
+        pub fn get_swapchain_images(&self) -> &Vec<vk::Image> {
+            &self.swapchain_images
+        }
     }
     impl Clone for Engine{
 
@@ -595,6 +602,7 @@ pub mod core{
             swapchain: self.swapchain.clone(), 
             swapchain_info: self.swapchain_info.clone(), 
             swapchain_images: self.swapchain_images.clone(),
+            surface_format: self.surface_format.clone(),
         }
         }
     }
@@ -1932,7 +1940,7 @@ pub mod core{
             unsafe{
                 self.acc_loader.destroy_acceleration_structure(self.tlas, None);
             }
-}           
+    }           
     }
     #[derive(Clone)]
     pub struct ObjectOutline<V>{
@@ -2070,8 +2078,8 @@ pub mod core{
         raytracing_loader: ash::extensions::khr::RayTracingPipeline,
         raytracing_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
         sbt_outline: SbtOutline,
-        layout: vk::PipelineLayout,
-        pipeline: vk::Pipeline,
+        pub layout: vk::PipelineLayout,
+        pub pipeline: vk::Pipeline,
         gpu_mem: Allocation,
         shaders_buffer: Buffer,
         shader_regions: (BufferRegion, BufferRegion, BufferRegion),
@@ -2326,6 +2334,30 @@ pub mod core{
                     self.device.destroy_fence(self.fence, None);
                 }
             }
+        }
+    
+        pub struct Semaphore{
+            device: ash::Device,
+            pub semaphore: vk::Semaphore,
+        }
+        impl Semaphore{
+            pub fn new<T: IEngineData>(engine: &T) -> Semaphore {
+                let device = engine.device();
+                let c_info = vk::SemaphoreCreateInfo::builder().build();
+                let semaphore = unsafe{device.create_semaphore(&c_info, None).expect("Could not create semaphore")};
+                debug!("Created semaphore {:?}", semaphore);
+
+                Semaphore{
+                    device,
+                    semaphore,
+                }
+            }
+        }
+        impl Drop for Semaphore{
+            fn drop(&mut self) {
+                debug!("Destroying semaphore {:?}", self.semaphore);
+                unsafe{self.device.destroy_semaphore(self.semaphore, None)};
+    }
         }
     }
     
