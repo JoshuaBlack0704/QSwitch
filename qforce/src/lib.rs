@@ -461,13 +461,17 @@ pub mod core{
                     #[cfg(any(target_os = "macos", target_os = "ios"))]
                         KhrPortabilitySubsetFn::name().as_ptr(),
                 ];
+                let mut ray_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::builder().ray_tracing_pipeline(true);
+                let mut acc_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder().acceleration_structure(true);
                 let mut features13 = vk::PhysicalDeviceVulkan13Features::builder().dynamic_rendering(true).build();
                 let mut features12 = vk::PhysicalDeviceVulkan12Features::builder().timeline_semaphore(true).buffer_device_address(true).build();
                 let mut features11 = vk::PhysicalDeviceVulkan11Features::builder().build();
                 let mut features = vk::PhysicalDeviceFeatures2::builder()
                     .push_next(&mut features11)
                     .push_next(&mut features12)
-                    .push_next(&mut features13);
+                    .push_next(&mut features13)
+                    .push_next(&mut acc_features)
+                    .push_next(&mut ray_features);
                 let priorities = [1.0];
 
                 let (queue_infos, queue_families) = get_queue_info(instance.clone(), pdevice, &priorities);
@@ -852,7 +856,7 @@ pub mod core{
         }
 
     }
-   
+
     pub mod memory{
     use std::{ffi::c_void};
     use log::{self, debug};
@@ -863,8 +867,9 @@ pub mod core{
 
     #[derive(Clone)]
         pub enum DescriptorWriteType{
-            Buffer(vk::DescriptorBufferInfo),
-            Image(vk::DescriptorImageInfo),
+            Buffer([vk::DescriptorBufferInfo;1]),
+            Image([vk::DescriptorImageInfo;1]),
+            AccelerationStructure(Option<Box<[vk::AccelerationStructureKHR;1]>>, vk::WriteDescriptorSetAccelerationStructureKHR)
         }
 
         #[doc = "Safe clonable structure that provides helper functions and data needed to resolve different requirements"]
@@ -1186,7 +1191,10 @@ pub mod core{
                     panic!("No identifiable descriptor type")
                 }
                 
-                write = DescriptorWriteType::Buffer(vk::DescriptorBufferInfo::builder().buffer(self.buffer).offset(self.buffer_offset).range(self.size).build());
+                write = DescriptorWriteType::Buffer([vk::DescriptorBufferInfo::builder()
+                .buffer(self.buffer)
+                .offset(self.buffer_offset)
+                .range(self.size).build()]);
 
                 (ty, count, stages, write)
 
@@ -1341,36 +1349,44 @@ pub mod core{
                 }
 
                 let mut writes:Vec<vk::WriteDescriptorSet> = Vec::with_capacity(outlines.len()*2);
-                let mut b_infos:Vec<[vk::DescriptorBufferInfo;1]> = Vec::with_capacity(outlines.len()*2);
-                let mut i_infos:Vec<[vk::DescriptorImageInfo;1]> = Vec::with_capacity(outlines.len()*2);
 
                 for (index,set) in allocated_sets.iter().enumerate(){
-                    let outline = outlines.get(index).unwrap().clone();
+                    let mut outline = outlines.get(index).unwrap().clone();
                     let layout = layouts.get(index).unwrap().clone();
 
                     for binding in outline.bindings.iter(){
                         match binding.1 {
                             DescriptorWriteType::Buffer(b) => {
-                                b_infos.push([b]);
                                 let write = vk::WriteDescriptorSet::builder()
                                 .dst_set(*set)
                                 .dst_array_element(0)
                                 .dst_binding(binding.0.binding)
                                 .descriptor_type(binding.0.descriptor_type)
-                                .buffer_info(b_infos.last().unwrap())
+                                .buffer_info(&b)
                                 .build();
                                 debug!("Generated descriptor set write {:?}", write);
                                 writes.push(write);
                             },
                             DescriptorWriteType::Image(i) => {
-                                i_infos.push([i]);
                                 let write = vk::WriteDescriptorSet::builder()
                                 .dst_set(*set)
                                 .dst_array_element(0)
                                 .dst_binding(binding.0.binding)
                                 .descriptor_type(binding.0.descriptor_type)
-                                .image_info(i_infos.last().unwrap())
+                                .image_info(&i)
                                 .build();
+                                debug!("Generated descriptor set write {:?}", write);
+                                writes.push(write);
+                            },
+                            DescriptorWriteType::AccelerationStructure(_,mut acc) => {
+                                let mut write = vk::WriteDescriptorSet::builder()
+                                .dst_set(*set)
+                                .dst_array_element(0)
+                                .dst_binding(binding.0.binding)
+                                .descriptor_type(binding.0.descriptor_type)
+                                .push_next(&mut acc)
+                                .build();
+                                write.descriptor_count = 1;
                                 debug!("Generated descriptor set write {:?}", write);
                                 writes.push(write);
                             },
@@ -1425,6 +1441,7 @@ pub mod core{
             pub fn new(c_l_flags: vk::DescriptorSetLayoutCreateFlags, c_l_next: *const c_void, a_s_next: *const c_void) -> DescriptorSetOutline{
                 DescriptorSetOutline { create_set_layout_flags: c_l_flags, create_set_layout_next: c_l_next, allocate_set_next: a_s_next, bindings: vec![] }
             }
+            //                                                            ty, count, stages              write
             pub fn add_binding(&mut self, bindable_data: (vk::DescriptorType, u32, vk::ShaderStageFlags, DescriptorWriteType)) -> u32{
                 let (ty, count, stage, write) = bindable_data;
                 let binding = vk::DescriptorSetLayoutBinding::builder()
@@ -1453,10 +1470,12 @@ pub mod core{
         use crate::core::Shader;
         use std::ffi::{c_void, CString};
         use cgmath;
-        use ash::vk::{self, Packed24_8};
+        use ash::vk::{self, Packed24_8, PipelineLayoutCreateInfo};
         use log::debug;
 
         use crate::{core::{self, memory::{Allocation, Buffer, AllocationDataStore, BufferRegion}, CommandPool, sync::{self, Fence}}, traits::{IEngineData, ICommandPool}};
+
+        use super::memory::DescriptorWriteType;
 
         #[doc = "Must survive as long as the create blas store command buffer is executing"]
     pub struct BlasStoreCreateRecipt{
@@ -1897,6 +1916,15 @@ pub mod core{
             fence.wait();
             data.0                
         }
+        pub fn get_binding(&self, stages: vk::ShaderStageFlags) -> (vk::DescriptorType, u32, vk::ShaderStageFlags, DescriptorWriteType){
+            let descriptor_type = vk::DescriptorType::ACCELERATION_STRUCTURE_KHR;
+            let count = 1;
+            let tlas = Box::new([self.tlas]);
+            let write = vk::WriteDescriptorSetAccelerationStructureKHR::builder()
+            .acceleration_structures(&(*tlas))
+            .build();
+            (descriptor_type, count, stages, DescriptorWriteType::AccelerationStructure(Some(tlas), write))
+        }
     }
     impl Drop for Tlas{
         fn drop(&mut self) {
@@ -2033,60 +2061,223 @@ pub mod core{
             SbtOutline{ ray_gen, misses: misses.to_vec(), hit_groups: hit_groups.to_vec() }
         }
     }
+    pub struct RayTracingPipelineCreateRecipt{
+        cpu_mem: Allocation,
+        cpu_buffer: Buffer,
+    }
     pub struct RayTracingPipeline{
         device: ash::Device,
         raytracing_loader: ash::extensions::khr::RayTracingPipeline,
+        raytracing_props: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
         sbt_outline: SbtOutline,
+        layout: vk::PipelineLayout,
         pipeline: vk::Pipeline,
         gpu_mem: Allocation,
         shaders_buffer: Buffer,
-        shaders_region: BufferRegion,
+        shader_regions: (BufferRegion, BufferRegion, BufferRegion),
+        pub shader_addresses: (vk::StridedDeviceAddressRegionKHR,vk::StridedDeviceAddressRegionKHR,vk::StridedDeviceAddressRegionKHR),
     }
     impl RayTracingPipeline{
-        pub fn new<T:IEngineData>(engine: &T, sbt_outline: SbtOutline){
+        pub fn new<T:IEngineData>(engine: &T, cmd: vk::CommandBuffer, sbt_outline: SbtOutline, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]) -> (RayTracingPipeline, RayTracingPipelineCreateRecipt) {
             let device = engine.device();
             let raytracing_loader = ash::extensions::khr::RayTracingPipeline::new(&engine.instance(), &device);
-            
+            let mut raytracing_props = vk::PhysicalDeviceRayTracingPipelinePropertiesKHR::builder().build();
+            let mut default_props = vk::PhysicalDeviceProperties2::builder().push_next(&mut raytracing_props);
+            unsafe{
+                engine.instance().get_physical_device_properties2(engine.physical_device(), &mut default_props);
+            }
+            debug!("Got ray tracing props: {:?}", raytracing_props);
+
             let mut stages = vec![];
             let mut groups = vec![];
             
             stages.push(sbt_outline.ray_gen);
             groups.push(vk::RayTracingShaderGroupCreateInfoKHR::builder()
             .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-            .general_shader(0));
+            .general_shader(0)
+            .closest_hit_shader(u32::max_value())
+            .any_hit_shader(u32::max_value())
+            .intersection_shader(u32::max_value()).build());
+            debug!("Added ray gen shader at index 0");
             for miss in sbt_outline.misses.iter(){
                 groups.push(vk::RayTracingShaderGroupCreateInfoKHR::builder()
                 .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-                .general_shader(stages.len() as u32));
+                .general_shader(stages.len() as u32)
+                .closest_hit_shader(u32::max_value())
+                .any_hit_shader(u32::max_value())
+                .intersection_shader(u32::max_value()).build());
+                debug!("Added miss shader at index {}", stages.len());
                 stages.push(*miss);
             }
             for (closest_hit, any_hit, intersection) in sbt_outline.hit_groups.iter(){
-                let mut group_builder = vk::RayTracingShaderGroupCreateInfoKHR::builder().ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP);
+                let mut group_builder = vk::RayTracingShaderGroupCreateInfoKHR::builder()
+                .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP);
+                group_builder = group_builder.general_shader(u32::MAX);
                 match closest_hit {
                     Some(s) => {
                         group_builder = group_builder.closest_hit_shader(stages.len() as u32);
+                        debug!("Added closest_hit shader at index {}", stages.len());
                         stages.push(*s);
                     },
-                    None => {},
+                    None =>  {group_builder = group_builder.closest_hit_shader(u32::MAX);},
                 }
                 match any_hit {
                     Some(s) => {
                         group_builder = group_builder.any_hit_shader(stages.len() as u32);
+                        debug!("Added any_hit shader at index {}", stages.len());
+                        
                         stages.push(*s);
                     },
-                    None => {},
+                    None => {group_builder =group_builder.any_hit_shader(u32::MAX);},
                 }
                 match intersection {
                     Some(s) => {
                         group_builder = group_builder.intersection_shader(stages.len() as u32);
+                        debug!("Added intersection shader at index {}", stages.len());
                         stages.push(*s);
                     },
-                    None => {},
+                    None => {group_builder =group_builder.intersection_shader(u32::MAX);},
                 }
+                groups.push(group_builder.build());
             }
+            let lc_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&set_layouts)
+            .push_constant_ranges(&push_constant_ranges)
+            .build();
+            let layout = unsafe{device.create_pipeline_layout(&lc_info, None).expect("Could not create pipeline layout")};
+            debug!("Built ray tracing pipeline layout {:?}", layout);
+            let c_info = [vk::RayTracingPipelineCreateInfoKHR::builder()
+            .stages(&stages)
+            .groups(&groups)
+            .max_pipeline_ray_recursion_depth(2)
+            .layout(layout)
+            .build()];
+            let pipeline = unsafe{raytracing_loader.create_ray_tracing_pipelines(
+                vk::DeferredOperationKHR::null(), 
+                vk::PipelineCache::null(), 
+                &c_info, 
+                None).expect("Could not create ray tracing pipeline")[0]};
+            debug!("Built ray tracing pipeline {:?}", layout);
+            
+            let handle_data;
+
+            let shaders = unsafe {
+                handle_data = raytracing_loader.get_ray_tracing_shader_group_handles(pipeline, 0, groups.len() as u32, groups.len() * raytracing_props.shader_group_handle_size as usize).expect("Could not get shader handles")
+            };
+
+            let ray_gen_size = (raytracing_props.shader_group_handle_size * 1) as u64;
+            let miss_size = (raytracing_props.shader_group_handle_size * sbt_outline.misses.len() as u32) as u64;
+            let hit_group_size = (raytracing_props.shader_group_handle_size * sbt_outline.hit_groups.len() as u32) as u64;
+
+            let mut shaders: Vec<Vec<u8>> = vec![];
+            for index in 0..(handle_data.len()/raytracing_props.shader_group_handle_size as usize){
+                let shader_count = index*raytracing_props.shader_group_handle_size as usize;
+                let shader = &handle_data[shader_count..shader_count+raytracing_props.shader_group_handle_size as usize];
+                shaders.push(shader.to_vec());
+            }
+            let ray_gen_handle = shaders[0].to_vec();
+            let miss_handles_seperated = shaders[1..sbt_outline.misses.len()+1 as usize].to_vec();
+            let hit_handles_seperated = shaders[sbt_outline.misses.len()+1..shaders.len()].to_vec();
+            let mut miss_handles = vec![];
+            let mut hit_handles = vec![];
+            for sep in miss_handles_seperated.iter(){
+                miss_handles.extend_from_slice(&sep);
+            }
+            for sep in hit_handles_seperated.iter(){
+                hit_handles.extend_from_slice(&sep);
+            }
+
+
+            let mut alloc_flags = vk::MemoryAllocateFlagsInfo::builder()
+            .flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS)
+            .build();
+            let a_m_next = vk::MemoryAllocateInfo::builder().push_next(&mut alloc_flags).build().p_next;
+            let allocator = AllocationDataStore::new(engine);
+            let mut gpu_mem = allocator.allocate_typed::<u8>(allocator.get_type(vk::MemoryPropertyFlags::DEVICE_LOCAL), 1024, a_m_next);
+            let mut cpu_mem = allocator.allocate_typed::<u8>(allocator.get_type(vk::MemoryPropertyFlags::HOST_COHERENT), 1024, a_m_next);
+            let mut handles_copy = cpu_mem.get_buffer_typed::<u8>(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC, handle_data.len()*3, None, vk::BufferCreateFlags::empty(), 0 as *const c_void);
+            let mut handles_buffer = gpu_mem.get_buffer_typed::<u8>(
+                vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR | vk::BufferUsageFlags::TRANSFER_DST, 
+                handle_data.len()*3, 
+                None, 
+                vk::BufferCreateFlags::empty(), 
+                0 as *const c_void);
+
+            let ray_gen_copy_region = handles_copy.get_region(ray_gen_handle.len() as u64, None);
+            let misses_copy_region = handles_copy.get_region(miss_handles.len() as u64, None);
+            let hits_copy_region = handles_copy.get_region(hit_handles.len() as u64, None);
+            
+            let ray_gen_region = handles_buffer.get_region(ray_gen_handle.len() as u64, Some((false, raytracing_props.shader_group_base_alignment.into())));
+            let misses_region = handles_buffer.get_region(miss_handles.len() as u64, Some((false, raytracing_props.shader_group_base_alignment.into())));
+            let hits_region = handles_buffer.get_region(hit_handles.len() as u64, Some((false, raytracing_props.shader_group_base_alignment.into())));
+
+            ray_gen_copy_region.copy_to_region(cmd, &ray_gen_region);
+            misses_copy_region.copy_to_region(cmd, &misses_region);
+            hits_copy_region.copy_to_region(cmd, &hits_region);
+
+            let ray_gen_strided = vk::StridedDeviceAddressRegionKHR::builder()
+            .device_address(unsafe{ray_gen_region.get_device_address().device_address as u64})
+            .stride(raytracing_props.shader_group_handle_size as u64)
+            .size((raytracing_props.shader_group_handle_size*1) as u64)
+            .build();
+            let miss_strided = vk::StridedDeviceAddressRegionKHR::builder()
+            .device_address(unsafe{misses_region.get_device_address().device_address as u64})
+            .stride(raytracing_props.shader_group_handle_size as u64)
+            .size((raytracing_props.shader_group_handle_size*sbt_outline.misses.len() as u32) as u64)
+            .build();
+            let hit_strided = vk::StridedDeviceAddressRegionKHR::builder()
+            .device_address(unsafe{hits_region.get_device_address().device_address as u64})
+            .stride(raytracing_props.shader_group_handle_size as u64)
+            .size((raytracing_props.shader_group_handle_size*sbt_outline.hit_groups.len() as u32) as u64)
+            .build();
+            
+
+            (RayTracingPipeline{ 
+                device, 
+                raytracing_loader, 
+                raytracing_props, 
+                sbt_outline, 
+                layout, 
+                pipeline, 
+                gpu_mem, 
+                shaders_buffer: handles_buffer, 
+                shader_regions: (ray_gen_region, misses_region, hits_region),
+                shader_addresses: (ray_gen_strided, miss_strided, hit_strided), },
+            RayTracingPipelineCreateRecipt{ cpu_mem, cpu_buffer: handles_copy })
+
+        }
+        pub fn new_immediate<T: IEngineData>(engine: &T, sbt_outline: SbtOutline, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]) -> RayTracingPipeline{
+            let pool = core::CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.queue_data().graphics.1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            unsafe{
+                engine.device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().build()).unwrap();
+            }
+            let data = RayTracingPipeline::new(engine, cmd, sbt_outline, set_layouts, push_constant_ranges);
+            unsafe{
+                engine.device().end_command_buffer(cmd).unwrap();
+            }
+            let cmds = [cmd];
+            let submit = [vk::SubmitInfo::builder().command_buffers(&cmds).build()];
+            let fence = core::sync::Fence::new(engine, false);
+            unsafe{
+                engine.device().queue_submit(engine.queue_data().graphics.0, &submit, fence.get_fence()).unwrap();
+            }
+            fence.wait();    
+            data.0
+        }
+        
+    }
+    impl Drop for RayTracingPipeline{
+        fn drop(&mut self) {
+        debug!("Destroying ray tracing pipeline {:?}", self.pipeline);
+        debug!("Destroying ray tracing pipeline layout {:?}", self.layout);
+        unsafe{
+            self.device.destroy_pipeline_layout(self.layout, None);
+            self.device.destroy_pipeline(self.pipeline, None);
         }
     }
-    }
+    }        
+}
     
     pub mod sync{
         use ash::{self, vk};

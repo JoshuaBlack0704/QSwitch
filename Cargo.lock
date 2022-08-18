@@ -329,6 +329,7 @@ dependencies = [
  "cgmath",
  "pretty_env_logger",
  "qforce",
+ "shaderc",
  "winit",
 ]
 

@@ -80,7 +80,7 @@
             },
             "args": [],
             "cwd": "${workspaceFolder}",
-            "env": {"RUST_LOG":"trace"},
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
         },
         {
             "type": "lldb",
