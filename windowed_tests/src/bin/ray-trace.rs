@@ -1,8 +1,9 @@
-use std::ffi::{c_void, CString};
+use std::{ffi::{c_void, CString}, sync::Arc, rc::Rc, cell::RefCell};
 use ash::{self, vk};
 use qforce::{core::{self}, traits::{IWindowedEngineData, IEngineData, ICommandPool}};
 use cgmath;
 use shaderc;
+use time::Instant;
 
 
 #[cfg(debug_assertions)]
@@ -99,16 +100,33 @@ fn main(){
 
 
     let v_data = [
-        Vertex{pos: [ 1.0,-1.0,0.0]},
-        Vertex{pos: [ 0.0, 1.0,0.0]},
-        Vertex{pos: [-1.0,-1.0,0.0]},
+        Vertex{pos: [ 0.0, 1.0, 0.0]}, //top
+        Vertex{pos: [ -1.0, -1.0,0.5]},  //left
+        Vertex{pos: [1.0,-1.0,0.5]}, //right
+        Vertex{pos: [0.0, -1.0, -0.5]}, //front  
     ];
-    let i_data = [1,2,3];
+    let i_data = [
+        3, 2, 0, //fr
+        1, 0, 2, //back
+        1, 3, 0, //fl
+        1,2,3 ]; //bottom
+
+    let mut positions = vec![cgmath::vec4(0.0, 0.0, 2.0, 1.0)];
+
+    for x in -10..10{
+        for y in -10..10{
+            for z in 10..500{
+                //positions.push(cgmath::vec4(x as f32*3.0, y as f32*3.0, z as f32*2.0, 1.0));
+                //println!("{:?}", positions.last().unwrap());
+            }
+        }
+    }
+
     let objects = [core::ray_tracing::ObjectOutline{ 
         vertex_data: v_data.to_vec(), 
         vertex_format: vk::Format::R32G32B32_SFLOAT, 
         index_data: i_data.to_vec(), 
-        inital_pos_data: vec![cgmath::vec4(0.0, 0.0, 1.0, 0.0)],
+        inital_pos_data: positions,
         sbt_hit_group_offset: 0, }];
     let store = core::ray_tracing::ObjectStore::new(&engine, &objects);
 
@@ -140,7 +158,8 @@ fn main(){
 
     struct hitPayload
     {
-    vec3 hitValue;
+        bool hit;
+        vec3 hitValue;
     };
 
     layout(location = 0) rayPayloadEXT hitPayload prd;
@@ -151,24 +170,27 @@ fn main(){
             const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
             vec2 d = inUV * 2.0 - 1.0;
             vec4 origin    = vec4(0, 0, -1, 1);
-            vec4 target    = vec4(d.x, d.y, 0, 1);
-            vec4 direction = vec4(normalize(target.xyz), 0);
+            vec4 target    = vec4(d.x, -d.y, 0, 1);
+            vec4 direction = vec4(normalize(target.xyz - origin.xyz), 0);
             uint  rayFlags = gl_RayFlagsOpaqueEXT;
             float tMin     = 0.001;
-            float tMax     = 10000.0;
-            // traceRayEXT(topLevelAS, // acceleration structure
-            //     rayFlags,       // rayFlags
-            //     0xFF,           // cullMask
-            //     0,              // sbtRecordOffset
-            //     0,              // sbtRecordStride
-            //     0,              // missIndex
-            //     origin.xyz,     // ray origin
-            //     tMin,           // ray min range
-            //     direction.xyz,  // ray direction
-            //     tMax,           // ray max range
-            //     0               // payload (location = 0)
-        //);
-            imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(1.0,0.0,0.0,1.0));
+            float tMax     = 100000.0;
+            traceRayEXT(topLevelAS, // acceleration structure
+                rayFlags,       // rayFlags
+                0xFF,           // cullMask
+                0,              // sbtRecordOffset
+                0,              // sbtRecordStride
+                0,              // missIndex
+                origin.xyz,     // ray origin
+                tMin,           // ray min range
+                direction.xyz,  // ray direction
+                tMax,           // ray max range
+                0               // payload (location = 0)
+        );
+            if (d.x > 0 && prd.hit){
+                prd.hitValue = prd.hitValue * 0.5;
+            }
+            imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
         }
     
     "#), shaderc::ShaderKind::RayGeneration, "main", Some(&options));
@@ -177,22 +199,36 @@ fn main(){
     #extension GL_EXT_ray_tracing : require
     #extension GL_EXT_nonuniform_qualifier : enable
     
-    layout(location = 0) rayPayloadInEXT vec3 hitValue;
+    struct hitPayload
+    {
+        bool hit;
+        vec3 hitValue;
+    };
+
+    layout(location = 0) rayPayloadInEXT hitPayload hitdata;
     hitAttributeEXT vec3 attribs;
     
     void main()
     {
-      hitValue = vec3(0.2, 0.5, 0.5);
+        hitdata.hit = true;
+        hitdata.hitValue = vec3(0.2, 0.5, 0.5);
     }"#), shaderc::ShaderKind::ClosestHit, "main", Some(&options));
     let miss = core::Shader::new(&engine, String::from(r#"
     #version 460
     #extension GL_EXT_ray_tracing : require
     
-    layout(location = 0) rayPayloadInEXT vec3 hitValue;
+    struct hitPayload
+    {
+        bool hit;
+        vec3 hitValue;
+    };
+
+    layout(location = 0) rayPayloadInEXT hitPayload hitdata;
     
     void main()
     {
-        hitValue = vec3(0.0, 0.1, 0.3);
+        hitdata.hit = false;
+        hitdata.hitValue = vec3(0.0, 0.1, 0.3);
     }"#), shaderc::ShaderKind::Miss, "main", Some(&options));
 
     let main = CString::new("main").unwrap();
@@ -217,7 +253,7 @@ fn main(){
 
 
 
-
+    let mut instant = Box::new(Instant::now());
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
         match event {
@@ -227,6 +263,7 @@ fn main(){
                     winit::event::WindowEvent::CloseRequested => {
                     *control_flow = winit::event_loop::ControlFlow::Exit;
                         loop_complete.wait();
+                        unsafe{engine.device().device_wait_idle().expect("Device could not wait");}
                         drop(&store);
                         drop(&tlas);
                         drop(&d_stack);
@@ -254,6 +291,8 @@ fn main(){
             winit::event::Event::Resumed => {},
             winit::event::Event::MainEventsCleared => {
                 loop_complete.wait_reset();
+                println!("Time elapsed last frame {} us", instant.elapsed().whole_microseconds());
+                *instant = Instant::now();
                 let index = unsafe{[engine.swapchain_loader().acquire_next_image(engine.swapchain(), u64::MAX, aquire_semaphore.semaphore, vk::Fence::null()).expect("Could not get next image index").0]};
                 let swapchain = [engine.swapchain()];
                 let device = engine.device();

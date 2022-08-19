@@ -90,6 +90,7 @@ pub mod core{
     use shaderc;
     use ash;
     use ash::{vk, Entry};
+    use winit::dpi::PhysicalSize;
     use std::{string::String, ffi::CStr, os::raw::c_char};
     use std::borrow::{Cow, Borrow};
     use crate::traits::{self, IEngineData};
@@ -367,6 +368,7 @@ pub mod core{
             let event_loop = winit::event_loop::EventLoop::new();
             let window = winit::window::WindowBuilder::new()
                 .with_title("Ray tracer!")
+                .with_inner_size(PhysicalSize::new(1000,1000))
                 .build(&event_loop)
                 .unwrap();
 
@@ -434,12 +436,12 @@ pub mod core{
                     .message_severity(
                         vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
                             | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
-                            | vk::DebugUtilsMessageSeverityFlagsEXT::INFO,
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
                     )
                     .message_type(
                         vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
                             | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                     )
                     .pfn_user_callback(Some(vulkan_debug_callback));
 
@@ -1362,15 +1364,15 @@ pub mod core{
                     let mut outline = outlines.get(index).unwrap().clone();
                     let layout = layouts.get(index).unwrap().clone();
 
-                    for binding in outline.bindings.iter(){
-                        match binding.1 {
+                    for binding in outline.bindings.iter_mut(){
+                        match &mut binding.1 {
                             DescriptorWriteType::Buffer(b) => {
                                 let write = vk::WriteDescriptorSet::builder()
                                 .dst_set(*set)
                                 .dst_array_element(0)
                                 .dst_binding(binding.0.binding)
                                 .descriptor_type(binding.0.descriptor_type)
-                                .buffer_info(&b)
+                                .buffer_info(b)
                                 .build();
                                 debug!("Generated descriptor set write {:?}", write);
                                 writes.push(write);
@@ -1381,19 +1383,21 @@ pub mod core{
                                 .dst_array_element(0)
                                 .dst_binding(binding.0.binding)
                                 .descriptor_type(binding.0.descriptor_type)
-                                .image_info(&i)
+                                .image_info(i)
                                 .build();
                                 debug!("Generated descriptor set write {:?}", write);
                                 writes.push(write);
                             },
-                            DescriptorWriteType::AccelerationStructure(_,mut acc) => {
+                            DescriptorWriteType::AccelerationStructure(data, acc) => {
                                 let mut write = vk::WriteDescriptorSet::builder()
                                 .dst_set(*set)
                                 .dst_array_element(0)
                                 .dst_binding(binding.0.binding)
                                 .descriptor_type(binding.0.descriptor_type)
-                                .push_next(&mut acc)
+                                .push_next(acc)
                                 .build();
+                                println!("Acc_struct write {:?}", acc);
+
                                 write.descriptor_count = 1;
                                 debug!("Generated descriptor set write {:?}", write);
                                 writes.push(write);
@@ -2219,6 +2223,10 @@ pub mod core{
             let misses_region = handles_buffer.get_region(miss_handles.len() as u64, Some((false, raytracing_props.shader_group_base_alignment.into())));
             let hits_region = handles_buffer.get_region(hit_handles.len() as u64, Some((false, raytracing_props.shader_group_base_alignment.into())));
 
+            cpu_mem.copy_from_ram_slice(&ray_gen_handle, &ray_gen_copy_region);
+            cpu_mem.copy_from_ram_slice(&miss_handles, &misses_copy_region);
+            cpu_mem.copy_from_ram_slice(&hit_handles, &hits_copy_region);
+
             ray_gen_copy_region.copy_to_region(cmd, &ray_gen_region);
             misses_copy_region.copy_to_region(cmd, &misses_region);
             hits_copy_region.copy_to_region(cmd, &hits_region);
@@ -2539,8 +2547,8 @@ mod tests{
         let mut outline = core::memory::DescriptorSetOutline::new(vk::DescriptorSetLayoutCreateFlags::empty(), 0 as *const c_void, 0 as *const c_void);
         outline.add_binding(gpu_region.get_binding(vk::ShaderStageFlags::COMPUTE));
         let descriptor_stack = descriptor_store.get_descriptor_stack(&[outline], vk::DescriptorPoolCreateFlags::empty(), 0 as *const c_void, 0 as *const c_void);
-
-        let compute = core::ComputePipeline::new(&engine, &[], &[descriptor_stack.get_set_layout(0)], shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
+        let layout = [descriptor_stack.get_set_layout(0)];
+        let compute = core::ComputePipeline::new(&engine, &[], &layout, shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
 
         let pool = core::CommandPool::new(&engine, vk::CommandPoolCreateInfo::builder().build());
         let cmd = crate::traits::ICommandPool::get_command_buffers(&pool, vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
