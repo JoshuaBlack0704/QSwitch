@@ -1,5 +1,4 @@
 
-
 #[allow(dead_code)]
 pub mod enums{
     use ash;
@@ -2494,6 +2493,189 @@ pub mod core{
 
 }
 
+#[allow(dead_code, unused)]
+pub mod init{
+    use std::{ffi::CStr, borrow::Cow, os::raw::c_char};
+    use ash::vk;
+    use log::debug;
+    use winit::window::Window;
+    unsafe extern "system" fn vulkan_debug_callback(
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+        p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+        _user_data: *mut std::os::raw::c_void,
+    ) -> vk::Bool32 {
+        let callback_data = *p_callback_data;
+        let message_id_number: i32 = callback_data.message_id_number as i32;
+    
+        let message_id_name = if callback_data.p_message_id_name.is_null() {
+            Cow::from("")
+        } else {
+            CStr::from_ptr(callback_data.p_message_id_name).to_string_lossy()
+        };
+    
+        let message = if callback_data.p_message.is_null() {
+            Cow::from("")
+        } else {
+            CStr::from_ptr(callback_data.p_message).to_string_lossy()
+        };
+    
+        println!(
+            "{:?}:\n{:?} [{} ({})] : {}\n",
+            message_severity,
+            message_type,
+            message_id_name,
+            &message_id_number.to_string(),
+            message,
+        );
+    
+        vk::FALSE
+    }
+
+    pub trait IEngine {
+    }
+    pub trait IWindowedEngine {
+    }
+    pub enum EngineInitOptions<'a>{
+        UseValidation,
+        UseDebugUtils,
+        EnumerateWindowExtensions(&'a Window),
+        ApplicationName(&'a CStr),
+        ApplicationVersion(u32),
+        EngineName(&'a CStr),
+        EngineVersion(u32),
+        ApiVersion(u32),
+        InstanceCreateFlags(vk::InstanceCreateFlags),
+    }
+    pub struct Engine{
+        instance: ash::Instance,
+        physical_device: vk::PhysicalDevice,
+        device: ash::Device,
+
+    }
+    pub struct WindowedEngine{}
+    pub struct SwapchainManager{}
+    pub struct PhysicalDevicePropertiesStore{}
+    pub struct QueueStore{}
+    pub struct DebugStore{
+        debug_loader: ash::extensions::ext::DebugUtils,
+        callback: vk::DebugUtilsMessengerEXT,
+    }
+
+    impl Engine{
+        pub fn init(options: &[EngineInitOptions]){
+            let entry = ash::Entry::linked();
+            let app_name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VulkanTriangle\0")};
+
+
+            let mut layer_names = vec![];
+            let mut extension_names = vec![]; 
+            for option in options.iter(){
+                match option{
+                    EngineInitOptions::UseValidation => {
+                        let name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0")};
+                        layer_names.push(name.as_ptr());
+                        debug!("Adding Khronos validation layers");
+                    },
+                    EngineInitOptions::EnumerateWindowExtensions(window) => {
+                        let names = ash_window::enumerate_required_extensions(window)
+                        .expect("Could not get required window extensions")
+                        .to_vec();
+                        extension_names.extend_from_slice(&names);
+                        debug!("Adding neccesary window extensions");
+                    },
+                    EngineInitOptions::UseDebugUtils => {
+                        extension_names.push(ash::extensions::ext::DebugUtils::name().as_ptr())
+                    }
+                    _ => {}
+                }
+            }
+
+            let mut app_info = vk::ApplicationInfo::builder()
+                    .application_name(app_name)
+                    .application_version(0)
+                    .engine_name(app_name)
+                    .engine_version(0)
+                    .api_version(vk::API_VERSION_1_3);
+            let mut instance_c_info = vk::InstanceCreateInfo::builder()
+            .enabled_layer_names(&layer_names)
+            .enabled_extension_names(&extension_names);
+            for option in options.iter(){
+                match option{
+                    EngineInitOptions::UseValidation => {},
+                    EngineInitOptions::EnumerateWindowExtensions(_) => {},
+                    EngineInitOptions::ApplicationName(s) => {
+                        app_info = app_info.application_name(s);
+                        debug!("None standard app name specified");
+                    },
+                    EngineInitOptions::ApplicationVersion(v) => {
+                        app_info = app_info.application_version(*v);
+                        debug!("None standard app version specified");
+                    },
+                    EngineInitOptions::EngineName(s) => {
+                        app_info = app_info.engine_name(s);
+                        debug!("None standard engine name specified");
+                    },
+                    EngineInitOptions::EngineVersion(v) => {
+                        app_info = app_info.engine_version(*v);
+                        debug!("None standard engine version specified");
+                    },
+                    EngineInitOptions::ApiVersion(v) => {
+                        app_info = app_info.api_version(*v);
+                        debug!("None standard api version specified");
+                    },
+                    EngineInitOptions::InstanceCreateFlags(f) => {instance_c_info = instance_c_info.flags(*f);},
+                }
+            }
+            instance_c_info = instance_c_info.application_info(&app_info);
+            let instance = unsafe {entry.create_instance(&instance_c_info, None).expect("Could not create instance")};
+
+
+            let mut debug_store = None;
+            match options.iter().find(|option| {
+                let ret = match option{
+                    EngineInitOptions::UseDebugUtils => true,
+                    _ => {false}
+                };
+                ret
+            })
+            {
+                Some(d) => {
+                    let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+                    .message_severity(
+                        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::WARNING
+                            | vk::DebugUtilsMessageSeverityFlagsEXT::INFO
+                    )
+                    .message_type(
+                        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                    )
+                    .pfn_user_callback(Some(vulkan_debug_callback));
+
+                let debug_utils_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+                let debug_call_back = unsafe{debug_utils_loader
+                    .create_debug_utils_messenger(&debug_info, None)
+                    .unwrap()};
+                
+                debug_store = Some(DebugStore{ debug_loader: debug_utils_loader, callback: debug_call_back })
+                debug!("Created debug utils callback");
+                },
+                None => {},
+            }
+
+
+
+
+        }
+    }
+}
+pub mod memory{}
+pub mod sync{}
+pub mod ray_tracing{}
+
+
 #[cfg(test)]
 mod tests{
     #[cfg(debug_assertions)]
@@ -2511,9 +2693,20 @@ mod tests{
     use ash::{self, vk};
     use std::ffi::c_void;
     use log::{self, debug};
+    #[test]
+    fn redesign_space(){
+        use crate::init;
 
+        match pretty_env_logger::try_init(){
+            Ok(_) => {},
+            Err(_) => {},
+        };
 
+        let options = vec![];
+        init::Engine::init(&options)
 
+    }
+    
     #[test]
     fn memory_round_trip_and_compute(){
         pretty_env_logger::init();
