@@ -101,6 +101,25 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {"RUST_LOG":"trace"},
-        }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'redesign'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=redesign",
+                    "--package=examples"
+                ],
+                "filter": {
+                    "name": "redesign",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
+        },
     ]
 }

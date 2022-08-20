@@ -2495,10 +2495,10 @@ pub mod core{
 
 #[allow(dead_code, unused)]
 pub mod init{
-    use std::{ffi::CStr, borrow::Cow, os::raw::c_char};
+    use std::{ffi::CStr, borrow::{Cow, BorrowMut}, os::raw::c_char, f32::consts::E};
     use ash::vk;
     use log::debug;
-    use winit::window::Window;
+    use winit::{window::Window, dpi::PhysicalSize};
     unsafe extern "system" fn vulkan_debug_callback(
         message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
         message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -2533,37 +2533,78 @@ pub mod init{
     }
 
     pub trait IEngine {
+        fn get_instance(&self) -> ash::Instance;
+        fn get_physical_device(&self) -> vk::PhysicalDevice;
+        fn get_device(&self) -> ash::Device;
+        fn get_property_store(&self) -> PhysicalDevicePropertiesStore;
+        fn get_queue_store(&self) -> QueueStore;
     }
     pub trait IWindowedEngine {
+        fn get_surface_loader(&self) -> ash::extensions::khr::Surface;
+        fn get_surface(&self) -> vk::SurfaceKHR;
     }
     pub enum EngineInitOptions<'a>{
-        UseValidation,
+        UseValidation(Option<&'a [vk::ValidationFeatureEnableEXT]>, Option<&'a [vk::ValidationFeatureDisableEXT]>),
         UseDebugUtils,
-        EnumerateWindowExtensions(&'a Window),
+        WindowTitle(&'a str),
+        WindowInnerSize(winit::dpi::PhysicalSize<u32>),
+        WindowResizable(bool),
         ApplicationName(&'a CStr),
         ApplicationVersion(u32),
         EngineName(&'a CStr),
         EngineVersion(u32),
         ApiVersion(u32),
         InstanceCreateFlags(vk::InstanceCreateFlags),
+        QueueCreateFlags(vk::DeviceQueueCreateFlags),
+        DeviceExtensions(&'a[*const i8]),
+        DeviceFeatures(vk::PhysicalDeviceFeatures),
+        DeviceFeatures11(vk::PhysicalDeviceVulkan11Features),
+        DeviceFeatures12(vk::PhysicalDeviceVulkan12Features),
+        DeviceFeatures13(vk::PhysicalDeviceVulkan13Features),
+        DeviceFeaturesRayTracing(vk::PhysicalDeviceRayTracingPipelineFeaturesKHR),
+        DeviceFeaturesAccelerationStructure(vk::PhysicalDeviceAccelerationStructureFeaturesKHR),
+    }
+    pub enum CreateSwapchainOptions{
+        TargetFormat(vk::SurfaceFormatKHR),
     }
     pub struct Engine{
         instance: ash::Instance,
         physical_device: vk::PhysicalDevice,
         device: ash::Device,
-
+        properties_store: PhysicalDevicePropertiesStore,
+        queue_store: QueueStore,
+        debug_store: Option<DebugStore>
     }
-    pub struct WindowedEngine{}
+    pub struct WindowedEngine{
+        surface_loader: ash::extensions::khr::Surface,
+        surface: vk::SurfaceKHR,
+        engine: Engine,
+    }
     pub struct SwapchainManager{}
-    pub struct PhysicalDevicePropertiesStore{}
-    pub struct QueueStore{}
+    #[derive(Clone)]
+    pub struct PhysicalDevicePropertiesStore{
+        instance: ash::Instance,
+        physical_device: vk::PhysicalDevice,
+        pub pd_properties: vk::PhysicalDeviceProperties,
+        pub pd_raytracing_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
+        pub pd_acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
+        pub pd_mem_props: vk::PhysicalDeviceMemoryProperties,
+        pub pd_mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT
+    }
+    #[derive(Clone)]
+    pub struct QueueStore{
+        device: ash::Device,
+        family_props: Vec<vk::QueueFamilyProperties>,
+        created_families: Vec<u32>,
+    }
+    #[derive(Clone)]
     pub struct DebugStore{
         debug_loader: ash::extensions::ext::DebugUtils,
         callback: vk::DebugUtilsMessengerEXT,
     }
 
     impl Engine{
-        pub fn init(options: &[EngineInitOptions]){
+        pub fn init(options: &mut [EngineInitOptions], window: Option<&Window>) -> (Engine, Option<(ash::extensions::khr::Surface, vk::SurfaceKHR)>) {
             let entry = ash::Entry::linked();
             let app_name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VulkanTriangle\0")};
 
@@ -2572,23 +2613,26 @@ pub mod init{
             let mut extension_names = vec![]; 
             for option in options.iter(){
                 match option{
-                    EngineInitOptions::UseValidation => {
+                    EngineInitOptions::UseValidation(_,_) => {
                         let name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0")};
                         layer_names.push(name.as_ptr());
                         debug!("Adding Khronos validation layers");
-                    },
-                    EngineInitOptions::EnumerateWindowExtensions(window) => {
-                        let names = ash_window::enumerate_required_extensions(window)
-                        .expect("Could not get required window extensions")
-                        .to_vec();
-                        extension_names.extend_from_slice(&names);
-                        debug!("Adding neccesary window extensions");
                     },
                     EngineInitOptions::UseDebugUtils => {
                         extension_names.push(ash::extensions::ext::DebugUtils::name().as_ptr())
                     }
                     _ => {}
                 }
+            }
+            match window {
+                Some(w) => {
+                    let names = ash_window::enumerate_required_extensions(w)
+                        .expect("Could not get required window extensions")
+                        .to_vec();
+                        extension_names.extend_from_slice(&names);
+                        debug!("Adding neccesary window extensions");
+                },
+                None => {},
             }
 
             let mut app_info = vk::ApplicationInfo::builder()
@@ -2597,13 +2641,27 @@ pub mod init{
                     .engine_name(app_name)
                     .engine_version(0)
                     .api_version(vk::API_VERSION_1_3);
+            let mut validation_features = vk::ValidationFeaturesEXT::builder();
             let mut instance_c_info = vk::InstanceCreateInfo::builder()
             .enabled_layer_names(&layer_names)
             .enabled_extension_names(&extension_names);
             for option in options.iter(){
                 match option{
-                    EngineInitOptions::UseValidation => {},
-                    EngineInitOptions::EnumerateWindowExtensions(_) => {},
+                    EngineInitOptions::UseValidation(enables, disables) => {
+                        match enables{
+                            Some(features) => {
+                                debug!("Enabling extra validation features");
+                                validation_features = validation_features.enabled_validation_features(&features)},
+                            None => {},
+                        }
+                        match disables{
+                            Some(features) => {
+                                debug!("Disabling some default validation features");
+                                validation_features = validation_features.disabled_validation_features(&features);
+                            },
+                            None => {},
+                        }
+                    },
                     EngineInitOptions::ApplicationName(s) => {
                         app_info = app_info.application_name(s);
                         debug!("None standard app name specified");
@@ -2625,11 +2683,13 @@ pub mod init{
                         debug!("None standard api version specified");
                     },
                     EngineInitOptions::InstanceCreateFlags(f) => {instance_c_info = instance_c_info.flags(*f);},
+                    _ => {},
                 }
             }
             instance_c_info = instance_c_info.application_info(&app_info);
+            instance_c_info = instance_c_info.push_next(&mut validation_features);
             let instance = unsafe {entry.create_instance(&instance_c_info, None).expect("Could not create instance")};
-
+            debug!("Created instance {:?}", instance.handle());
 
             let mut debug_store = None;
             match options.iter().find(|option| {
@@ -2659,15 +2719,354 @@ pub mod init{
                     .create_debug_utils_messenger(&debug_info, None)
                     .unwrap()};
                 
-                debug_store = Some(DebugStore{ debug_loader: debug_utils_loader, callback: debug_call_back })
+                debug_store = Some(DebugStore{ debug_loader: debug_utils_loader, callback: debug_call_back });
                 debug!("Created debug utils callback");
                 },
                 None => {},
             }
+            let mut surface_support = match window {
+                Some(w) => {
+                    let surface = unsafe{ash_window::create_surface(&entry, &instance, w, None).expect("Could not create surface")};
+                    let loader = ash::extensions::khr::Surface::new(&entry, &instance);
+                    debug!("Created surface {:?}", surface);
+                    Some((loader, surface))
+                },
+                None => None,
+            };
+
+            let physical_device = QueueStore::choose_physical_device(&instance, &surface_support);
+            let queue_infos = QueueStore::get_queue_infos(&instance, &physical_device, options);
+            let mut device_info = vk::DeviceCreateInfo::builder().queue_create_infos(&queue_infos.1);
+            let mut features = vk::PhysicalDeviceFeatures2::builder();
+            for option in options.iter_mut(){
+                match option {
+                    EngineInitOptions::DeviceExtensions(ext) => {
+                        debug!("Adding device extensions");
+                        device_info = device_info.enabled_extension_names(ext)
+                    },
+                    EngineInitOptions::DeviceFeatures(f) => {
+                        debug!("Adding device features");
+                        features = features.features(*f)
+                    },
+                    EngineInitOptions::DeviceFeatures12(f) => {
+                        debug!("Adding device vulkan 12 features");
+                        features = features.push_next(f)
+                    },
+                    EngineInitOptions::DeviceFeatures11(f) => {
+                        debug!("Adding device vulkan 11 features");
+                        features = features.push_next(f)
+                    },
+                    EngineInitOptions::DeviceFeatures13(f) => {
+                        debug!("Adding device vulkan 13 features");
+                        features = features.push_next(f)
+                    },
+                    EngineInitOptions::DeviceFeaturesRayTracing(f) => {
+                        debug!("Adding device ray tracing features");
+                        features = features.push_next(f)
+                    },
+                    EngineInitOptions::DeviceFeaturesAccelerationStructure(f) => {
+                        debug!("Adding device acceleration structure features");
+                        features = features.push_next(f)
+                    },
+                    _ => {}
+                }
+            }
+            device_info = device_info.push_next(&mut features);
+
+            let device = unsafe{instance.create_device(physical_device, &device_info, None).expect("Could not create logical device")};
+            debug!("Created logical device {:?}", device.handle());
+
+            let queue_store = QueueStore::new(&instance, &physical_device, &device, &queue_infos.1);
+            let props = PhysicalDevicePropertiesStore::new(&instance, &physical_device);
+            (Engine{instance, physical_device, device, queue_store, debug_store, properties_store: props  }, surface_support)
+        }
+    }
+    impl IEngine for Engine{
+        fn get_instance(&self) -> ash::Instance {
+        self.instance.clone()
+    }
+
+        fn get_physical_device(&self) -> vk::PhysicalDevice {
+        self.physical_device.clone()
+    }
+
+        fn get_device(&self) -> ash::Device {
+        self.device.clone()
+    }
+
+        fn get_property_store(&self) -> PhysicalDevicePropertiesStore {
+        self.properties_store.clone()
+    }
+
+        fn get_queue_store(&self) -> QueueStore {
+        self.queue_store.clone()
+    }
+    }
+    impl Drop for Engine{
+        fn drop(&mut self) {
+            unsafe{
+                match &self.debug_store {
+                    Some(store) => {
+                        debug!("Destroying debug callback {:?}", store.callback);
+                        store.debug_loader.destroy_debug_utils_messenger(store.callback, None);
+                    },
+                    None => {},
+                }
+                debug!("Destroying device {:?}", self.device.handle());
+                debug!("Destroying instance {:?}", self.instance.handle());
+                self.device.destroy_device(None);
+                self.instance.destroy_instance(None);
+            }
+    }
+    }
+    impl WindowedEngine{
+        pub fn init(options: &mut [EngineInitOptions]) -> (winit::event_loop::EventLoop<()>, Window, WindowedEngine) {
+
+            let event_loop = winit::event_loop::EventLoop::new();
+            let mut window = winit::window::WindowBuilder::new()
+                .with_title("Ray tracer!")
+                .with_inner_size(PhysicalSize::new(200 as u32,200 as u32));
+            for option in options.iter(){
+                match option{
+                    EngineInitOptions::WindowTitle(s) => window = window.with_title(*s),
+                    EngineInitOptions::WindowInnerSize(s) => window = window.with_inner_size(*s),
+                    EngineInitOptions::WindowResizable(b) =>  window = window.with_resizable(*b),
+                    _ => {}
+                }
+            }
+            
+            let window = window.build(&event_loop).expect("Could not create window");
+                
+
+            let mut surface = vk::SurfaceKHR::null();
+
+            let (engine, surface_data) = Engine::init(options, Some(&window));
+
+            drop(options);
+
+            let surface_data = surface_data.expect("No surface data found");
+
+            (event_loop, window, WindowedEngine{ surface_loader: surface_data.0, surface: surface_data.1, engine })
+        }
+    }
+    impl IEngine for WindowedEngine{
+        fn get_instance(&self) -> ash::Instance {
+        self.engine.get_instance()
+    }
+
+        fn get_physical_device(&self) -> vk::PhysicalDevice {
+        self.engine.get_physical_device()
+    }
+
+        fn get_device(&self) -> ash::Device {
+        self.engine.get_device()
+    }
+
+        fn get_property_store(&self) -> PhysicalDevicePropertiesStore {
+        self.engine.get_property_store()
+    }
+
+        fn get_queue_store(&self) -> QueueStore {
+        self.engine.get_queue_store()
+    }
+    }
+    impl IWindowedEngine for WindowedEngine{
+        fn get_surface_loader(&self) -> ash::extensions::khr::Surface {
+        self.surface_loader.clone()
+    }
+
+        fn get_surface(&self) -> vk::SurfaceKHR {
+        self.surface.clone()
+    }
+    }
+    impl Drop for WindowedEngine{
+        fn drop(&mut self) {
+            unsafe{
+                debug!("Destroying surface {:?}", self.surface);
+                self.surface_loader.destroy_surface(self.surface, None);
+            }
+    }
+    }
+    impl QueueStore{
+        fn choose_physical_device(instance: &ash::Instance, surface_support: &Option<(ash::extensions::khr::Surface, vk::SurfaceKHR)>) -> vk::PhysicalDevice {
+            let physical_devices = unsafe{instance.enumerate_physical_devices().expect("Could not get physical devices")};
+            let mut device_properties = vk::PhysicalDeviceProperties::default();
+            let chosen_device = physical_devices.iter().find(|&dev|{
+                let queue_family_properties = unsafe{instance.get_physical_device_queue_family_properties(*dev)};
+                device_properties = unsafe{instance.get_physical_device_properties(*dev)};
+                let mut has_graphics = false;
+                let mut has_transfer = false;
+                let mut has_compute = false;
+                let mut has_surface = false;
+
+                for (index, fam) in queue_family_properties.iter().enumerate(){
+                    if !has_graphics {
+                        has_graphics = fam.queue_flags.contains(vk::QueueFlags::GRAPHICS);
+                    }
+                    if !has_transfer {
+                        has_transfer = fam.queue_flags.contains(vk::QueueFlags::TRANSFER);
+                    }
+                    if !has_compute {
+                        has_compute = fam.queue_flags.contains(vk::QueueFlags::COMPUTE);
+                    }
+                    match &surface_support {
+                        Some((l, s)) => {
+                            if !has_surface {
+                                has_surface = unsafe{l.get_physical_device_surface_support(*dev, index as u32, *s).expect("Could not get physical device surface support")};
+                            }
+                        },
+                        None => {},
+                    }
+                }
+
+                let capable = match &surface_support {
+                    Some(_) => {
+                        device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
+                        has_graphics &&
+                        has_transfer &&
+                        has_compute &&
+                        has_surface
+                    },
+                    None => {
+                        device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
+                        has_graphics &&
+                        has_transfer &&
+                        has_compute},
+                };
+                capable
+            });
+
+            let mut physical_device = vk::PhysicalDevice::null();
+            match chosen_device {
+                Some(dev) => {
+                    match surface_support {
+                        Some(_) => {
+                            debug!("Discrete Device {:?} has graphics, transfer, compute, and surface support", String::from_utf8(device_properties.device_name.iter().map(|&c| c as u8).collect()).unwrap().replace("\0", ""));
+                            physical_device = *dev;
+                        },
+                        None => {
+                            debug!("Discrete Device {:?} has graphics, transfer, and compute support", String::from_utf8(device_properties.device_name.iter().map(|&c| c as u8).collect()).unwrap().replace("\0", ""));
+                            physical_device = *dev;
+                        },
+                    }
+                },
+                None => panic!("No physical devices meet all queue requirements and are discrete"),
+            }
+
+            physical_device
+
+        }
+        fn get_queue_infos(instance: &ash::Instance, physical_device: &vk::PhysicalDevice, options: &[EngineInitOptions]) -> (Vec<f32>, Vec<vk::DeviceQueueCreateInfo>) {
+
+            let priorites = vec![1.0];
+
+            let create_flags = match options.iter().find(|option| match option {
+                EngineInitOptions::QueueCreateFlags(_) => {
+                    debug!("Using non-default queue create flags");
+                    true
+                },
+                _ => {false}
+            }) {
+                Some(option) => {
+                    match option {
+                        EngineInitOptions::QueueCreateFlags(flags) => Some(*flags),
+                        _ => {panic!("What?")}
+                    }
+                },
+                None => None,
+            };
+
+            let queue_create_infos:Vec<vk::DeviceQueueCreateInfo> = unsafe{instance.get_physical_device_queue_family_properties(*physical_device)}.iter().enumerate().filter(|(index,props)|{
+                props.queue_flags.contains(vk::QueueFlags::GRAPHICS) || props.queue_flags.contains(vk::QueueFlags::TRANSFER) || props.queue_flags.contains(vk::QueueFlags::COMPUTE)
+            }).map(|(index, q_props)| {
+                let mut builder = vk::DeviceQueueCreateInfo::builder();
+                match create_flags {
+                    Some(flags) => builder = builder.flags(flags),
+                    None => {},
+                }
+                builder = builder.queue_family_index(index as u32);
+                builder = builder.queue_priorities(&priorites);
+                builder.build()
+            }).collect();
+
+            let indecies:Vec<u32> = queue_create_infos.iter().map(|infos| infos.queue_family_index).collect();
+            debug!{"Creating queues from families {:?}", indecies};
+            (priorites, queue_create_infos)
 
 
+        }
+        fn new(instance: &ash::Instance, physical_device: &vk::PhysicalDevice, device: &ash::Device, queue_create_infos: &[vk::DeviceQueueCreateInfo]) -> QueueStore {
+            let queue_infos = unsafe{instance.get_physical_device_queue_family_properties(*physical_device)};
+            QueueStore{ device: device.clone(), family_props: queue_infos, created_families: queue_create_infos.iter().map(|info| info.queue_family_index).collect() }
+        }
+    }
+    impl PhysicalDevicePropertiesStore{
+        fn new(instance: &ash::Instance, physical_device: &vk::PhysicalDevice) -> PhysicalDevicePropertiesStore {
+            let mut ray_props = vk::PhysicalDeviceRayTracingPipelinePropertiesKHR::builder().build();
+            let mut acc_props = vk::PhysicalDeviceAccelerationStructurePropertiesKHR::builder().build();
+            let mut properties2 = vk::PhysicalDeviceProperties2::builder()
+            .push_next(&mut ray_props)
+            .push_next(&mut acc_props)
+            .build();
+            
 
+            
+            let mut memory_budgets = vk::PhysicalDeviceMemoryBudgetPropertiesEXT::builder().build();
+            let mut memory_properties = vk::PhysicalDeviceMemoryProperties2::builder()
+            .push_next(&mut memory_budgets)
+            .build();
 
+            unsafe{
+                instance.get_physical_device_properties2(*physical_device, &mut properties2);
+                instance.get_physical_device_memory_properties2(*physical_device, &mut memory_properties);
+                debug!("{:?}", memory_budgets);
+            }
+
+            PhysicalDevicePropertiesStore{ 
+                instance: instance.clone(), 
+                physical_device: physical_device.clone(), 
+                pd_properties: properties2.properties, 
+                pd_raytracing_properties: ray_props, 
+                pd_acc_structure_properties: acc_props, 
+                pd_mem_props: memory_properties.memory_properties, 
+                pd_mem_budgets: memory_budgets }
+
+        }
+    }
+    impl SwapchainManager{
+        pub fn new<T:IEngine + IWindowedEngine>(engine: &T, options: &[CreateSwapchainOptions]){
+            let surface_loader = engine.get_surface_loader();
+            let surface = engine.get_surface();
+            let physical_device = engine.get_physical_device();
+
+            let possible_formats = unsafe{surface_loader.get_physical_device_surface_formats(physical_device, surface).expect("Could not get surface formats")};
+            let chosen_format = match options.iter().find(|option| {
+                let res = match option {
+                    CreateSwapchainOptions::TargetFormat(f) => {true},
+                    _ => {false}
+                };
+                res
+            }){
+                Some(option) => {
+                    let (f,has_format) = match option {
+                        CreateSwapchainOptions::TargetFormat(f) => {(*f,possible_formats.contains(f))},
+                        _ => {panic!("What?")}
+                    };
+                    if has_format {
+                        debug!("Using target format of {:?}", f);
+                        Some(f)
+                    }
+                    else {
+                        None
+                    }
+                },
+                None => {
+                    debug!("Using first available format of {:?}", possible_formats[0]);
+                    Some(possible_formats[0])
+                },
+            }.expect("Could not find a suitable format");
+
+            
         }
     }
 }
@@ -2693,19 +3092,6 @@ mod tests{
     use ash::{self, vk};
     use std::ffi::c_void;
     use log::{self, debug};
-    #[test]
-    fn redesign_space(){
-        use crate::init;
-
-        match pretty_env_logger::try_init(){
-            Ok(_) => {},
-            Err(_) => {},
-        };
-
-        let options = vec![];
-        init::Engine::init(&options)
-
-    }
     
     #[test]
     fn memory_round_trip_and_compute(){
