@@ -2542,6 +2542,7 @@ pub mod init{
     pub trait IWindowedEngine {
         fn get_surface_loader(&self) -> ash::extensions::khr::Surface;
         fn get_surface(&self) -> vk::SurfaceKHR;
+        fn get_window_size(&self) -> PhysicalSize<u32>;
     }
     pub enum EngineInitOptions<'a>{
         UseValidation(Option<&'a [vk::ValidationFeatureEnableEXT]>, Option<&'a [vk::ValidationFeatureDisableEXT]>),
@@ -2556,7 +2557,7 @@ pub mod init{
         ApiVersion(u32),
         InstanceCreateFlags(vk::InstanceCreateFlags),
         QueueCreateFlags(vk::DeviceQueueCreateFlags),
-        DeviceExtensions(&'a[*const i8]),
+        DeviceExtensions(Vec<*const i8>),
         DeviceFeatures(vk::PhysicalDeviceFeatures),
         DeviceFeatures11(vk::PhysicalDeviceVulkan11Features),
         DeviceFeatures12(vk::PhysicalDeviceVulkan12Features),
@@ -2564,8 +2565,11 @@ pub mod init{
         DeviceFeaturesRayTracing(vk::PhysicalDeviceRayTracingPipelineFeaturesKHR),
         DeviceFeaturesAccelerationStructure(vk::PhysicalDeviceAccelerationStructureFeaturesKHR),
     }
-    pub enum CreateSwapchainOptions{
+    pub enum CreateSwapchainOptions<'a>{
         TargetFormat(vk::SurfaceFormatKHR),
+        SwapchainExtent(vk::Extent2D),
+        OldSwapchain(&'a SwapchainStore),
+        ImageUsages(vk::ImageUsageFlags),
     }
     pub struct Engine{
         instance: ash::Instance,
@@ -2576,11 +2580,16 @@ pub mod init{
         debug_store: Option<DebugStore>
     }
     pub struct WindowedEngine{
+        window: Window,
         surface_loader: ash::extensions::khr::Surface,
         surface: vk::SurfaceKHR,
         engine: Engine,
     }
-    pub struct SwapchainManager{}
+    pub struct SwapchainStore{
+        swapchain_loader: ash::extensions::khr::Swapchain,
+        swapchain: vk::SwapchainKHR,
+        images: Vec<vk::Image>,
+    }
     #[derive(Clone)]
     pub struct PhysicalDevicePropertiesStore{
         instance: ash::Instance,
@@ -2629,8 +2638,8 @@ pub mod init{
                     let names = ash_window::enumerate_required_extensions(w)
                         .expect("Could not get required window extensions")
                         .to_vec();
-                        extension_names.extend_from_slice(&names);
-                        debug!("Adding neccesary window extensions");
+                    extension_names.extend_from_slice(&names);
+                    debug!("Adding neccesary window extensions");
                 },
                 None => {},
             }
@@ -2820,17 +2829,20 @@ pub mod init{
     }
     }
     impl WindowedEngine{
-        pub fn init(options: &mut [EngineInitOptions]) -> (winit::event_loop::EventLoop<()>, Window, WindowedEngine) {
+        pub fn init(options: &mut [EngineInitOptions]) -> (winit::event_loop::EventLoop<()>, WindowedEngine) {
 
             let event_loop = winit::event_loop::EventLoop::new();
             let mut window = winit::window::WindowBuilder::new()
                 .with_title("Ray tracer!")
                 .with_inner_size(PhysicalSize::new(200 as u32,200 as u32));
-            for option in options.iter(){
+            for option in options.iter_mut(){
                 match option{
                     EngineInitOptions::WindowTitle(s) => window = window.with_title(*s),
                     EngineInitOptions::WindowInnerSize(s) => window = window.with_inner_size(*s),
                     EngineInitOptions::WindowResizable(b) =>  window = window.with_resizable(*b),
+                    EngineInitOptions::DeviceExtensions(ext) => {
+                        ext.push(ash::extensions::khr::Swapchain::name().as_ptr());
+                    },
                     _ => {}
                 }
             }
@@ -2846,7 +2858,7 @@ pub mod init{
 
             let surface_data = surface_data.expect("No surface data found");
 
-            (event_loop, window, WindowedEngine{ surface_loader: surface_data.0, surface: surface_data.1, engine })
+            (event_loop, WindowedEngine{ surface_loader: surface_data.0, surface: surface_data.1, engine, window })
         }
     }
     impl IEngine for WindowedEngine{
@@ -2877,6 +2889,10 @@ pub mod init{
 
         fn get_surface(&self) -> vk::SurfaceKHR {
         self.surface.clone()
+    }
+
+        fn get_window_size(&self) -> PhysicalSize<u32> {
+        self.window.inner_size()
     }
     }
     impl Drop for WindowedEngine{
@@ -3019,7 +3035,6 @@ pub mod init{
             unsafe{
                 instance.get_physical_device_properties2(*physical_device, &mut properties2);
                 instance.get_physical_device_memory_properties2(*physical_device, &mut memory_properties);
-                debug!("{:?}", memory_budgets);
             }
 
             PhysicalDevicePropertiesStore{ 
@@ -3033,8 +3048,9 @@ pub mod init{
 
         }
     }
-    impl SwapchainManager{
-        pub fn new<T:IEngine + IWindowedEngine>(engine: &T, options: &[CreateSwapchainOptions]){
+    impl SwapchainStore{
+        pub fn new<T:IEngine + IWindowedEngine>(engine: &T, options: &[CreateSwapchainOptions]) -> SwapchainStore {
+            
             let surface_loader = engine.get_surface_loader();
             let surface = engine.get_surface();
             let physical_device = engine.get_physical_device();
@@ -3061,13 +3077,90 @@ pub mod init{
                     }
                 },
                 None => {
-                    debug!("Using first available format of {:?}", possible_formats[0]);
+                    //debug!("Using first available format of {:?}", possible_formats[0]);
                     Some(possible_formats[0])
                 },
             }.expect("Could not find a suitable format");
 
-            
+            let surface_capabilties = unsafe{surface_loader.get_physical_device_surface_capabilities(physical_device, surface).expect("Could not get surface capabilities")};
+            let mut desired_image_count = surface_capabilties.min_image_count + 1;
+            if surface_capabilties.max_image_count > 0
+                && desired_image_count > surface_capabilties.max_image_count
+            {
+                desired_image_count = surface_capabilties.max_image_count;
+            }
+
+            let window_size = engine.get_window_size();
+            let surface_resolution = vk::Extent2D::builder().width(window_size.width).height(window_size.height).build();
+
+            let pre_transform = if surface_capabilties
+                .supported_transforms
+                .contains(vk::SurfaceTransformFlagsKHR::IDENTITY)
+            {
+                vk::SurfaceTransformFlagsKHR::IDENTITY
+            } else {
+                surface_capabilties.current_transform
+            };
+
+            let present_modes = unsafe{surface_loader
+                    .get_physical_device_surface_present_modes(physical_device, surface)
+                    .expect("Could not get present modes")};
+            let present_mode = present_modes
+                .iter()
+                .cloned()
+                .find(|&mode| mode == vk::PresentModeKHR::MAILBOX)
+                .unwrap_or(vk::PresentModeKHR::FIFO);
+
+
+            let mut swapchain_create_info = vk::SwapchainCreateInfoKHR::builder()
+            .surface(surface)
+            .min_image_count(desired_image_count)
+            .image_color_space(chosen_format.color_space)
+            .image_format(chosen_format.format)
+            .image_extent(surface_resolution)
+            .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .pre_transform(pre_transform)
+            .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
+            .present_mode(present_mode)
+            .clipped(true)
+            .image_array_layers(1);
+
+            for option in options.iter().filter(|option| {
+                let res = match option {
+                    CreateSwapchainOptions::OldSwapchain(_) => {true},
+                    CreateSwapchainOptions::ImageUsages(_) => {true},
+                    _ => {false}
+                };
+                res
+            }){
+                match option {
+                    CreateSwapchainOptions::OldSwapchain(s) => {
+                        debug!("Creating new swapchain from old swapchain {:?}", s.swapchain);
+                        swapchain_create_info = swapchain_create_info.old_swapchain(s.swapchain);
+                    },
+                    CreateSwapchainOptions::ImageUsages(u) => {
+                        debug!("Adding non default image usage flags to swapchain");
+                        swapchain_create_info = swapchain_create_info.image_usage(*u);
+                    }
+                    _ => {panic!("What?")}
+                };
+            }
+
+            let swapchain_loader = ash::extensions::khr::Swapchain::new(&engine.get_instance(), &engine.get_device());
+            let swapchain  = unsafe{swapchain_loader.create_swapchain(&swapchain_create_info, None).expect("Could not create swapchain")};
+            debug!("Created swapchain {:?} of resolution {} x {}",swapchain, surface_resolution.width, surface_resolution.height);
+            let images = unsafe{swapchain_loader.get_swapchain_images(swapchain).expect("Could not retrieve swapchain images")};
+
+            SwapchainStore{ swapchain_loader, swapchain, images }
         }
+    }
+    impl Drop for SwapchainStore{
+        fn drop(&mut self) {
+        debug!("Destroying swapchain {:?}", self.swapchain);
+        unsafe{
+            self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+        }
+    }
     }
 }
 pub mod memory{}
