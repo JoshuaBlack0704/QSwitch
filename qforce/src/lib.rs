@@ -889,7 +889,7 @@ pub mod core{
             physical_device: vk::PhysicalDevice,
             device: ash::Device,
             props: vk::PhysicalDeviceProperties,
-            mem_props: vk::PhysicalDeviceMemoryProperties,
+            pd_mem_props: vk::PhysicalDeviceMemoryProperties,
             destroy_allocation: Option<vk::DeviceMemory>,
             destroy_buffer: Option<vk::Buffer>,
             destroy_image: Option<vk::Image>,
@@ -933,13 +933,13 @@ pub mod core{
                 
                 unsafe{
                     let props = instance.get_physical_device_properties(physical_device);
-                    let mem_props = instance.get_physical_device_memory_properties(physical_device);
+                    let pd_mem_props = instance.get_physical_device_memory_properties(physical_device);
                     AllocationDataStore { 
                         instance, 
                         physical_device, 
                         device, 
                         props, 
-                        mem_props, 
+                        pd_mem_props, 
                         destroy_allocation: None, 
                         destroy_buffer: None, 
                         destroy_image: None }
@@ -948,14 +948,14 @@ pub mod core{
             pub fn get_type(&self, properties: vk::MemoryPropertyFlags) -> u32{
                 let mut selected_type: usize = 0;
                     //Selecting the corrent memory type
-                    for type_index in 0..self.mem_props.memory_types.len(){
-                        let mem_type = &self.mem_props.memory_types[type_index];
-                        let heap = &self.mem_props.memory_heaps[mem_type.heap_index as usize];
+                    for type_index in 0..self.pd_mem_props.memory_types.len(){
+                        let mem_type = &self.pd_mem_props.memory_types[type_index];
+                        let heap = &self.pd_mem_props.memory_heaps[mem_type.heap_index as usize];
                         if mem_type.property_flags & properties != vk::MemoryPropertyFlags::empty() {
                             //debug!("Found compatible memory");
-                            //debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.mem_props.memory_types[type_index].property_flags, self.mem_props.memory_types[type_index].heap_index);
-                            if self.mem_props.memory_types[selected_type].property_flags & properties != vk::MemoryPropertyFlags::empty() {
-                                if heap.size > self.mem_props.memory_heaps[self.mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
+                            //debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.pd_mem_props.memory_types[type_index].property_flags, self.pd_mem_props.memory_types[type_index].heap_index);
+                            if self.pd_mem_props.memory_types[selected_type].property_flags & properties != vk::MemoryPropertyFlags::empty() {
+                                if heap.size > self.pd_mem_props.memory_heaps[self.pd_mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
                                     //debug!("  Selecting Memory Type");
                                     selected_type = type_index;
                                 }
@@ -2545,7 +2545,7 @@ pub mod init{
         fn get_window_size(&self) -> PhysicalSize<u32>;
     }
     pub enum EngineInitOptions<'a>{
-        UseValidation(Option<&'a [vk::ValidationFeatureEnableEXT]>, Option<&'a [vk::ValidationFeatureDisableEXT]>),
+        UseValidation(Option<Vec<vk::ValidationFeatureEnableEXT>>, Option<Vec<vk::ValidationFeatureDisableEXT>>),
         UseDebugUtils,
         WindowTitle(&'a str),
         WindowInnerSize(winit::dpi::PhysicalSize<u32>),
@@ -3047,6 +3047,29 @@ pub mod init{
                 pd_mem_budgets: memory_budgets }
 
         }
+        pub fn get_memory_index(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+            let mut selected_type: usize = 0;
+                    //Selecting the corrent memory type
+                    for type_index in 0..self.pd_mem_props.memory_types.len(){
+                        let mem_type = &self.pd_mem_props.memory_types[type_index];
+                        let heap = &self.pd_mem_props.memory_heaps[mem_type.heap_index as usize];
+                        if mem_type.property_flags & properties != vk::MemoryPropertyFlags::empty() {
+                            //debug!("Found compatible memory");
+                            //debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.pd_mem_props.memory_types[type_index].property_flags, self.pd_mem_props.memory_types[type_index].heap_index);
+                            if self.pd_mem_props.memory_types[selected_type].property_flags & properties != vk::MemoryPropertyFlags::empty() {
+                                if heap.size > self.pd_mem_props.memory_heaps[self.pd_mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
+                                    //debug!("  Selecting Memory Type");
+                                    selected_type = type_index;
+                                }
+                            }
+                            else {
+                                //debug!("Previously selected memory is of wrong type, selecting current memory type");
+                                selected_type = type_index;
+                            }
+                        }
+                    }
+            selected_type as u32
+        }
     }
     impl SwapchainStore{
         pub fn new<T:IEngine + IWindowedEngine>(engine: &T, options: &[CreateSwapchainOptions]) -> SwapchainStore {
@@ -3163,10 +3186,524 @@ pub mod init{
     }
     }
 }
-pub mod memory{}
+#[allow(dead_code, unused)]
+pub mod memory{
+    use std::{sync::Arc, mem::size_of};
+    use ash::{self, vk};
+    use log::debug;
+    use crate::init::{self,IEngine,PhysicalDevicePropertiesStore};
+
+    #[derive(Clone)]
+    pub enum AlignmentType{
+        Free,
+        Allocation(u64),
+        User(u64),
+    }
+    pub enum CreateAllocationOptions{
+        MemoryAllocateFlags(vk::MemoryAllocateFlagsInfo),
+    }
+    pub enum CreateBufferOptions{
+        BufferCreateFlags(vk::BufferCreateFlags),
+        Alignment(AlignmentType),
+        SizeOverkillFactor(u64),
+    }
+    pub enum CreateBufferRegionOptions {
+        
+    }
+    #[derive(Clone)]
+    struct AllocationMemoryBlock{
+        start_offset: u64,
+        size: u64,
+        user: Arc<bool>,
+    }
+    #[derive(Clone)]
+    struct BufferMemoryBlock{
+        allocation_offset: u64,
+        buffer_offset: u64,
+        size: u64,
+        user: Arc<bool>,
+    }
+
+    #[derive(Clone)]
+    enum MemoryBlockArray{
+        Allocation(Vec<AllocationMemoryBlock>),
+        Buffer(Vec<BufferMemoryBlock>),
+    }
+    pub struct Allocation{
+        device: ash::Device,
+        properties: PhysicalDevicePropertiesStore,
+        memory_type: vk::MemoryPropertyFlags,
+        allocation: vk::DeviceMemory,
+        c_info: vk::MemoryAllocateInfo,
+        blocks: MemoryBlockArray,
+    }
+    pub struct Buffer{
+        device: ash::Device,
+        properties: PhysicalDevicePropertiesStore,
+        buffer: vk::Buffer,
+        memory_type: vk::MemoryPropertyFlags,
+        memory_index: u32,
+        c_info: vk::BufferCreateInfo,
+        home_block: AllocationMemoryBlock,
+        blocks: MemoryBlockArray,
+    }
+    pub struct BufferRegion{
+        device: ash::Device,
+        properties: PhysicalDevicePropertiesStore,
+        buffer: vk::Buffer,
+        memory_type: vk::MemoryPropertyFlags,
+        memory_index: u32,
+        buffer_usage: vk::BufferUsageFlags,
+        home_block: BufferMemoryBlock,
+        blocks: MemoryBlockArray,
+    }
+    pub struct Image{}
+    pub struct ImageRegion{}
+
+
+    impl MemoryBlockArray{
+        fn merge_unused(&mut self){
+            match self {
+                MemoryBlockArray::Allocation(a) => {
+                    let mut fixed_array:Vec<AllocationMemoryBlock> = vec![];
+                    let mut merge_block: Option<AllocationMemoryBlock> = None;
+                    for (index, block) in a.iter().enumerate(){
+                        if Arc::strong_count(&block.user) == 1{
+                            match &mut merge_block {
+                                Some(b) => {
+                                    debug!("Adding size {} to merge block from empty block at offset {}", block.size, block.start_offset);
+                                    b.size += block.size;
+                                },
+                                None => {
+                                    debug!("Empty block at index {} and offset {} and of size {} starting new merge_block", index, block.start_offset, block.size);
+                                    merge_block = Some(block.clone());
+                                },
+                            }
+                        }
+                        else {
+                            match &mut merge_block {
+                                Some(b) => {
+                                    debug!("Pushing merge block at offset {} and of size {} to the new block array at index {}", b.start_offset, b.size, fixed_array.len());
+                                    fixed_array.push(b.clone());
+                                    debug!("Pushing in-use block at offset {} and of size {} to the new block array at index {}", block.start_offset, block.size, fixed_array.len());
+                                    fixed_array.push(block.clone());
+                                    merge_block = None;
+                                },
+                                None => {
+                                    debug!("Pushing in use block at offset {} and of size {} to the new block array at index {}", block.start_offset, block.size, fixed_array.len());
+                                    fixed_array.push(block.clone());
+                                },
+                            }
+                        }
+                    }
+                    match &mut merge_block {
+                        Some(block) => {
+                            debug!("Pushing merge block at offset {} and of size {} to the new block array at index {}", block.start_offset, block.size, fixed_array.len());
+                            fixed_array.push(block.clone())
+                        },
+                        None => {},
+                    }
+                    *a = fixed_array;
+                },
+                MemoryBlockArray::Buffer(a) => {
+                    let mut fixed_array:Vec<BufferMemoryBlock> = vec![];
+                    let mut merge_block: Option<BufferMemoryBlock> = None;
+                    for (index, block) in a.iter().enumerate(){
+                        if Arc::strong_count(&block.user) == 1{
+                            match &mut merge_block {
+                                Some(b) => {
+                                    debug!("Adding size {} to merge block from empty block at offset {}", block.size, block.buffer_offset);
+                                    b.size += block.size
+                                },
+                                None => {
+                                    debug!("Empty block at index {} and offset {} and of size {} starting new merge_block", index, block.buffer_offset, block.size);
+                                    merge_block = Some(block.clone())
+                                },
+                            }
+                        }
+                        else {
+                            match &mut merge_block {
+                                Some(b) => {
+                                    fixed_array.push(b.clone());
+                                    debug!("Pushing merge block at offset {} and of size {} to the new block array at index {}", b.buffer_offset, b.size, fixed_array.len());
+                                    fixed_array.push(block.clone());
+                                    debug!("Pushing in-use block at offset {} and of size {} to the new block array at index {}", block.buffer_offset, block.size, fixed_array.len());
+                                    merge_block = None;
+                                },
+                                None => {
+                                    debug!("Pushing in use block at offset {} and of size {} to the new block array at index {}", block.buffer_offset, block.size, fixed_array.len());
+                                    fixed_array.push(block.clone());
+                                },
+                            }
+                        }
+                    }
+                    match &mut merge_block {
+                        Some(block) => {
+                            debug!("Pushing merge block at offset {} and of size {} to the new block array at index {}", block.buffer_offset, block.size, fixed_array.len());
+                            fixed_array.push(block.clone())
+                        },
+                        None => {},
+                    }
+                    *a = fixed_array;
+                },
+            }
+        }
+        fn try_get_region(&mut self, size: u64, alignment: AlignmentType) -> Option<usize> {
+            debug!("Trying to get a region\n");
+            self.merge_unused();
+            let mut selected_index = None;
+            
+
+            match self {
+                MemoryBlockArray::Allocation(a) => {
+                    let (mut target_offset, mut block_size) = (0,0);
+
+
+                    for (index, block) in a.iter().enumerate(){
+                        if (Arc::strong_count(&block.user) == 1){
+                            (target_offset, block_size) = block.get_offset_and_remaining_size(&alignment);
+                            if block_size >= size{
+                            debug!("Found unused allocation block with adjusted offset {} and of size {} that satifies needed size of {}", target_offset, block_size, size);
+                            selected_index = Some(index);
+                            break;
+                        }
+                        }
+                        
+                    }   
+                    
+                    match selected_index {
+                        Some(i) => {
+                            let old_block = a[i].clone();
+
+                            let new_block = AllocationMemoryBlock{ 
+                                start_offset: target_offset, 
+                                size, 
+                                user: old_block.user };
+                            let unused_block = AllocationMemoryBlock{ 
+                                start_offset: target_offset + size, 
+                                size: old_block.size - ((target_offset-old_block.start_offset) + size), 
+                                user: Arc::new(true) };
+                            
+                            debug!("Created new allocation block at offset {} and of size {} and an unused block at offset {} and size {}", new_block.start_offset, new_block.size, unused_block.start_offset, unused_block.size);
+                            
+                            if i > 0 {
+                                let previous_block = &mut a[i-1];
+                                previous_block.size += (target_offset - (previous_block.start_offset + previous_block.size));
+                            }
+
+                            a[i] = new_block;
+                            a.insert(i+1, unused_block);
+                        },
+                        None => {},
+                    }
+
+                },
+                MemoryBlockArray::Buffer(a) => {
+                    let (mut target_allocation_offset, mut target_buffer_offset, mut block_size) = (0,0,0);
+
+                    for (index, block) in a.iter().enumerate(){
+                        if Arc::strong_count(&block.user) == 1{
+                            (target_allocation_offset, target_buffer_offset, block_size) = block.get_offset_and_remaining_size(&alignment);
+                            if block_size >= size{
+                                debug!("Found unused allocation block at offset {} and of size {} that satifies needed size of {}", target_buffer_offset, block_size, size);
+                                selected_index = Some(index);
+                                break;
+                            }
+                        }
+                        
+                    }   
+                    
+                    match selected_index {
+                        Some(i) => {
+                            let old_block = a[i].clone();
+
+                            let new_block = BufferMemoryBlock { 
+                                allocation_offset: target_allocation_offset, 
+                                buffer_offset: target_buffer_offset, 
+                                size: size, 
+                                user: old_block.user };
+                            let unused_block = BufferMemoryBlock { 
+                                allocation_offset: target_allocation_offset + size, 
+                                buffer_offset: target_buffer_offset + size, 
+                                size: old_block.size - ((target_buffer_offset - old_block.buffer_offset) + size), 
+                                user: Arc::new(false) };
+                            
+                            debug!("Created new buffer block at offset {} and of size {} and an unused block at offset {} and size {}", new_block.buffer_offset, new_block.size, unused_block.buffer_offset, unused_block.size);
+                            
+                            if i > 0 {
+                                let previous_block = &mut a[i-1];
+                                previous_block.size += (target_buffer_offset - (previous_block.buffer_offset + previous_block.size));
+                            }
+
+                            a[i] = new_block;
+                            a.insert(i+1, unused_block);
+                        },
+                        None => {},
+                    }
+                },
+            }
+
+            selected_index
+        }
+    }
+    impl AllocationMemoryBlock{
+        fn get_offset_and_remaining_size(&self, alignment: &AlignmentType) -> (u64, u64) {
+            let data = match alignment {
+                AlignmentType::Free => {
+                    (self.start_offset, self.size)
+                },
+                AlignmentType::Allocation(a) => {
+                    if *a == 1 || self.start_offset == 0 || *a % self.start_offset == 0{
+                        (self.start_offset, self.size)
+                    }
+                    else {
+                        let offset = (self.start_offset/ *a + 1) *  *a;
+                        let size;
+                        if self.size < (offset - self.start_offset){
+                            size = 0;
+                        }
+                        else {
+                            size = self.size - (offset - self.start_offset);
+                        }
+                        (offset, size)
+                    }
+                },
+                AlignmentType::User(_) => {panic!("Cannot use User alignment type on allocation")},
+            };
+            data
+        }
+    }
+    impl BufferMemoryBlock{
+        fn get_offset_and_remaining_size(&self, alignment: &AlignmentType) -> (u64, u64, u64) {
+            let (allocation_offset, buffer_offset, remaining_size) = match alignment {
+                AlignmentType::Free => {
+                    (self.allocation_offset, self.buffer_offset, self.size)
+                },
+                AlignmentType::Allocation(a) => {
+                    if *a == 1 || self.allocation_offset == 0 || *a % self.allocation_offset == 0{
+                        (self.allocation_offset, self.buffer_offset, self.size)
+                    }
+                    else {
+                        let allocation_offset = ((self.allocation_offset/ *a + 1) * *a);
+                        let buffer_offset = allocation_offset + (self.buffer_offset - self.allocation_offset);
+
+                        let size;
+                        if self.size < (buffer_offset - self.buffer_offset){
+                            size = 0;
+                        }
+                        else {
+                            size = self.size - (buffer_offset - self.buffer_offset);
+                        }
+                        
+                        (allocation_offset, buffer_offset, size)
+                    }
+                },
+                AlignmentType::User(a) => {
+                    if *a == 1 || self.buffer_offset == 0 || *a % self.buffer_offset == 0{
+                        (self.allocation_offset, self.buffer_offset, self.size)
+                    }
+                    else{
+                        let buffer_offset = (self.buffer_offset / *a + 1) * *a;
+                        let allocation_offset = buffer_offset + (self.allocation_offset - self.buffer_offset);
+
+                        let size;
+                        if self.size < (buffer_offset - self.buffer_offset){
+                            size = 0;
+                        }
+                        else {
+                            size = self.size - (buffer_offset - self.buffer_offset);
+                        }
+
+                        (allocation_offset, buffer_offset, size)
+                    }
+                },
+            };
+            (allocation_offset, buffer_offset, remaining_size)
+        }
+    }
+    impl Allocation{
+        pub fn new<O, T:IEngine>(engine: &T, properties: vk::MemoryPropertyFlags, object_count: usize, options: &mut [CreateAllocationOptions]) -> Allocation {
+            let pd_properties = engine.get_property_store();
+            let type_index = pd_properties.get_memory_index(properties);
+            let device = engine.get_device();
+            let size = size_of::<O>() * object_count;
+
+            let mut c_info = vk::MemoryAllocateInfo::builder()
+            .memory_type_index(type_index)
+            .allocation_size(size as u64);
+            for option in options.iter_mut(){
+                match option {
+                    CreateAllocationOptions::MemoryAllocateFlags(f) => c_info = c_info.push_next(f),
+                    _ => {}
+                }
+            }
+            let allocation = unsafe{device.allocate_memory(&c_info, None).expect("Could not allocate memory")};
+            debug!("Created memory {:?} of size {} on type {}", allocation, c_info.allocation_size, type_index);
+
+            let default_block = AllocationMemoryBlock{ 
+                start_offset: 0, 
+                size: c_info.allocation_size, 
+                user: Arc::new(true) 
+            };
+
+            Allocation{ 
+                device, 
+                properties: pd_properties, 
+                memory_type: properties, 
+                allocation, 
+                c_info: c_info.build(), 
+                blocks: MemoryBlockArray::Allocation(vec![default_block]),
+                }
+        }
+        pub fn create_buffer<O>(&mut self, usage: vk::BufferUsageFlags, object_count: usize, options: &[CreateBufferOptions]) -> Buffer {
+            let buffer_size = size_of::<O>() * object_count;
+
+            let mut c_info = vk::BufferCreateInfo::builder()
+            .size(buffer_size as u64)
+            .usage(usage);
+
+            for option in options.iter(){
+                match option {
+                    CreateBufferOptions::BufferCreateFlags(f) => {
+                        debug!("Using non-standard buffer create flags");
+                        c_info = c_info.flags(*f);
+                    },
+                    CreateBufferOptions::SizeOverkillFactor(factor) => c_info = c_info.size(buffer_size as u64 * *factor),
+                    _ => {}
+                }
+            }
+
+            let buffer = unsafe{self.device.create_buffer(&c_info, None).expect("Could not create buffer")};
+            let mem_reqs = unsafe{self.device.get_buffer_memory_requirements(buffer)};
+            // if !self.memory_type.contains(vk::MemoryPropertyFlags::from_raw(mem_reqs.memory_type_bits)){
+            //     panic!("Trying to create buffer on incompatable memory");
+            // }
+
+            let block_index = self.blocks.try_get_region(mem_reqs.size, AlignmentType::Allocation(mem_reqs.alignment)).expect("Not enough space for buffer binding");
+
+            let block = match &self.blocks {
+                MemoryBlockArray::Allocation(a) => {
+                    a[block_index].clone()
+                },
+                MemoryBlockArray::Buffer(_) => panic!("What?"),
+            };
+
+            unsafe{
+                self.device.bind_buffer_memory(buffer, self.allocation, block.start_offset);
+            }
+
+            let default_block = BufferMemoryBlock{ 
+                allocation_offset: block.start_offset, 
+                buffer_offset: 0, 
+                size: c_info.size, 
+                user: Arc::new(true) };
+
+            Buffer{ 
+                device: self.device.clone(), 
+                properties: self.properties.clone(), 
+                buffer, 
+                memory_type: self.memory_type, 
+                memory_index: self.c_info.memory_type_index, 
+                c_info: c_info.build(),
+                home_block: block,
+                blocks: MemoryBlockArray::Buffer(vec![default_block]),
+             }
+        }
+    }
+    impl Drop for Allocation{
+        fn drop(&mut self) {
+            debug!("Destroying allocation {:?}", self.allocation);
+            unsafe{
+                self.device.free_memory(self.allocation, None);
+            }
+    }
+    }
+    impl Buffer{
+        pub fn get_region<T>(&mut self, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+            let size = size_of::<T>() * object_count;
+            let alignment = match alignment {
+                AlignmentType::Free => {
+                    if self.c_info.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
+                        AlignmentType::User(self.properties.pd_properties.limits.min_storage_buffer_offset_alignment)
+                    }
+                    else {
+                        AlignmentType::Free
+                    }
+                },
+                AlignmentType::Allocation(a) => AlignmentType::Allocation(a),
+                AlignmentType::User(a) => AlignmentType::User(a),
+            };
+            let block_index = self.blocks.try_get_region(size as u64, alignment).expect("Could not find buffer block big enough for requested region");
+            let block = match &self.blocks {
+                MemoryBlockArray::Allocation(_) => panic!("Should not be here"),
+                MemoryBlockArray::Buffer(a) => a[block_index].clone(),
+            };
+            let default_block = BufferMemoryBlock{ 
+                allocation_offset: block.allocation_offset, 
+                buffer_offset: block.buffer_offset, 
+                size: size as u64, 
+                user: Arc::new(true) };
+            BufferRegion{ 
+                device: self.device.clone(), 
+                properties: self.properties.clone(), 
+                buffer: self.buffer, 
+                memory_type: self.memory_type, 
+                memory_index: self.memory_index, 
+                buffer_usage: self.c_info.usage, 
+                home_block: block,
+                blocks: MemoryBlockArray::Buffer(vec![default_block]), }
+        }
+    }
+    impl Drop for Buffer{
+        fn drop(&mut self) {
+            debug!("Destroying buffer {:?}", self.buffer);
+            unsafe{
+                self.device.destroy_buffer(self.buffer, None);
+            }
+    }
+    }
+    impl BufferRegion{
+        pub fn get_region<T>(&mut self, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+            let size = size_of::<T>() * object_count;
+            let alignment = match alignment {
+                AlignmentType::Free => {
+                    if self.buffer_usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
+                        AlignmentType::User(self.properties.pd_properties.limits.min_storage_buffer_offset_alignment)
+                    }
+                    else {
+                        AlignmentType::Free
+                    }
+                },
+                AlignmentType::Allocation(a) => AlignmentType::Allocation(a),
+                AlignmentType::User(a) => AlignmentType::User(a),
+            };
+            let block_index = self.blocks.try_get_region(size as u64, alignment).expect("Could not find buffer block big enough for requested region");
+            let block = match &self.blocks {
+                MemoryBlockArray::Allocation(_) => panic!("Should not be here"),
+                MemoryBlockArray::Buffer(a) => a[block_index].clone(),
+            };
+            let default_block = BufferMemoryBlock{ 
+                allocation_offset: block.allocation_offset, 
+                buffer_offset: block.buffer_offset, 
+                size: size as u64, 
+                user: Arc::new(true) };
+            BufferRegion{ 
+                device: self.device.clone(), 
+                properties: self.properties.clone(), 
+                buffer: self.buffer, 
+                memory_type: self.memory_type, 
+                memory_index: self.memory_index, 
+                buffer_usage: self.buffer_usage, 
+                home_block: block,
+                blocks: MemoryBlockArray::Buffer(vec![default_block]), }
+        }
+    }
+}
+pub mod descriptor{}
 pub mod sync{}
 pub mod ray_tracing{}
-
+pub mod shader{}
+pub mod compute{}
 
 #[cfg(test)]
 mod tests{
