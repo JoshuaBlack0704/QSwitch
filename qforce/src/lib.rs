@@ -2493,12 +2493,19 @@ pub mod core{
 
 }
 
+
+pub trait IDisposable {
+    fn dispose(&mut self);
+}
+
 #[allow(dead_code, unused)]
 pub mod init{
     use std::{ffi::CStr, borrow::{Cow, BorrowMut}, os::raw::c_char, f32::consts::E};
     use ash::vk;
     use log::debug;
     use winit::{window::Window, dpi::PhysicalSize};
+
+    use crate::{memory, IDisposable};
     unsafe extern "system" fn vulkan_debug_callback(
         message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
         message_type: vk::DebugUtilsMessageTypeFlagsEXT,
@@ -2589,7 +2596,8 @@ pub mod init{
         swapchain_loader: ash::extensions::khr::Swapchain,
         swapchain: vk::SwapchainKHR,
         c_info: vk::SwapchainCreateInfoKHR,
-        images: Vec<vk::Image>,
+        images: Vec<memory::ImageResources>,
+        disposed: bool,
     }
     #[derive(Clone)]
     pub struct PhysicalDevicePropertiesStore{
@@ -3207,19 +3215,82 @@ pub mod init{
             debug!("Created swapchain {:?} of resolution {} x {}",swapchain, surface_resolution.width, surface_resolution.height);
             let images = unsafe{swapchain_loader.get_swapchain_images(swapchain).expect("Could not retrieve swapchain images")};
 
-            SwapchainStore{ swapchain_loader, swapchain, images, c_info: swapchain_create_info.build() }
+            let images = images.iter().map(|i| {
+                memory::ImageResources::new_from_image(
+                    engine, 
+                    i.clone(), 
+                    vk::ImageLayout::UNDEFINED, 
+                    surface_resolution.into(), 
+                    vk::ImageAspectFlags::COLOR,
+                    0, 
+                    1, 
+                    0, 
+                    1, 
+                    vk::ImageViewType::TYPE_2D, 
+                    chosen_format.format, 
+                    &[])
+                    
+            }).collect();
+
+            SwapchainStore{ swapchain_loader, swapchain, c_info: swapchain_create_info.build(), images, disposed: false }
         }
         pub fn get_extent(&self) -> vk::Extent2D {
             self.c_info.image_extent
         }
+        pub fn get_image(&self, index: usize) -> memory::ImageResources {
+            self.images[index].clone()
+        }
+        pub fn get_next_image(&mut self, timeout: u64, semaphore: Option<vk::Semaphore>, fence: Option<vk::Fence> ) -> (u32, &mut memory::ImageResources) {
+
+            let semaphore = match semaphore {
+                Some(s) => s,
+                None => vk::Semaphore::null(),
+            };
+            let fence = match fence {
+                Some(f) => f,
+                None => vk::Fence::null(),
+            };
+
+            let next = unsafe{self.swapchain_loader.acquire_next_image(self.swapchain, timeout, semaphore, fence).expect("Could not get next swapchain image index")};
+            
+            (next.0, &mut self.images[next.0 as usize])
+        
+        }
+        pub fn get_format(&self) -> vk::Format {
+            self.c_info.image_format
+        }
+        pub fn get_swapchain(&self) -> vk::SwapchainKHR {
+            self.swapchain
+        }
+        pub fn present(&self, queue: vk::Queue, index: u32, wait_semaphores: &[vk::Semaphore]){
+            let index = [index];
+            let swapchain = [self.swapchain];
+            
+            let present_info = vk::PresentInfoKHR::builder()
+            .image_indices(&index)
+            .swapchains(&swapchain)
+            .wait_semaphores(wait_semaphores);
+
+            unsafe{
+                self.swapchain_loader.queue_present(queue, &present_info).expect("Could not present swapchain");
+            }
+        }
+    }
+    impl IDisposable for SwapchainStore{
+        fn dispose(&mut self) {
+            if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying swapchain {:?}", self.swapchain);
+                unsafe{
+                    self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+                }
+            }
+        }
     }
     impl Drop for SwapchainStore{
         fn drop(&mut self) {
-        debug!("Destroying swapchain {:?}", self.swapchain);
-        unsafe{
-            self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+            self.dispose();
         }
-    }
     }
 }
 #[allow(dead_code, unused)]
@@ -3227,7 +3298,7 @@ pub mod memory{
     use std::{sync::Arc, mem::size_of};
     use ash::{self, vk};
     use log::debug;
-    use crate::init::{self,IEngine,PhysicalDevicePropertiesStore, Engine};
+    use crate::{init::{self,IEngine,PhysicalDevicePropertiesStore, Engine}, IDisposable};
 
     #[derive(Clone)]
     pub enum AlignmentType{
@@ -3288,6 +3359,7 @@ pub mod memory{
         allocation: vk::DeviceMemory,
         c_info: vk::MemoryAllocateInfo,
         blocks: MemoryBlockArray,
+        disposed: bool,
     }
     pub struct Buffer{
         device: ash::Device,
@@ -3298,6 +3370,7 @@ pub mod memory{
         c_info: vk::BufferCreateInfo,
         home_block: AllocationMemoryBlock,
         blocks: MemoryBlockArray,
+        disposed: bool,
     }
     pub struct BufferRegion{
         device: ash::Device,
@@ -3317,7 +3390,9 @@ pub mod memory{
         memory_index: u32,
         c_info: vk::ImageCreateInfo,
         home_block: AllocationMemoryBlock,
+        disposed: bool,
     }
+    #[derive(Clone)]
     pub struct ImageResources{
         device: ash::Device,
         properties: PhysicalDevicePropertiesStore,
@@ -3330,6 +3405,7 @@ pub mod memory{
         target_offset: vk::Offset3D,
         target_extent: vk::Extent3D,
         target_layers: vk::ImageSubresourceLayers,
+        disposed: bool,
     }
 
 
@@ -3625,6 +3701,7 @@ pub mod memory{
                 allocation, 
                 c_info: c_info.build(), 
                 blocks: MemoryBlockArray::Allocation(vec![default_block]),
+                disposed: false,
                 }
         }
         pub fn create_buffer<O>(&mut self, usage: vk::BufferUsageFlags, object_count: usize, options: &[CreateBufferOptions]) -> Buffer {
@@ -3681,6 +3758,7 @@ pub mod memory{
                 c_info: c_info.build(),
                 home_block: block,
                 blocks: MemoryBlockArray::Buffer(vec![default_block]),
+                disposed: false,
              }
         }
         pub fn create_image(&mut self, usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> Image {
@@ -3761,7 +3839,8 @@ pub mod memory{
                 memory_type: self.memory_type, 
                 memory_index: self.c_info.memory_type_index, 
                 c_info: c_info.build(), 
-                home_block: block }
+                home_block: block,
+                disposed: false, }
         }
         pub fn copy_from_ram<O>(&mut self, src: *const O, object_count: usize, dst: &BufferRegion){
             assert!((size_of::<O>() * object_count) as u64 <= dst.home_block.size);
@@ -3810,12 +3889,20 @@ pub mod memory{
             self.copy_to_ram(src, dst, object_count);
         }
     }
-    impl Drop for Allocation{
-        fn drop(&mut self) {
+    impl IDisposable for Allocation{
+        fn dispose(&mut self) {
+        if !self.disposed{
+            self.disposed = true;
             debug!("Destroying allocation {:?}", self.allocation);
             unsafe{
                 self.device.free_memory(self.allocation, None);
             }
+        }
+    }
+    }
+    impl Drop for Allocation{
+        fn drop(&mut self) {
+            self.dispose();
     }
     }
     impl Buffer{
@@ -3854,12 +3941,21 @@ pub mod memory{
                 blocks: MemoryBlockArray::Buffer(vec![default_block]), }
         }
     }
-    impl Drop for Buffer{
-        fn drop(&mut self) {
+    impl IDisposable for Buffer{
+        fn dispose(&mut self) {
+        if !self.disposed{
+            self.disposed = true;
             debug!("Destroying buffer {:?}", self.buffer);
             unsafe{
                 self.device.destroy_buffer(self.buffer, None);
             }
+        }
+        
+    }
+    }
+    impl Drop for Buffer{
+        fn drop(&mut self) {
+            self.dispose();
     }
     }
     impl BufferRegion{
@@ -3980,19 +4076,28 @@ pub mod memory{
                 memory_index: self.memory_index, 
                 target_offset: vk::Offset3D::builder().build(),
                 target_extent,
-                target_layers, }
+                target_layers,
+                disposed: false, }
 
         }
         pub fn get_extent(&self) -> vk::Extent3D {
             self.c_info.extent
         }
     }
-    impl Drop for Image{
-        fn drop(&mut self) {
+    impl IDisposable for Image{
+        fn dispose(&mut self) {
+        if !self.disposed{
+            self.disposed = true;
             debug!("Destroying image {:?}", self.image);
             unsafe{
                 self.device.destroy_image(self.image, None);
             }
+        }
+    }
+    }
+    impl Drop for Image{
+        fn drop(&mut self) {
+            self.dispose();
     }
     }
     impl ImageResources{
@@ -4032,18 +4137,193 @@ pub mod memory{
                 self.device.cmd_copy_image_to_buffer(cmd, self.image, self.layout, dst.buffer, &copy);
             }
         }
+        pub fn copy_to_image(&self, cmd: vk::CommandBuffer, dst: &ImageResources){
+            let copy = [vk::ImageCopy::builder()
+            .src_subresource(self.target_layers)
+            .src_offset(self.target_offset)
+            .dst_subresource(dst.target_layers)
+            .dst_offset(dst.target_offset)
+            .extent(self.target_extent)
+            .build()];
+
+            unsafe{
+                self.device.cmd_copy_image(cmd, self.image, self.layout, dst.image, dst.layout, &copy);
+            }
+        }
+        pub fn new_from_image<T:IEngine>(engine: &T, image: vk::Image, layout: vk::ImageLayout, extent: vk::Extent3D, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources {
+            let mut layout = layout;
+            let sizzle = vk::ComponentMapping::builder()
+            .a(vk::ComponentSwizzle::A)
+            .r(vk::ComponentSwizzle::R)
+            .g(vk::ComponentSwizzle::G)
+            .b(vk::ComponentSwizzle::B);
+            let subresource = vk::ImageSubresourceRange::builder()
+            .aspect_mask(aspect)
+            .base_mip_level(base_mip_level)
+            .level_count(mip_level_depth)
+            .base_array_layer(base_layer)
+            .layer_count(layer_depth);
+            let mut c_info = vk::ImageViewCreateInfo::builder()
+            .image(image)
+            .view_type(view_type)
+            .format(format)
+            .components(sizzle.build())
+            .subresource_range(subresource.build());
+            for option in options.iter(){
+                match option {
+                    CreateImageResourceOptions::Swizzle(s) => {
+                        debug!("Using non standard image view swizzle");
+                        c_info = c_info.components(*s);
+                    },
+                    CreateImageResourceOptions::Flags(f) => {
+                        debug!("Using non standard image create flags");
+                        c_info = c_info.flags(*f);
+                    },
+                    CreateImageResourceOptions::Layout(l) => {
+                        debug!("Using non standard image layout");
+                        layout = *l;
+                    },
+                }
+            }
+            
+            let view = unsafe{engine.get_device().create_image_view(&c_info, None).expect("Could not create image view")};
+            debug!("Created image view {:?}", view);
+
+            let target_extent = extent;
+            let target_layers = vk::ImageSubresourceLayers::builder()
+            .aspect_mask(aspect)
+            .mip_level(base_mip_level)
+            .base_array_layer(base_layer)
+            .layer_count(layer_depth)
+            .build();
+
+            ImageResources{ 
+                device: engine.get_device(), 
+                properties: engine.get_property_store(), 
+                image, 
+                layout, 
+                view, 
+                c_info: c_info.build(), 
+                memory_type: vk::MemoryPropertyFlags::empty(), 
+                memory_index: 0, 
+                target_offset: vk::Offset3D::builder().build(), 
+                target_extent, 
+                target_layers,
+                disposed: false, }
+        }
+    }
+    impl IDisposable for ImageResources{
+        fn dispose(&mut self) {
+        if !self.disposed{
+            self.disposed = true;
+            debug!("Destroying image view {:?}", self.view);
+            unsafe{
+                self.device.destroy_image_view(self.view, None);
+            }
+        }
+    }
     }
     impl Drop for ImageResources{
     fn drop(&mut self) {
-        debug!("Destroying image view {:?}", self.view);
-        unsafe{
-            self.device.destroy_image_view(self.view, None);
-        }
+        self.dispose();
     }
-}
+ }
 }
 pub mod descriptor{}
-pub mod sync{}
+pub mod sync{
+    use ash::vk;
+    use log::debug;
+
+    use crate::{init::IEngine, IDisposable};
+
+    pub struct Fence{
+        device: ash::Device,
+        fence: ash::vk::Fence,
+        disposed: bool,
+    }
+    impl Fence{
+        pub fn new<T: IEngine>(engine: &T, start_signaled: bool) -> Fence{
+            let fence;
+            let c_info;
+            if start_signaled{
+                c_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
+            }
+            else {
+                c_info = vk::FenceCreateInfo::builder().build();
+            }
+
+            unsafe{
+                fence = engine.get_device().create_fence(&c_info, None).expect("Could not create fence");
+            }
+            debug!("Created fence {:?}", fence);
+            Fence{ device: engine.get_device(), fence, disposed: false }
+        }
+        pub fn wait(&self){
+            unsafe{
+                self.device.wait_for_fences(&[self.fence], true, u64::max_value()).expect("Could not wait on fence");
+            }
+        }
+        pub fn wait_reset(&self){
+            self.wait();
+            unsafe{
+                self.device.reset_fences(&[self.fence]).expect("Could not reset fence");
+            }
+        }
+        pub fn get_fence(&self) -> vk::Fence{
+            self.fence
+        }
+    }
+    impl IDisposable for Fence{
+        fn dispose(&mut self) {
+        if !self.disposed{
+            self.disposed = true;
+            debug!("Destroying fence {:?}", self.fence);
+            unsafe{
+                self.device.destroy_fence(self.fence, None);
+            }
+        }
+    }
+    }
+    impl Drop for Fence{
+        fn drop(&mut self) {
+            self.dispose();
+        }
+    }
+
+    pub struct Semaphore{
+        device: ash::Device,
+        pub semaphore: vk::Semaphore,
+        disposed: bool,
+    }
+    impl Semaphore{
+        pub fn new<T: IEngine>(engine: &T) -> Semaphore {
+            let device = engine.get_device();
+            let c_info = vk::SemaphoreCreateInfo::builder().build();
+            let semaphore = unsafe{device.create_semaphore(&c_info, None).expect("Could not create semaphore")};
+            debug!("Created semaphore {:?}", semaphore);
+
+            Semaphore{
+                device,
+                semaphore,
+                disposed: false,
+            }
+        }
+    }
+    impl IDisposable for Semaphore{
+        fn dispose(&mut self) {
+        if !self.disposed{
+            self.disposed = true;
+            debug!("Destroying semaphore {:?}", self.semaphore);
+            unsafe{self.device.destroy_semaphore(self.semaphore, None)};
+        }
+    }
+    }
+    impl Drop for Semaphore{
+        fn drop(&mut self) {
+            self.dispose();
+    }
+    }
+}
 pub mod ray_tracing{}
 pub mod shader{}
 pub mod compute{}
