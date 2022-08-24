@@ -7,20 +7,21 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'qforce'",
+            "name": "Debug target test in library 'qforce'",
             "cargo": {
                 "args": [
                     "test",
+                    "target",
                     "--no-run",
                     "--lib",
-                    "--package=qforce"
+                    "--package=qforce",
                 ],
                 "filter": {
                     "name": "qforce",
                     "kind": "lib"
                 }
             },
-            "args": ["redesign_space"],
+            "args": ["target"],
             "cwd": "${workspaceFolder}",
             "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
         },
@@ -105,15 +106,15 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'redesign'",
+            "name": "Debug window_test 'init'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=redesign",
+                    "--bin=init",
                     "--package=examples"
                 ],
                 "filter": {
-                    "name": "redesign",
+                    "name": "init",
                     "kind": "bin"
                 }
             },

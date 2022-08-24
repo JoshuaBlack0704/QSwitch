@@ -48,8 +48,6 @@ fn main(){
         
         
     let mut swapchain = init::SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST)]);
-    let mut mem = qforce::memory::Allocation::new::<u8,_>(&engine, vk::MemoryPropertyFlags::HOST_COHERENT, 10000, &mut []);
-    
     
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
@@ -58,7 +56,6 @@ fn main(){
             winit::event::Event::WindowEvent {event, .. } => {
                 match event {
                     winit::event::WindowEvent::CloseRequested => {
-                        drop(&mem);
                         *control_flow = winit::event_loop::ControlFlow::Exit;
                     },
                     winit::event::WindowEvent::Resized(_) => {
@@ -73,11 +70,6 @@ fn main(){
             winit::event::Event::Suspended => {},
             winit::event::Event::Resumed => {},
             winit::event::Event::MainEventsCleared => {
-                let mut b1 = mem.create_buffer::<u8>(vk::BufferUsageFlags::STORAGE_BUFFER, 1001, &[]);
-                let mut r1 = b1.get_region::<u8>(120, qforce::memory::AlignmentType::Free, &[]);
-                let mut r2 = b1.get_region::<u8>(100, qforce::memory::AlignmentType::Free, &[]);
-                let r4 = r1.get_region::<u8>(50, qforce::memory::AlignmentType::Free, &[]);
-                let r5 = r1.get_region::<u8>(50, qforce::memory::AlignmentType::Free, &[]);
             },
             winit::event::Event::RedrawRequested(_) => {},
             winit::event::Event::RedrawEventsCleared => {},
