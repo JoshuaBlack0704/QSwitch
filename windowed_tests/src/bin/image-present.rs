@@ -34,7 +34,7 @@ fn main(){
         }
         
         
-        
+    let allocator = qforce::memory::Allocator::new(&engine);
     let mut swapchain = init::SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)]);
     
     let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
@@ -46,11 +46,11 @@ fn main(){
     let mut data:Vec<u32> = vec![u32::from_be_bytes([255,255,0,0]);(width*height) as usize];
 
     let mut cpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::HOST_COHERENT, data.len()*20, &mut []);
-    let mut cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]);
-    let mut staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]);
+    let mut cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]).unwrap();
+    let mut staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).unwrap();
 
     let mut gpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*20, &mut []);
-    let mut image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, swapchain.get_format(), extent, &[]);
+    let mut image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, swapchain.get_format(), extent, &[]).unwrap();
     let mut processing = image.get_resources(
         vk::ImageAspectFlags::COLOR, 
         0, 
@@ -92,10 +92,10 @@ fn main(){
                         processing.dispose();
 
                         cpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::HOST_COHERENT, data.len(), &mut []);
-                        cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]);
-                        staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]);
+                        cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]).unwrap();
+                        staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).unwrap();
                         gpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*20, &mut []);
-                        image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, swapchain.get_format(), extent, &[]);
+                        image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, swapchain.get_format(), extent, &[]).unwrap();
                         processing = image.get_resources(
                             vk::ImageAspectFlags::COLOR, 
                             0, 
