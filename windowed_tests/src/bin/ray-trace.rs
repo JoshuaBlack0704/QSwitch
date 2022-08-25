@@ -47,7 +47,7 @@ fn main(){
 {
     let ic_info = vk::ImageCreateInfo::builder()
     .image_type(vk::ImageType::TYPE_2D)
-    .format(engine.swapchain_info().image_format)
+    .format(vk::Format::B8G8R8A8_UNORM)
     .extent(swapchain_extent_3d)
     .mip_levels(1)
     .array_layers(1)
@@ -88,7 +88,7 @@ fn main(){
     let c_info = vk::ImageViewCreateInfo::builder()
         .image(render_target)
         .view_type(vk::ImageViewType::TYPE_2D)
-        .format(engine.swapchain_info().image_format)
+        .format(vk::Format::B8G8R8A8_UNORM)
         .components(sizzle)
         .subresource_range(subresource)
         .build();

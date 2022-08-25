@@ -140,10 +140,7 @@ pub mod core{
                 let mut has_compute = false;
     
                 for (index, family) in queue_families.iter().enumerate(){
-                    if has_graphics_present && has_transfer && has_compute {
-                        debug!("All queue type available, Device {:?} selected", name);
-                        return Some(*physical_device)
-                    }
+                    
                     if !has_graphics_present {
                         if  family.queue_flags.contains(vk::QueueFlags::GRAPHICS) && surface_loader.get_physical_device_surface_support(*physical_device, index as u32, surface).unwrap(){
                             debug!("Queue family {} on device {:?} contains graphics and surface", index, name);
@@ -162,6 +159,10 @@ pub mod core{
                             debug!("Queue family {} on device {:?} contains compute", index, name);
                             has_compute = true;
                         }
+                    }
+                    if has_graphics_present && has_transfer && has_compute {
+                        debug!("All queue type available, Device {:?} selected", name);
+                        return Some(*physical_device)
                     }
                 }
     
@@ -2946,14 +2947,14 @@ pub mod init{
 
                 let capable = match &surface_support {
                     Some(_) => {
-                        device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
+                        //device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
                         has_graphics &&
                         has_transfer &&
                         has_compute &&
                         has_surface
                     },
                     None => {
-                        device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
+                        //device_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU &&
                         has_graphics &&
                         has_transfer &&
                         has_compute},

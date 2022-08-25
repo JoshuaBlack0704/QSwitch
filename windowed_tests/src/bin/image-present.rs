@@ -50,7 +50,7 @@ fn main(){
     let mut staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).unwrap();
 
     let mut gpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*20, &mut []);
-    let mut image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, swapchain.get_format(), extent, &[]).unwrap();
+    let mut image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[]).unwrap();
     let mut processing = image.get_resources(
         vk::ImageAspectFlags::COLOR, 
         0, 
@@ -58,7 +58,7 @@ fn main(){
         0, 
         1, 
         vk::ImageViewType::TYPE_2D, 
-        swapchain.get_format(), 
+        vk::Format::B8G8R8A8_UNORM, 
         &[]);
 
 
@@ -95,7 +95,7 @@ fn main(){
                         cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]).unwrap();
                         staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).unwrap();
                         gpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*20, &mut []);
-                        image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, swapchain.get_format(), extent, &[]).unwrap();
+                        image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[]).unwrap();
                         processing = image.get_resources(
                             vk::ImageAspectFlags::COLOR, 
                             0, 
@@ -103,7 +103,7 @@ fn main(){
                             0, 
                             1, 
                             vk::ImageViewType::TYPE_2D, 
-                            swapchain.get_format(), 
+                            vk::Format::B8G8R8A8_UNORM, 
                             &[]);
 
 
