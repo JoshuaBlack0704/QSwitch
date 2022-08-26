@@ -3494,10 +3494,10 @@ pub mod memory{
             self.settings.push(profile);
             self.settings.len()-1
         }
-        pub fn get_buffer_region<O>(&mut self, profile: AllocatorProfileStack, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
             let mut buffer_profile = match profile {
                 AllocatorProfileStack::TargetBuffer(_, b) => {
-                    match &self.settings[b] {
+                    match &self.settings[*b] {
                         AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
                         AllocatorProfileType::Buffer(b) => b.clone(),
                         AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
@@ -3507,7 +3507,7 @@ pub mod memory{
             };
             let mut alloc_profile = match profile {
                 AllocatorProfileStack::TargetBuffer(a, _) => {
-                    match &self.settings[a] {
+                    match &self.settings[*a] {
                         AllocatorProfileType::Allocation(a) => a.clone(),
                         AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                         AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
@@ -3555,6 +3555,10 @@ pub mod memory{
                                     Ok(mut b) => {
                                         b.allocation_resource_index = a.allocation_resource_index;
                                         b.buffer_resource_index = self.resources.len();
+                                        match profile {
+                                            AllocatorProfileStack::TargetBuffer(_, i) => self.settings[*i].add_to_dependants(b.buffer_resource_index),
+                                            AllocatorProfileStack::TargetImage(_, _) => panic!("Profile settings mismatch"),
+                                        }
                                         match b.get_region::<O>(object_count, alignment.clone(), options) {
                                             Ok(mut r) => {
                                                 r.allocation_resource_index = b.allocation_resource_index;
@@ -3618,6 +3622,13 @@ pub mod memory{
                         },
                     };
 
+                    match profile {
+                        AllocatorProfileStack::TargetBuffer(ai, bi) => {
+                            self.settings[*bi].add_to_dependants(buffer.buffer_resource_index);
+                            self.settings[*ai].add_to_dependants(allocation.allocation_resource_index);
+                        },
+                        AllocatorProfileStack::TargetImage(_, _) => todo!(),
+                    }
                     new_resources.push(AllocatorResourceType::Allocation(allocation));
                     new_resources.push(AllocatorResourceType::Buffer(buffer));
 
@@ -3630,11 +3641,11 @@ pub mod memory{
 
             region
         }
-        pub fn get_image_resources(&mut self, profile: AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources {
+        pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources {
             let mut image_profile = match profile {
                 AllocatorProfileStack::TargetBuffer(_, _) => panic!("Using image profile stack in buffer region request"),
                 AllocatorProfileStack::TargetImage(_, i) => {
-                    match &self.settings[i] {
+                    match &self.settings[*i] {
                         AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
                         AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                         AllocatorProfileType::Image(i) => i.clone(),
@@ -3643,7 +3654,7 @@ pub mod memory{
             };
             let mut alloc_profile = match profile {
                 AllocatorProfileStack::TargetBuffer(a, _) => {
-                    match &self.settings[a] {
+                    match &self.settings[*a] {
                         AllocatorProfileType::Allocation(a) => a.clone(),
                         AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                         AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
@@ -3677,6 +3688,10 @@ pub mod memory{
                                     Ok(mut i) => {
                                         i.allocation_resource_index = a.allocation_resource_index;
                                         i.image_resource_index = resources_len;
+                                        match profile {
+                                            AllocatorProfileStack::TargetBuffer(_, _) => panic!("Profile settings mismatch"),
+                                            AllocatorProfileStack::TargetImage(_, index) => self.settings[*index].add_to_dependants(i.image_resource_index),
+                                        }
                                         img_resource = Some(i.get_resources(aspect, base_mip_level, mip_level_depth, base_layer, layer_depth, view_type, format, options));
                                         new_resources.push(AllocatorResourceType::Image(i));
                                     },
@@ -3714,7 +3729,13 @@ pub mod memory{
                             }
                         },
                     };
-
+                    match profile {
+                        AllocatorProfileStack::TargetBuffer(_, _) => panic!("Profile settings mismatch"),
+                        AllocatorProfileStack::TargetImage(ai, ii) => {
+                            self.settings[*ii].add_to_dependants(image.image_resource_index);
+                            self.settings[*ai].add_to_dependants(allocation.allocation_resource_index)
+                        },
+                    }
                     new_resources.push(AllocatorResourceType::Allocation(allocation));
                     new_resources.push(AllocatorResourceType::Image(image));
                     region
@@ -3762,6 +3783,9 @@ pub mod memory{
         }
     }
     impl AllocationAllocatorProfile{
+        pub fn new(memory_properties: vk::MemoryPropertyFlags, minimum_size: u64, options: &[CreateAllocationOptions]) -> AllocationAllocatorProfile {
+            AllocationAllocatorProfile{ dependant_allocations: vec![], memory_properties, options: options.to_vec(), minimum_size }
+        }
         fn correct_minimum_size<O>(&self, object_count: usize) -> usize{
             let size = object_count*size_of::<O>();
             if self.minimum_size > size as u64{
@@ -3773,6 +3797,9 @@ pub mod memory{
         }
     }
     impl BufferAllocatorProfile{
+        pub fn new(usage: vk::BufferUsageFlags, minimum_size: u64, options: &[CreateBufferOptions]) -> BufferAllocatorProfile {
+            BufferAllocatorProfile{ dependant_buffers: vec![], usage, options: options.to_vec(), minimum_size }
+        }
         fn correct_minimum_size<O>(&self, object_count: usize) -> usize{
             let size = object_count*size_of::<O>();
             if self.minimum_size > size as u64{
@@ -3783,12 +3810,35 @@ pub mod memory{
             }
         }
     }
+    impl ImageAllocatorProfile{
+        pub fn new(usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> ImageAllocatorProfile {
+            ImageAllocatorProfile{ 
+                dependant_images: vec![], 
+                usage, 
+                format, 
+                extent, 
+                options: options.to_vec() }
+        }
+    }
     impl AllocatorProfileStack{
         pub fn new_buffer(allocation_profile_index: usize, buffer_profile_index:usize) -> AllocatorProfileStack {
             AllocatorProfileStack::TargetBuffer(allocation_profile_index, buffer_profile_index)
         }
         pub fn new_image(allocation_profile_index: usize, image_profile_index:usize) -> AllocatorProfileStack {
             AllocatorProfileStack::TargetImage(allocation_profile_index, image_profile_index)
+        }
+    }
+    impl AllocatorProfileType{
+        fn add_to_dependants(&mut self, index: usize){
+            match self  {
+                AllocatorProfileType::Allocation(a) => {
+                    a.dependant_allocations.push(index);
+                },
+                AllocatorProfileType::Buffer(b) => {
+                    b.dependant_buffers.push(index);
+                },
+                AllocatorProfileType::Image(_) => todo!(),
+            }
         }
     }
     impl MemoryBlockArray{

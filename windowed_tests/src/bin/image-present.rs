@@ -1,4 +1,4 @@
-use qforce::{init::{self, IEngine, WindowedEngine}, memory::{AlignmentType, Allocation}, sync, IDisposable};
+use qforce::{init::{self, IEngine, WindowedEngine}, memory::{AlignmentType, Allocation, self, AllocatorProfileType, AllocationAllocatorProfile, BufferAllocatorProfile}, sync, IDisposable};
 use ash::vk;
 
 #[cfg(debug_assertions)]
@@ -34,7 +34,10 @@ fn main(){
         }
         
         
-    let allocator = qforce::memory::Allocator::new(&engine);
+    let mut allocator = memory::Allocator::new(&engine);
+
+    
+
     let mut swapchain = init::SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)]);
     
     let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
@@ -42,6 +45,17 @@ fn main(){
     let mut width:u32 = swapchain.get_extent().width;
     let mut height:u32 = swapchain.get_extent().height;
     let mut extent = vk::Extent3D::builder().width(width).height(height).depth(1).build();
+
+
+    let host_profile = allocator.add_profile(AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, 1024*1024, &[])));
+    let buffer_profile = allocator.add_profile(AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER, 1024, &[])));
+    let image_profile = allocator.add_profile(AllocatorProfileType::Image(memory::ImageAllocatorProfile::new(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[])));
+    let staging_stack = memory::AllocatorProfileStack::TargetBuffer(host_profile, buffer_profile);
+    let staging = allocator.get_buffer_region::<u8>(&staging_stack, 10*1024, AlignmentType::Free, &[]);
+    let staging1 = allocator.get_buffer_region::<u8>(&staging_stack, 10*1024, AlignmentType::Free, &[]);
+    let staging2 = allocator.get_buffer_region::<u8>(&staging_stack, 10*1024, AlignmentType::Free, &[]);
+
+
 
     let mut data:Vec<u32> = vec![u32::from_be_bytes([255,255,0,0]);(width*height) as usize];
 
