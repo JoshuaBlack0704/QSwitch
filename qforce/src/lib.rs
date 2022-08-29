@@ -28,7 +28,7 @@ pub mod enums{
         Buffer(vk::DescriptorBufferInfo),
     }
 }
-
+ 
 #[allow(dead_code)]
 pub mod traits{
     use flume;
@@ -3630,10 +3630,129 @@ pub mod memory{
                 image_resource_index: 0 }
 
         }
-        pub fn get_buffer_region<T>(&mut self, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> Result<BufferRegion, MemoryBlockError>{
+        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion{
+            let mut region = None;
             
+            
+            //First we need to find and seperate the resources intersection
+            let (allocations, buffers, _) = self.get_resource_intersection(profile);
+            //Then we need to test all buffers or images
+            for buffer in buffers.iter().map(|index| &mut self.resources[*index]){
+                match buffer {
+                    AllocatorResourceType::Allocation(_) => panic!("Wrong intersection"),
+                    AllocatorResourceType::Buffer(b) => {
+                        match b.get_region(object_count, alignment, options){
+                            Ok(mut r) => {
+                                region = Some(r);
+                                break;
+                            },
+                            Err(e) => {
+                                match e {
+                                    MemoryBlockError::NoSpace => {},
+                                }
+                            },
+                        }
+                    },
+                    AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
+                }
+            }
+            //If no buffers have space we need to search all allocations for additional buffer
+            let (usage, object_count, b_options) = match profile{
+                AllocatorProfileStack::TargetBuffer(_, bi) => {
+                    match self.settings[*bi]{
+                        AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                        AllocatorProfileType::Buffer(b) => b.get_settings::<O>(object_count),
+                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                    }
+                },
+                AllocatorProfileStack::TargetImage(_, _) => panic!("Using wrong profile type"),
+            };
+            let buffer = self.create_buffer(usage, object_count, b_options);
+
+            
+            for allocation in allocations.iter().map(|index| &mut self.resources[*index]){
+                match allocation {
+                    AllocatorResourceType::Allocation(a) => {
+                        match a.bind_buffer(&mut buffer){
+                            Ok(_) => {
+                                match buffer.get_region(object_count, alignment, options){
+                                    Ok(r) => {
+                                        region = Some(r);
+                                    },
+                                    Err(e) => match e {
+                                        MemoryBlockError::NoSpace => panic!("Buffer profile settings needs adjustment"),
+                                    },
+                                }
+                            },
+                            Err(e) => match e {
+                                MemoryBlockError::NoSpace => {},
+                            },
+                        };
+                    },
+                    AllocatorResourceType::Buffer(_) => panic!("Wrong intersection"),
+                    AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
+                }
+            }
+            //If no allocations have space we need to create both
+            
+            let allocation = self.create_allocation(properties, object_count, options)
+
+
+
+            region
         }
-        pub fn get_image_resources(&self, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> Result<ImageResources, MemoryBlockError> 
+        pub fn get_image_resources(&self, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> Result<ImageResources, MemoryBlockError> {}
+        fn get_resource_intersection(&self, profile: &AllocatorProfileStack) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+            let allocations = vec![];
+            let buffers = vec![];
+            let images = vec![];
+            for (index, resource) in self.resources.iter().enumerate(){
+
+                match profile{
+                    AllocatorProfileStack::TargetBuffer(ai, bi) => {
+                        match self.settings[*ai]{
+                            AllocatorProfileType::Allocation(a) => {
+                                if a.dependant_allocations.contains(&index){
+                                    allocations.push(index);
+                                }
+                            },
+                            AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                            AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                        }
+                        match self.settings[*bi]{
+                            AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                            AllocatorProfileType::Buffer(b) => {
+                                if b.dependant_buffers.contains(&index){
+                                    buffers.push(index);
+                                }
+                            },
+                            AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                        }
+                    },
+                    AllocatorProfileStack::TargetImage(ai, ii) => {
+                        match self.settings[*ai]{
+                            AllocatorProfileType::Allocation(a) => {
+                                if a.dependant_allocations.contains(&index){
+                                    allocations.push(index);
+                                }
+                            },
+                            AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                            AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                        }
+                        match self.settings[*ii]{
+                            AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                            AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                            AllocatorProfileType::Image(i) => {
+                                if i.dependant_images.contains(&index){
+                                    images.push(index);
+                                }
+                            },
+                        }
+                    },
+                }
+            }
+            (allocations,buffers,images)
+        }
     }
     impl AllocationAllocatorProfile{
         pub fn new(memory_properties: vk::MemoryPropertyFlags, minimum_size: u64, options: &[CreateAllocationOptions]) -> AllocationAllocatorProfile {
@@ -3662,6 +3781,17 @@ pub mod memory{
                 object_count
             }
         }
+        fn get_settings<O>(&self, object_count: usize) -> (vk::BufferUsageFlags, usize, &[CreateBufferOptions]) {
+            let size = (size_of::<O>() * object_count) as u64;
+            if size < self.minimum_size{
+                size = self.minimum_size;
+            }
+
+            let size = size/size_of::<O>() as u64 + 1;
+
+            (self.usage, size as usize, &self.options)
+
+        }
     }
     impl ImageAllocatorProfile{
         pub fn new(usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> ImageAllocatorProfile {
@@ -3681,7 +3811,6 @@ pub mod memory{
             AllocatorProfileStack::TargetImage(allocation_profile_index, image_profile_index)
         }
     }
-    
     
     impl MemoryBlockArray{
         fn merge_unused(&mut self){
@@ -3967,7 +4096,7 @@ pub mod memory{
                         user: Arc::new(true) };
 
                     buffer.memory_info = Some((self.memory_type, self.c_info.memory_type_index, block, MemoryBlockArray::Buffer(vec![default_block])));
-        
+                    buffer.allocation_resource_index = self.allocation_resource_index;
                     Ok(())
                 },
                 Err(e) => Err(e),
@@ -3989,7 +4118,7 @@ pub mod memory{
                     }
                     
                     image.memory_info = Some((self.memory_type, self.c_info.memory_type_index, block));
-        
+                    image.allocation_resource_index = self.allocation_resource_index;
                     Ok(())
                 },
                 Err(e) => Err(e),
@@ -4082,8 +4211,8 @@ pub mod memory{
                         buffer_usage: self.c_info.usage, 
                         home_block: block,
                         blocks: MemoryBlockArray::Buffer(vec![default_block]),
-                        buffer_resource_index: 0,
-                        allocation_resource_index: 0, })
+                        buffer_resource_index: self.buffer_resource_index,
+                        allocation_resource_index: self.allocation_resource_index, })
                 
                 },
                 Err(e) => Err(e),
