@@ -2494,7 +2494,7 @@ pub mod core{
 
 }
 
-
+ 
 pub trait IDisposable {
     fn dispose(&mut self);
 }
@@ -3323,12 +3323,14 @@ pub mod memory{
     #[derive(Clone)]
     pub enum CreateAllocationOptions{
         MemoryAllocateFlags(vk::MemoryAllocateFlagsInfo),
+        MinimumSize(u64),
+        SizeOverkillFactor(u64),
     }
     #[derive(Clone)]
     pub enum CreateBufferOptions{
         BufferCreateFlags(vk::BufferCreateFlags),
-        Alignment(AlignmentType),
         SizeOverkillFactor(u64),
+        MinimumSize(u64),
     }
     #[derive(Clone)]
     pub enum CreateImageOptions{
@@ -3455,14 +3457,12 @@ pub mod memory{
         dependant_allocations: Vec<usize>,
         memory_properties: vk::MemoryPropertyFlags,
         options: Vec<CreateAllocationOptions>,
-        minimum_size: u64,
     }
     #[derive(Clone)]
     pub struct BufferAllocatorProfile{
         dependant_buffers: Vec<usize>,
         usage: vk::BufferUsageFlags,
         options: Vec<CreateBufferOptions>,
-        minimum_size: u64,
     }
     #[derive(Clone)]
     pub struct ImageAllocatorProfile{
@@ -3504,10 +3504,7 @@ pub mod memory{
             .memory_type_index(type_index)
             .allocation_size(size as u64);
             for option in options.iter_mut(){
-                match option {
-                    CreateAllocationOptions::MemoryAllocateFlags(f) => c_info = c_info.push_next(f),
-                    _ => {}
-                }
+                c_info = option.add_options(c_info);
             }
             let allocation = unsafe{self.device.allocate_memory(&c_info, None).expect("Could not allocate memory")};
             debug!("Created memory {:?} of size {} on type {}", allocation, c_info.allocation_size, type_index);
@@ -3538,14 +3535,7 @@ pub mod memory{
             .usage(usage);
 
             for option in options.iter(){
-                match option {
-                    CreateBufferOptions::BufferCreateFlags(f) => {
-                        debug!("Using non-standard buffer create flags");
-                        c_info = c_info.flags(*f);
-                    },
-                    CreateBufferOptions::SizeOverkillFactor(factor) => c_info = c_info.size(buffer_size as u64 * *factor),
-                    _ => {}
-                }
+                c_info = option.add_options(c_info);
             }
 
             let buffer = unsafe{self.device.create_buffer(&c_info, None).expect("Could not create buffer")};
@@ -3630,87 +3620,298 @@ pub mod memory{
                 image_resource_index: 0 }
 
         }
-        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion{
+        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion{
             let mut region = None;
-            
-            
-            //First we need to find and seperate the resources intersection
             let (allocations, buffers, _) = self.get_resource_intersection(profile);
-            //Then we need to test all buffers or images
-            for buffer in buffers.iter().map(|index| &mut self.resources[*index]){
-                match buffer {
-                    AllocatorResourceType::Allocation(_) => panic!("Wrong intersection"),
-                    AllocatorResourceType::Buffer(b) => {
-                        match b.get_region(object_count, alignment, options){
-                            Ok(mut r) => {
-                                region = Some(r);
-                                break;
-                            },
-                            Err(e) => {
-                                match e {
-                                    MemoryBlockError::NoSpace => {},
+
+            match profile{
+                AllocatorProfileStack::TargetBuffer(ai, bi) => {
+                    //First we need to find and seperate the resources intersection
+                    //Then we need to test all buffers or images
+                    for buffer in buffers.iter(){
+                        let buffer = &mut self.resources[*buffer];
+                        match buffer {
+                            AllocatorResourceType::Allocation(_) => panic!("Wrong intersection"),
+                            AllocatorResourceType::Buffer(b) => {
+                                match b.get_region::<O>(object_count, alignment, options){
+                                    Ok(mut r) => {
+                                        region = Some(r);
+                                        break;
+                                    },
+                                    Err(e) => {
+                                        match e {
+                                            MemoryBlockError::NoSpace => {},
+                                        }
+                                    },
                                 }
                             },
+                            AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
                         }
-                    },
-                    AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
-                }
-            }
-            //If no buffers have space we need to search all allocations for additional buffer
-            let (usage, object_count, b_options) = match profile{
-                AllocatorProfileStack::TargetBuffer(_, bi) => {
-                    match self.settings[*bi]{
-                        AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
-                        AllocatorProfileType::Buffer(b) => b.get_settings::<O>(object_count),
-                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                    }
+                    //If no buffers have space we need to search all allocations for additional buffer
+                    
+                    match region {
+                        Some(_) => {},
+                        None => {
+
+                            let (usage, b_options) = match &self.settings[*bi]{
+                                AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                                AllocatorProfileType::Buffer(b) => b.get_settings(),
+                                AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                            };
+                            let mut buffer = self.create_buffer::<O>(usage, object_count, b_options);
+                            buffer.buffer_resource_index = self.resources.len();
+
+                            for allocation in allocations.iter(){
+                                let allocation = &mut self.resources[*allocation];
+                                match allocation {
+                                    AllocatorResourceType::Allocation(a) => {
+                                        
+                                        match a.bind_buffer(&mut buffer){
+                                            Ok(_) => {
+                                                match buffer.get_region::<O>(object_count, alignment, options){
+                                                    Ok(r) => {
+                                                        region = Some(r);
+                                                        break;
+                                                        
+                                                    },
+                                                    Err(e) => match e {
+                                                        MemoryBlockError::NoSpace => panic!("Buffer profile settings needs adjustment"),
+                                                    },
+                                                }
+                                            },
+                                            Err(e) => match e {
+                                                MemoryBlockError::NoSpace => {},
+                                            },
+                                        };
+
+
+
+                                    },
+                                    AllocatorResourceType::Buffer(_) => panic!("Wrong intersection"),
+                                    AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
+                                }
+                            }
+
+                            match region {
+                                Some(_) => {
+                                    match &mut self.settings[*bi]{
+                                        AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                                        AllocatorProfileType::Buffer(b) => b.dependant_buffers.push(buffer.buffer_resource_index),
+                                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                                    }
+                                    self.resources.push(AllocatorResourceType::Buffer(buffer));
+                                },
+                                None => {
+                                    //If no allocations have space we need to create both
+                                    let mut a_profile = match &self.settings[*ai] {
+                                        AllocatorProfileType::Allocation(a) => a.clone(),
+                                        AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                                    };
+                                    let (properties, a_options) = a_profile.get_settings();
+                                    let mut allocation = self.create_allocation::<u8>(properties, buffer.mem_reqs.size as usize, a_options);
+                                    allocation.allocation_resource_index = self.resources.len() + 1;
+                                    match allocation.bind_buffer(&mut buffer){
+                                        Ok(_) => {
+                                            match buffer.get_region::<O>(object_count, alignment, options){
+                                                Ok(r) => {
+                                                    region = Some(r);
+
+                                                    match &mut self.settings[*bi]{
+                                                        AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                                                        AllocatorProfileType::Buffer(b) => b.dependant_buffers.push(buffer.buffer_resource_index),
+                                                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                                                    }
+                                                    match &mut self.settings[*ai]{
+                                                        AllocatorProfileType::Allocation(a) => {
+                                                            a.dependant_allocations.push(allocation.allocation_resource_index);
+                                                        },
+                                                        AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                                                    }
+
+                                                    self.resources.push(AllocatorResourceType::Buffer(buffer));
+                                                    self.resources.push(AllocatorResourceType::Allocation(allocation))
+                                                },
+                                                Err(e) => match e {
+                                                    MemoryBlockError::NoSpace => panic!("Buffer profile settings needs adjustment"),
+                                                },
+                                            }
+                                        },
+                                        Err(e) => match e {
+                                            MemoryBlockError::NoSpace => panic!("Allocation profile settings need ot be adjusted"),
+                                        },
+                                    };
+                                },
+                            }
+                        },
                     }
                 },
-                AllocatorProfileStack::TargetImage(_, _) => panic!("Using wrong profile type"),
-            };
-            let buffer = self.create_buffer(usage, object_count, b_options);
-
-            
-            for allocation in allocations.iter().map(|index| &mut self.resources[*index]){
-                match allocation {
-                    AllocatorResourceType::Allocation(a) => {
-                        match a.bind_buffer(&mut buffer){
-                            Ok(_) => {
-                                match buffer.get_region(object_count, alignment, options){
-                                    Ok(r) => {
-                                        region = Some(r);
-                                    },
-                                    Err(e) => match e {
-                                        MemoryBlockError::NoSpace => panic!("Buffer profile settings needs adjustment"),
-                                    },
-                                }
-                            },
-                            Err(e) => match e {
-                                MemoryBlockError::NoSpace => {},
-                            },
-                        };
-                    },
-                    AllocatorResourceType::Buffer(_) => panic!("Wrong intersection"),
-                    AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
-                }
+                AllocatorProfileStack::TargetImage(_, _) => panic!("Profile stack targeting image in buffer region creation"),
             }
-            //If no allocations have space we need to create both
             
-            let allocation = self.create_allocation(properties, object_count, options)
-
-
-
-            region
+            match region {
+                Some(r) => r,
+                None => panic!("Allocator failure"),
+            }
         }
-        pub fn get_image_resources(&self, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> Result<ImageResources, MemoryBlockError> {}
+        pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources {
+            let mut img_resources = None;
+
+            let (allocations, _, images) = self.get_resource_intersection(profile);
+
+            match profile {
+                AllocatorProfileStack::TargetBuffer(_, _) => panic!("Targeting buffer in image resource creation"),
+                AllocatorProfileStack::TargetImage(ai, ii) => {
+                    for image in images.iter().map(|index| &self.resources[*index]){
+                        match image {
+                            AllocatorResourceType::Allocation(_) => panic!("Wrong intersection"),
+                            AllocatorResourceType::Buffer(_) => panic!("Wrong intersection"),
+                            AllocatorResourceType::Image(i) => {
+                                img_resources = Some(i.get_resources(aspect, base_mip_level, mip_level_depth, base_layer, layer_depth, view_type, format, options));
+                                break;
+                            },
+                        }
+                    }
+
+                    match img_resources {
+                        Some(_) => {},
+                        None => {
+                            let (usage, format, extent, i_options) = match &self.settings[*ii]{
+                                AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                                AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                AllocatorProfileType::Image(i) => i.get_settings(),
+                            };
+                            let mut image = self.create_image(usage, format, extent, i_options);
+                            image.image_resource_index = self.resources.len();
+
+                            for allocation in allocations.iter(){
+                                let allocation = &mut self.resources[*allocation];
+                                match allocation {
+                                    AllocatorResourceType::Allocation(a) => {
+                                        
+                                        match a.bind_image(&mut image){
+                                            Ok(_) => {
+                                                img_resources = Some(image.get_resources(aspect, base_mip_level, mip_level_depth, base_layer, layer_depth, view_type, format, options));
+                                                break;
+                                            },
+                                            Err(e) => match e {
+                                                MemoryBlockError::NoSpace => {},
+                                            },
+                                        };
+
+
+
+                                    },
+                                    AllocatorResourceType::Buffer(_) => panic!("Wrong intersection"),
+                                    AllocatorResourceType::Image(_) => panic!("Wrong intersection"),
+                                }
+                            }
+
+                            match img_resources {
+                                Some(_) => {
+                                    match &mut self.settings[*ii]{
+                                        AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                                        AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                        AllocatorProfileType::Image(i) => i.dependant_images.push(image.image_resource_index),
+                                    }
+                                    self.resources.push(AllocatorResourceType::Image(image))
+                                },
+                                None => {
+                                    //If no allocations have space we need to create both
+                                    let mut a_profile = match &self.settings[*ai] {
+                                        AllocatorProfileType::Allocation(a) => a.clone(),
+                                        AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                        AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                                    };
+                                    let (properties, a_options) = a_profile.get_settings();
+                                    let mut allocation = self.create_allocation::<u8>(properties, image.mem_reqs.size as usize, a_options);
+                                    allocation.allocation_resource_index = self.resources.len() + 1;
+                                    match allocation.bind_image(&mut image){
+                                        Ok(_) => {
+                                            img_resources = Some(image.get_resources(aspect, base_mip_level, mip_level_depth, base_layer, layer_depth, view_type, format, options));
+                                            
+                                            match &mut self.settings[*ii]{
+                                                AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                                                AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                                AllocatorProfileType::Image(i) => i.dependant_images.push(image.image_resource_index),
+                                            }
+                                            match &mut self.settings[*ai]{
+                                                AllocatorProfileType::Allocation(a) => {
+                                                    a.dependant_allocations.push(allocation.allocation_resource_index);
+                                                },
+                                                AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                                                AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
+                                            }
+
+                                            self.resources.push(AllocatorResourceType::Image(image));
+                                            self.resources.push(AllocatorResourceType::Allocation(allocation));
+                                        },
+                                        Err(e) => match e {
+                                            MemoryBlockError::NoSpace => panic!("Allocation profile settings needs to be adjusted"),
+                                        },
+                                    };
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+
+            
+
+
+            match img_resources {
+                Some(i) => i,
+                None => panic!("Allocator failure"),
+            }
+        }
+        pub fn copy_from_ram<O>(&mut self, src: *const O, object_count: usize, dst: &BufferRegion){
+            match &mut self.resources[dst.allocation_resource_index] {
+                AllocatorResourceType::Allocation(a) => {
+                    a.copy_from_ram(src, object_count, dst)
+                },
+                AllocatorResourceType::Buffer(_) => panic!("Resource index mismatch"),
+                AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
+            }
+        }
+        pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion){
+            match &mut self.resources[dst.allocation_resource_index] {
+                AllocatorResourceType::Allocation(a) => {
+                    a.copy_from_ram_slice(objects, dst);
+                },
+                AllocatorResourceType::Buffer(_) => panic!("Resource index mismatch"),
+                AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
+            }
+        }
+        pub fn copy_to_ram<O>(&self, src: &BufferRegion, dst: *mut O, object_count: usize, ){
+            match &self.resources[src.allocation_resource_index] {
+                AllocatorResourceType::Allocation(a) => {
+                    a.copy_to_ram(src, dst, object_count)
+                },
+                AllocatorResourceType::Buffer(_) => panic!("Resource index mismatch"),
+                AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
+            }
+        }
+        pub fn copy_to_ram_slice<O>(&self, src: &BufferRegion, dst: &mut [O]){
+            match &self.resources[src.allocation_resource_index] {
+                AllocatorResourceType::Allocation(a) => {
+                    a.copy_to_ram_slice(src, dst)
+                },
+                AllocatorResourceType::Buffer(_) => panic!("Resource index mismatch"),
+                AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
+            }
+        }
         fn get_resource_intersection(&self, profile: &AllocatorProfileStack) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
-            let allocations = vec![];
-            let buffers = vec![];
-            let images = vec![];
+            let mut allocations = vec![];
+            let mut buffers = vec![];
+            let mut images = vec![];
             for (index, resource) in self.resources.iter().enumerate(){
 
                 match profile{
                     AllocatorProfileStack::TargetBuffer(ai, bi) => {
-                        match self.settings[*ai]{
+                        match &self.settings[*ai]{
                             AllocatorProfileType::Allocation(a) => {
                                 if a.dependant_allocations.contains(&index){
                                     allocations.push(index);
@@ -3719,7 +3920,7 @@ pub mod memory{
                             AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                             AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
                         }
-                        match self.settings[*bi]{
+                        match &self.settings[*bi]{
                             AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
                             AllocatorProfileType::Buffer(b) => {
                                 if b.dependant_buffers.contains(&index){
@@ -3730,7 +3931,7 @@ pub mod memory{
                         }
                     },
                     AllocatorProfileStack::TargetImage(ai, ii) => {
-                        match self.settings[*ai]{
+                        match &self.settings[*ai]{
                             AllocatorProfileType::Allocation(a) => {
                                 if a.dependant_allocations.contains(&index){
                                     allocations.push(index);
@@ -3739,7 +3940,7 @@ pub mod memory{
                             AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                             AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
                         }
-                        match self.settings[*ii]{
+                        match &self.settings[*ii]{
                             AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
                             AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                             AllocatorProfileType::Image(i) => {
@@ -3754,43 +3955,46 @@ pub mod memory{
             (allocations,buffers,images)
         }
     }
-    impl AllocationAllocatorProfile{
-        pub fn new(memory_properties: vk::MemoryPropertyFlags, minimum_size: u64, options: &[CreateAllocationOptions]) -> AllocationAllocatorProfile {
-            AllocationAllocatorProfile{ dependant_allocations: vec![], memory_properties, options: options.to_vec(), minimum_size }
-        }
-        fn correct_minimum_size<O>(&self, object_count: usize) -> usize{
-            let size = object_count*size_of::<O>();
-            if self.minimum_size > size as u64{
-                (self.minimum_size / size_of::<O>() as u64 + 1) as usize
+    impl IDisposable for Allocator{
+        fn dispose(&mut self) {
+            let mut allocations = vec![];
+
+            for resource in self.resources.iter_mut(){
+                match resource {
+                    AllocatorResourceType::Allocation(a) => allocations.push(a),
+                    AllocatorResourceType::Buffer(b) => {
+                        b.dispose();
+                    },
+                    AllocatorResourceType::Image(i) => {
+                        i.dispose()
+                    },
+                }
             }
-            else {
-                object_count
+
+            for allocation in allocations{
+                allocation.dispose();
             }
         }
     }
+    impl Drop for Allocator{
+        fn drop(&mut self) {
+        self.dispose();
+        }
+    }
+    impl AllocationAllocatorProfile{
+        pub fn new(memory_properties: vk::MemoryPropertyFlags, options: &[CreateAllocationOptions]) -> AllocationAllocatorProfile {
+            AllocationAllocatorProfile{ dependant_allocations: vec![], memory_properties, options: options.to_vec() }
+        }
+        pub fn get_settings(&mut self) -> (vk::MemoryPropertyFlags, &mut [CreateAllocationOptions]) {
+            (self.memory_properties, &mut self.options)
+        }
+    }
     impl BufferAllocatorProfile{
-        pub fn new(usage: vk::BufferUsageFlags, minimum_size: u64, options: &[CreateBufferOptions]) -> BufferAllocatorProfile {
-            BufferAllocatorProfile{ dependant_buffers: vec![], usage, options: options.to_vec(), minimum_size }
+        pub fn new(usage: vk::BufferUsageFlags, options: &[CreateBufferOptions]) -> BufferAllocatorProfile {
+            BufferAllocatorProfile{ dependant_buffers: vec![], usage, options: options.to_vec() }
         }
-        fn correct_minimum_size<O>(&self, object_count: usize) -> usize{
-            let size = object_count*size_of::<O>();
-            if self.minimum_size > size as u64{
-                (self.minimum_size / size_of::<O>() as u64 + 1) as usize
-            }
-            else {
-                object_count
-            }
-        }
-        fn get_settings<O>(&self, object_count: usize) -> (vk::BufferUsageFlags, usize, &[CreateBufferOptions]) {
-            let size = (size_of::<O>() * object_count) as u64;
-            if size < self.minimum_size{
-                size = self.minimum_size;
-            }
-
-            let size = size/size_of::<O>() as u64 + 1;
-
-            (self.usage, size as usize, &self.options)
-
+        fn get_settings(&self) -> (vk::BufferUsageFlags, &[CreateBufferOptions]) {
+            (self.usage, &self.options)
         }
     }
     impl ImageAllocatorProfile{
@@ -3801,6 +4005,9 @@ pub mod memory{
                 format, 
                 extent, 
                 options: options.to_vec() }
+        }
+        fn get_settings(&self) -> (vk::ImageUsageFlags, vk::Format, vk::Extent3D, &[CreateImageOptions]) {
+            (self.usage, self.format, self.extent, &self.options)
         }
     }
     impl AllocatorProfileStack{
@@ -4171,10 +4378,24 @@ pub mod memory{
             self.copy_to_ram(src, dst, object_count);
         }
     }
-    
+    impl CreateAllocationOptions {
+        fn add_options<'a>(&'a mut self, mut info: vk::MemoryAllocateInfoBuilder<'a>) -> vk::MemoryAllocateInfoBuilder {
+            match self {
+                CreateAllocationOptions::MemoryAllocateFlags(f) => info = info.push_next(f),
+                CreateAllocationOptions::MinimumSize(s) => {if info.allocation_size < *s {
+                    info = info.allocation_size(*s);
+                }},
+                CreateAllocationOptions::SizeOverkillFactor(f) => {
+                    let size = info.allocation_size;
+                    info = info.allocation_size(size * *f);
+                },
+            }
+            info
+        }
+    }
     
     impl Buffer{
-        pub fn get_region<T>(&mut self, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> Result<BufferRegion, MemoryBlockError> {
+        pub fn get_region<T>(&mut self, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> Result<BufferRegion, MemoryBlockError> {
 
             match &mut self.memory_info  {
                 Some((t,ti,b,a)) => {
@@ -4188,8 +4409,8 @@ pub mod memory{
                         AlignmentType::Free
                     }
                 },
-                AlignmentType::Allocation(a) => AlignmentType::Allocation(a),
-                AlignmentType::User(a) => AlignmentType::User(a),
+                AlignmentType::Allocation(a) => AlignmentType::Allocation(*a),
+                AlignmentType::User(a) => AlignmentType::User(*a),
             };
             match a.try_get_region(size as u64, alignment){
                 Ok(block_index) => {
@@ -4290,7 +4511,27 @@ pub mod memory{
             }
         }
     }
-    
+    impl CreateBufferOptions{
+        fn add_options<'a>(&'a self, mut info: vk::BufferCreateInfoBuilder<'a>) -> vk::BufferCreateInfoBuilder {
+            match self {
+                CreateBufferOptions::BufferCreateFlags(f) => {
+                    debug!("Using non-standard buffer create flags");
+                    info = info.flags(*f);
+                },
+                CreateBufferOptions::SizeOverkillFactor(factor) => {
+                    debug!("Overkilling buffer size by {}", factor);
+                    let size = info.size;
+                    info = info.size(size * factor);
+                },
+                CreateBufferOptions::MinimumSize(s) => {
+                    if info.size < *s {
+                        info = info.size(*s);
+                    }
+                },
+            }
+            info
+        }
+    }
     
     impl Image{
         pub fn get_resources(&self, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources {
@@ -4658,7 +4899,7 @@ pub mod compute{}
 mod tests{
     use ash::vk;
 
-    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType}};
+    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable};
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -4693,14 +4934,13 @@ mod tests{
 
         let data:Vec<u32> = vec![u32::from_be_bytes([255,0,0,0]);(WIDTH*HEIGHT) as usize];
 
-        let allocator = memory::Allocator::new(&engine);
-
+        let allocator = Allocator::new(&engine);
 
         let mut cpu_mem = allocator.create_allocation::<u32>(vk::MemoryPropertyFlags::HOST_COHERENT, data.len() * 2, &mut []);
         let mut cpu_buffer = allocator.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len()*2, &[]);
         cpu_mem.bind_buffer(&mut cpu_buffer).expect("Could not bind buffer");
-        let staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).expect("Could not make buffer region");
-        let target = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).expect("Could not make buffer region");
+        let staging = cpu_buffer.get_region::<u32>(data.len(), &AlignmentType::Free, &[]).expect("Could not make buffer region");
+        let target = cpu_buffer.get_region::<u32>(data.len(), &AlignmentType::Free, &[]).expect("Could not make buffer region");
     
         let mut gpu_mem = allocator.create_allocation::<u32>(vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*2, &mut []);
         let mut image = allocator.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::R8G8B8A8_UNORM, extent, &[]);
@@ -4765,21 +5005,20 @@ mod tests{
 
         let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
         let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+        let allocator = Allocator::new(&engine);
 
         let data:Vec<u64> = (0..100).collect();
-
-        let allocator = memory::Allocator::new(&engine);
 
         let mut cpu_mem = allocator.create_allocation::<u64>(vk::MemoryPropertyFlags::HOST_COHERENT, data.len() * 2, &mut []);
         let mut cpu_buffer = allocator.create_buffer::<u64>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len()*2, &[]);
         cpu_mem.bind_buffer(&mut cpu_buffer).expect("Could not bind cpu buffer");
-        let staging = cpu_buffer.get_region::<u64>(data.len(), AlignmentType::Free, &[]).expect("Could not make buffer region");
-        let target = cpu_buffer.get_region::<u64>(data.len(), AlignmentType::Free, &[]).expect("Could not make buffer region");
+        let staging = cpu_buffer.get_region::<u64>(data.len(), &AlignmentType::Free, &[]).expect("Could not make buffer region");
+        let target = cpu_buffer.get_region::<u64>(data.len(), &AlignmentType::Free, &[]).expect("Could not make buffer region");
     
         let mut gpu_mem = allocator.create_allocation::<u64>(vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len(), &mut []);
         let mut gpu_buffer = allocator.create_buffer::<u64>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]);
         gpu_mem.bind_buffer(&mut gpu_buffer).expect("Could not bind gpu buffer");
-        let processing = gpu_buffer.get_region::<u64>(data.len(), AlignmentType::Free, &[]).expect("Could not make region");
+        let processing = gpu_buffer.get_region::<u64>(data.len(), &AlignmentType::Free, &[]).expect("Could not make region");
     
         cpu_mem.copy_from_ram_slice(&data, &staging);
 
@@ -4799,11 +5038,71 @@ mod tests{
         let mut tgt:[u64;100] = [0;100];
 
         cpu_mem.copy_to_ram_slice(&target, &mut tgt);
-
-        assert!(tgt.last().unwrap() == data.last().unwrap());
-
         unsafe{
             engine.get_device().destroy_command_pool(pool, None);
         }
+
+        assert!(tgt.last().unwrap() == data.last().unwrap());
+
+        
     }
+
+    #[test]
+    fn target(){
+        match pretty_env_logger::try_init() {
+            Ok(_) => {},
+            Err(_) => {},
+        };
+        let mut options = vec![];
+        get_vulkan_validate(&mut options);
+        let (engine, _) = Engine::init(&mut options, None);
+
+        let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
+        let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+
+        let data:Vec<u64> = (0..100).collect();
+
+        let mem_options = vec![CreateAllocationOptions::MinimumSize(1024*1024*100)];
+        let buffer_options = vec![CreateBufferOptions::MinimumSize(1024*1024)];
+
+        let mut allocator = memory::Allocator::new(&engine);
+        let cpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &mem_options)));
+        let gpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &mem_options)));
+        let buffer_profile = allocator.add_profile(memory::AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options)));
+        let cpu_stack = AllocatorProfileStack::TargetBuffer(cpu_mem_profile, buffer_profile);
+        let gpu_stack = AllocatorProfileStack::TargetBuffer(gpu_mem_profile, buffer_profile);
+
+        let staging = allocator.get_buffer_region::<u64>( &cpu_stack, data.len(), &AlignmentType::Free, &[]);
+        let target = allocator.get_buffer_region::<u64>(&cpu_stack, data.len(), &AlignmentType::Free, &[]);
+        let processing = allocator.get_buffer_region::<u64>(&gpu_stack, data.len(), &AlignmentType::Free, &[]);
+    
+        allocator.copy_from_ram_slice(&data, &staging);
+
+        unsafe{
+            engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
+            staging.copy_to_region(cmd, &processing);
+            let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::MEMORY_WRITE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
+            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            processing.copy_to_region(cmd, &target);
+            engine.get_device().end_command_buffer(cmd).unwrap();
+            let cmds = [cmd];
+            let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
+            engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
+            engine.get_device().queue_wait_idle(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
+        }
+
+        let mut tgt:[u64;100] = [0;100];
+
+        allocator.copy_to_ram_slice(&target, &mut tgt);
+        allocator.dispose();
+        unsafe{
+            engine.get_device().destroy_command_pool(pool, None);
+        }
+
+
+
+        assert!(tgt.last().unwrap() == data.last().unwrap());
+
+    }
+
 }
