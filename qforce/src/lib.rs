@@ -3370,6 +3370,7 @@ pub mod memory{
             Buffer(Buffer),
             Image(Image),
         }
+    #[derive(PartialEq, Eq, Hash, Clone)]
     pub enum AllocatorProfileStack{
         TargetBuffer(usize, usize),
         TargetImage(usize, usize),
@@ -3477,6 +3478,7 @@ pub mod memory{
         properties: PhysicalDevicePropertiesStore,
         settings: Vec<AllocatorProfileType>,
         resources: Vec<AllocatorResourceType>,
+        profile_mapping: HashMap<AllocatorProfileStack, (Vec<usize>, Vec<usize>, Vec<usize>)>,
         channel: (flume::Sender<AllocatorProfileStack>, flume::Receiver<AllocatorProfileStack>),
     }
     
@@ -3490,6 +3492,7 @@ pub mod memory{
                 settings: vec![],
                 resources: vec![],
                 channel: flume::unbounded(),
+                profile_mapping: HashMap::new(),
             }
         }
         pub fn add_profile(&mut self, profile: AllocatorProfileType) -> usize {
@@ -3622,14 +3625,13 @@ pub mod memory{
         }
         pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion{
             let mut region = None;
-            let (allocations, buffers, _) = self.get_resource_intersection(profile);
-
+            
             match profile{
                 AllocatorProfileStack::TargetBuffer(ai, bi) => {
                     //First we need to find and seperate the resources intersection
                     //Then we need to test all buffers or images
-                    for buffer in buffers.iter(){
-                        let buffer = &mut self.resources[*buffer];
+                    for buffer in self.get_mapped_buffers(profile){
+                        let buffer = &mut self.resources[buffer];
                         match buffer {
                             AllocatorResourceType::Allocation(_) => panic!("Wrong intersection"),
                             AllocatorResourceType::Buffer(b) => {
@@ -3661,9 +3663,8 @@ pub mod memory{
                             };
                             let mut buffer = self.create_buffer::<O>(usage, object_count, b_options);
                             buffer.buffer_resource_index = self.resources.len();
-
-                            for allocation in allocations.iter(){
-                                let allocation = &mut self.resources[*allocation];
+                            for allocation in self.get_mapped_allocations(profile){
+                                let allocation = &mut self.resources[allocation];
                                 match allocation {
                                     AllocatorResourceType::Allocation(a) => {
                                         
@@ -3700,6 +3701,7 @@ pub mod memory{
                                         AllocatorProfileType::Buffer(b) => b.dependant_buffers.push(buffer.buffer_resource_index),
                                         AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
                                     }
+                                    self.add_mapped_buffer(profile, buffer.buffer_resource_index);
                                     self.resources.push(AllocatorResourceType::Buffer(buffer));
                                 },
                                 None => {
@@ -3730,7 +3732,8 @@ pub mod memory{
                                                         AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                                                         AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
                                                     }
-
+                                                    self.add_mapped_buffer(profile, buffer.buffer_resource_index);
+                                                    self.add_mapped_allocation(profile, allocation.allocation_resource_index);
                                                     self.resources.push(AllocatorResourceType::Buffer(buffer));
                                                     self.resources.push(AllocatorResourceType::Allocation(allocation))
                                                 },
@@ -3759,12 +3762,11 @@ pub mod memory{
         pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources {
             let mut img_resources = None;
 
-            let (allocations, _, images) = self.get_resource_intersection(profile);
-
             match profile {
                 AllocatorProfileStack::TargetBuffer(_, _) => panic!("Targeting buffer in image resource creation"),
                 AllocatorProfileStack::TargetImage(ai, ii) => {
-                    for image in images.iter().map(|index| &self.resources[*index]){
+                    for image in self.get_mapped_images(profile){
+                        let image = &self.resources[image];
                         match image {
                             AllocatorResourceType::Allocation(_) => panic!("Wrong intersection"),
                             AllocatorResourceType::Buffer(_) => panic!("Wrong intersection"),
@@ -3786,8 +3788,8 @@ pub mod memory{
                             let mut image = self.create_image(usage, format, extent, i_options);
                             image.image_resource_index = self.resources.len();
 
-                            for allocation in allocations.iter(){
-                                let allocation = &mut self.resources[*allocation];
+                            for allocation in self.get_mapped_allocations(profile){
+                                let allocation = &mut self.resources[allocation];
                                 match allocation {
                                     AllocatorResourceType::Allocation(a) => {
                                         
@@ -3816,6 +3818,7 @@ pub mod memory{
                                         AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                                         AllocatorProfileType::Image(i) => i.dependant_images.push(image.image_resource_index),
                                     }
+                                    self.add_mapped_image(profile, image.image_resource_index);
                                     self.resources.push(AllocatorResourceType::Image(image))
                                 },
                                 None => {
@@ -3844,7 +3847,8 @@ pub mod memory{
                                                 AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
                                                 AllocatorProfileType::Image(_) => panic!("Profile index mismatch"),
                                             }
-
+                                            self.add_mapped_image(profile, image.image_resource_index);
+                                            self.add_mapped_allocation(profile, allocation.allocation_resource_index);
                                             self.resources.push(AllocatorResourceType::Image(image));
                                             self.resources.push(AllocatorResourceType::Allocation(allocation));
                                         },
@@ -3953,6 +3957,98 @@ pub mod memory{
                 }
             }
             (allocations,buffers,images)
+        }
+        fn add_profile_mapping(&mut self, profile: &AllocatorProfileStack){
+            let (allocations, _, _) = match self.profile_mapping.insert(profile.clone(), (vec![], vec![], vec![])){
+                Some(_) => panic!("profile already mapped"),
+                None => {
+                    self.profile_mapping.get_mut(profile).expect("Could not map profile")
+                },
+            };
+            match profile {
+                AllocatorProfileStack::TargetBuffer(ai, _) => {
+                    match &self.settings[*ai]{
+                        AllocatorProfileType::Allocation(a) => {
+                            for allocation in a.dependant_allocations.iter(){
+                                allocations.push(*allocation);
+                            }
+                        },
+                        AllocatorProfileType::Buffer(_) => panic!("mismatched profile index"),
+                        AllocatorProfileType::Image(_) => panic!("mismatched profile index"),
+                    }
+                },
+                AllocatorProfileStack::TargetImage(ai, _) => {
+                    match &self.settings[*ai]{
+                        AllocatorProfileType::Allocation(a) => {
+                            for allocation in a.dependant_allocations.iter(){
+                                allocations.push(*allocation);
+                            }
+                        },
+                        AllocatorProfileType::Buffer(_) => panic!("mismatched profile index"),
+                        AllocatorProfileType::Image(_) => panic!("mismatched profile index"),
+                    }
+                },
+            }
+        }
+        fn get_mapped_allocations(&mut self, profile: &AllocatorProfileStack) -> Vec<usize> {
+            let (a,_,_) = match self.profile_mapping.get(profile){
+                Some(data) => data,
+                None => {
+                    self.add_profile_mapping(profile);
+                    self.profile_mapping.get(profile).expect("Did not enter new profile mapping")
+                },
+            };
+            a.clone()
+        }
+        fn get_mapped_buffers(&mut self, profile: &AllocatorProfileStack) -> Vec<usize> {
+            let (_,b,_) = match self.profile_mapping.get(profile){
+                Some(data) => data,
+                None => {
+                    self.add_profile_mapping(profile);
+                    self.profile_mapping.get(profile).expect("Did not enter new profile mapping")
+                },
+            };
+            b.clone()
+        }
+        fn get_mapped_images(&mut self, profile: &AllocatorProfileStack) -> Vec<usize> {
+            let (_,_,i) = match self.profile_mapping.get_mut(profile){
+                Some(data) => data,
+                None => {
+                    self.add_profile_mapping(profile);
+                    self.profile_mapping.get(profile).expect("Did not enter new profile mapping")
+                },
+            };
+            i.clone()
+        }
+        fn add_mapped_allocation(&mut self, profile: &AllocatorProfileStack, resource_index: usize){
+            let (a,_,_) = match self.profile_mapping.get_mut(profile){
+                Some(data) => data,
+                None => {
+                    self.add_profile_mapping(profile);
+                    self.profile_mapping.get_mut(profile).expect("Did not enter new profile mapping")
+                },
+            };
+            a.push(resource_index);
+        }
+        fn add_mapped_buffer(&mut self, profile: &AllocatorProfileStack, resource_index: usize){
+            let (_,b,_) = match self.profile_mapping.get_mut(profile){
+                Some(data) => data,
+                None => {
+                    self.add_profile_mapping(profile);
+                    self.profile_mapping.get_mut(profile).expect("Did not enter new profile mapping")
+                },
+            };
+            b.push(resource_index);
+        }
+        fn add_mapped_image(&mut self, profile: &AllocatorProfileStack, resource_index: usize){
+            let (_,_,i) = match self.profile_mapping.get_mut(profile){
+                Some(data) => data,
+                None => {
+                    self.add_profile_mapping(profile);
+                    self.profile_mapping.get_mut(profile).expect("Did not enter new profile mapping")
+                },
+            };
+            i.push(resource_index);
         }
     }
     impl IDisposable for Allocator{
