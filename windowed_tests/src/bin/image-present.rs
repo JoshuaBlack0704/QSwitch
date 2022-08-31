@@ -1,4 +1,4 @@
-use qforce::{init::{self, IEngine, WindowedEngine}, memory::{AlignmentType, Allocation, self, AllocatorProfileType, AllocationAllocatorProfile, BufferAllocatorProfile}, sync, IDisposable};
+use qforce::{init::{self, IEngine, WindowedEngine, SwapchainStore}, memory::{AlignmentType, AllocatorProfileType, AllocationAllocatorProfile, BufferAllocatorProfile, ImageAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, sync, IDisposable};
 use ash::vk;
 
 #[cfg(debug_assertions)]
@@ -30,43 +30,39 @@ fn main(){
                 init::EngineInitOptions::UseDebugUtils,
                 init::EngineInitOptions::DeviceExtensions(vec![])];
             get_vulkan_validate(&mut engine_options);
-            (event_loop, engine) = init::WindowedEngine::init(&mut engine_options);
+            (event_loop, engine) = WindowedEngine::init(&mut engine_options);
         }
         
-        
-    let mut allocator = memory::Allocator::new(&engine);
 
-    
+    let mut swapchain = SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)]);
 
-    let mut swapchain = init::SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)]);
-    
-    let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
-    let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
     let mut width:u32 = swapchain.get_extent().width;
     let mut height:u32 = swapchain.get_extent().height;
     let mut extent = vk::Extent3D::builder().width(width).height(height).depth(1).build();
 
+    let mem_options = vec![CreateAllocationOptions::MinimumSize(1024*1024*100)];
+    let buffer_options = vec![CreateBufferOptions::MinimumSize(1024*1024)];
+    let mut allocator = Allocator::new(&engine);
 
-    let host_profile = allocator.add_profile(AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, 1024*1024, &[])));
-    let buffer_profile = allocator.add_profile(AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER, 1024, &[])));
-    let image_profile = allocator.add_profile(AllocatorProfileType::Image(memory::ImageAllocatorProfile::new(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[])));
-    let staging_stack = memory::AllocatorProfileStack::TargetBuffer(host_profile, buffer_profile);
-    let staging = allocator.get_buffer_region::<u8>(&staging_stack, 10*1024, AlignmentType::Free, &[]);
-    let staging1 = allocator.get_buffer_region::<u8>(&staging_stack, 10*1024, AlignmentType::Free, &[]);
-    let staging2 = allocator.get_buffer_region::<u8>(&staging_stack, 10*1024, AlignmentType::Free, &[]);
 
+    let cpu_mem_profile = allocator.add_profile(AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &mem_options)));
+    let gpu_mem_profile = allocator.add_profile(AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &mem_options)));
+    let buffer_profile = allocator.add_profile(AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options)));
+    let image_profile = allocator.add_profile(AllocatorProfileType::Image(ImageAllocatorProfile::new(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[])));
+    let cpu_stack = AllocatorProfileStack::TargetBuffer(cpu_mem_profile, buffer_profile);
+    let gpu_stack = AllocatorProfileStack::TargetImage(gpu_mem_profile, image_profile);
+
+    
+    let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
+    let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+    
 
 
     let mut data:Vec<u32> = vec![u32::from_be_bytes([255,255,0,0]);(width*height) as usize];
 
-    let mut cpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::HOST_COHERENT, data.len()*20, &mut []);
-    let mut cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]).unwrap();
-    let mut staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).unwrap();
+    let mut staging = allocator.get_buffer_region::<u32>(&cpu_stack, data.len(), &AlignmentType::Free, &[]);
 
-    let mut gpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*20, &mut []);
-    let mut image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[]).unwrap();
-    let mut processing = image.get_resources(
-        vk::ImageAspectFlags::COLOR, 
+    let mut processing = allocator.get_image_resources(&gpu_stack, vk::ImageAspectFlags::COLOR, 
         0, 
         1, 
         0, 
@@ -74,8 +70,6 @@ fn main(){
         vk::ImageViewType::TYPE_2D, 
         vk::Format::B8G8R8A8_UNORM, 
         &[]);
-
-
 
 
     let mut copy_done = sync::Fence::new(&engine, true);
@@ -94,24 +88,20 @@ fn main(){
                     },
                     winit::event::WindowEvent::Resized(_) => {
                         copy_done.wait();
-                        swapchain = init::SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::OldSwapchain(&swapchain),init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)]);
+                        swapchain = SwapchainStore::new(&engine, &[init::CreateSwapchainOptions::OldSwapchain(&swapchain),init::CreateSwapchainOptions::ImageUsages(vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)]);
                         
                         width = swapchain.get_extent().width;
                         height = swapchain.get_extent().height;
                         data = vec![u32::from_le_bytes([255,0,0,0]);(width*height) as usize];
                         extent = vk::Extent3D::builder().width(width).height(height).depth(1).build();
                     
-                        cpu_buffer.dispose();
-                        image.dispose();
                         processing.dispose();
 
-                        cpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::HOST_COHERENT, data.len(), &mut []);
-                        cpu_buffer = cpu_mem.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len(), &[]).unwrap();
-                        staging = cpu_buffer.get_region::<u32>(data.len(), AlignmentType::Free, &[]).unwrap();
-                        gpu_mem = Allocation::new::<u32, WindowedEngine>(&engine, vk::MemoryPropertyFlags::DEVICE_LOCAL, data.len()*20, &mut []);
-                        image = gpu_mem.create_image(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[]).unwrap();
-                        processing = image.get_resources(
-                            vk::ImageAspectFlags::COLOR, 
+                        allocator.update_image(image_profile, &ImageAllocatorProfile::new(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::STORAGE, vk::Format::B8G8R8A8_UNORM, extent, &[]));
+
+                        staging = allocator.get_buffer_region::<u32>(&cpu_stack, data.len(), &AlignmentType::Free, &[]);
+
+                        processing = allocator.get_image_resources(&gpu_stack, vk::ImageAspectFlags::COLOR, 
                             0, 
                             1, 
                             0, 
@@ -127,7 +117,7 @@ fn main(){
                 }
             },
             winit::event::Event::MainEventsCleared => {
-                cpu_mem.copy_from_ram_slice(&data, &staging);
+                allocator.copy_from_ram_slice(&data, &staging);
 
                 unsafe{
                     copy_done.wait_reset();
@@ -180,10 +170,7 @@ fn main(){
                     engine.get_device().destroy_command_pool(pool, None);
                 }
                 processing.dispose();
-                cpu_buffer.dispose();
-                image.dispose();
-                cpu_mem.dispose();
-                gpu_mem.dispose();
+                allocator.dispose();
                 copy_done.dispose();
                 aquire_semaphore.dispose();
                 present_semaphore.dispose();

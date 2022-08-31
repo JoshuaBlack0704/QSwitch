@@ -3499,6 +3499,30 @@ pub mod memory{
             self.settings.push(profile);
             self.settings.len()-1
         }
+        pub fn update_image(&mut self, image_profile_index: usize, new_profile: &ImageAllocatorProfile){
+            match &mut self.settings[image_profile_index] {
+                AllocatorProfileType::Allocation(_) => panic!("Profile index mismatch"),
+                AllocatorProfileType::Buffer(_) => panic!("Profile index mismatch"),
+                AllocatorProfileType::Image(i) => {
+                    for image in i.dependant_images.iter(){
+                        match &mut self.resources[*image]{
+                            AllocatorResourceType::Allocation(_) => panic!("Resource index mismatch"),
+                            AllocatorResourceType::Buffer(_) => panic!("Resource index mismatch"),
+                            AllocatorResourceType::Image(i) => {
+                                i.dispose();
+
+                            },
+                        }
+                    }
+
+                    for (_,_,images) in self.profile_mapping.values_mut(){
+                        *images = images.iter().filter(|index| !i.dependant_images.contains(index)).map(|index| *index).collect();
+                    }
+
+                    *i = new_profile.clone();
+                },
+            }
+        }
         pub fn create_allocation<O>(&self, properties: vk::MemoryPropertyFlags, object_count: usize, options: &mut [CreateAllocationOptions]) -> Allocation {
             let type_index = self.properties.get_memory_index(properties);
             let size = size_of::<O>() * object_count;
@@ -4049,32 +4073,6 @@ pub mod memory{
                 },
             };
             i.push(resource_index);
-        }
-    }
-    impl IDisposable for Allocator{
-        fn dispose(&mut self) {
-            let mut allocations = vec![];
-
-            for resource in self.resources.iter_mut(){
-                match resource {
-                    AllocatorResourceType::Allocation(a) => allocations.push(a),
-                    AllocatorResourceType::Buffer(b) => {
-                        b.dispose();
-                    },
-                    AllocatorResourceType::Image(i) => {
-                        i.dispose()
-                    },
-                }
-            }
-
-            for allocation in allocations{
-                allocation.dispose();
-            }
-        }
-    }
-    impl Drop for Allocator{
-        fn drop(&mut self) {
-        self.dispose();
         }
     }
     impl AllocationAllocatorProfile{
@@ -4838,6 +4836,10 @@ pub mod memory{
             if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying buffer {:?}", self.buffer);
+                match &mut self.memory_info {
+                    Some((_,_,block,_)) => drop(*block.user),
+                    None => todo!(),
+                }
                 unsafe{
                     self.device.destroy_buffer(self.buffer, None);
                 }
@@ -4850,6 +4852,10 @@ pub mod memory{
             if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying image {:?}", self.image);
+                match &mut self.memory_info {
+                    Some((_,_,block)) => drop(*block.user),
+                    None => todo!(),
+                }
                 unsafe{
                     self.device.destroy_image(self.image, None);
                 }
@@ -4867,8 +4873,34 @@ pub mod memory{
             }
         }
     }
+    impl IDisposable for Allocator{
+        fn dispose(&mut self) {
+            let mut allocations = vec![];
 
+            for resource in self.resources.iter_mut(){
+                match resource {
+                    AllocatorResourceType::Allocation(a) => allocations.push(a),
+                    AllocatorResourceType::Buffer(b) => {
+                        b.dispose();
+                    },
+                    AllocatorResourceType::Image(i) => {
+                        i.dispose()
+                    },
+                }
+            }
 
+            for allocation in allocations{
+                allocation.dispose();
+            }
+        }
+    }
+    
+
+    impl Drop for Allocator{
+        fn drop(&mut self) {
+        self.dispose();
+        }
+    }
     impl Drop for Allocation{
         fn drop(&mut self) {
             self.dispose();
@@ -4892,7 +4924,132 @@ pub mod memory{
     
 
 }
-pub mod descriptor{}
+#[allow(dead_code, unused)]
+pub mod descriptor{
+    use std::os::raw::c_void;
+    use ash::vk;
+    use log::debug;
+
+    use crate::{init::IEngine, IDisposable};
+
+    #[derive(Clone)]
+    pub enum DescriptorWriteType{
+        Buffer([vk::DescriptorBufferInfo;1]),
+        Image([vk::DescriptorImageInfo;1]),
+        AccelerationStructure(Option<Box<[vk::AccelerationStructureKHR;1]>>, vk::WriteDescriptorSetAccelerationStructureKHR)
+    }
+    pub enum CreateDescriptorSetLayoutOptions{
+        Flags(vk::DescriptorSetLayoutCreateFlags)
+    }
+
+
+    pub struct DescriptorSetOutline{
+        device: ash::Device,
+        bindings: Vec<vk::DescriptorSetLayoutBinding>,
+        layout: Option<vk::DescriptorSetLayout>,
+        disposed: bool,
+    }
+
+    pub struct DescriptorSet{
+
+    }
+
+    pub struct DesciptorStack{
+        device: ash::Device,
+        pool: Option<vk::DescriptorPool>,
+        outlines: Vec<DescriptorSetOutline>,
+        sets: Vec<DescriptorSet>,
+    }
+
+
+    impl DescriptorSetOutline{
+        pub fn new<T:IEngine>(engine: &T) -> DescriptorSetOutline {
+            DescriptorSetOutline{ device: engine.get_device(), bindings: vec![], layout: None, disposed: false }
+        }
+        pub fn add_binding(&mut self, ty: vk::DescriptorType, count: u32, stages: vk::ShaderStageFlags){
+            match self.layout{
+                Some(_) => panic!("Descriptor set layout already built"),
+                None => {
+                    let binding = vk::DescriptorSetLayoutBinding::builder()
+                    .binding(self.bindings.len() as u32)
+                    .descriptor_type(ty)
+                    .descriptor_count(count)
+                    .stage_flags(stages)
+                    .build();
+                    self.bindings.push(binding);
+                },
+            }
+        }
+        pub fn get_layout(&mut self, options: &[CreateDescriptorSetLayoutOptions]) -> vk::DescriptorSetLayout{
+            match self.layout {
+                Some(l) => l,
+                None => {
+                    let mut c_info = vk::DescriptorSetLayoutCreateInfo::builder()
+                    .bindings(&self.bindings);
+                    for option in options.iter(){
+                        c_info = option.apply_option(c_info);
+                    }
+        
+                    let layout = unsafe{self.device.create_descriptor_set_layout(&c_info, None).expect("Could not create descriptor set layout")};
+                    debug!("Created descriptor set layout {:?}", layout);
+                    self.layout = Some(layout);
+                    layout
+                },
+            }
+
+            
+        }
+    }
+    impl CreateDescriptorSetLayoutOptions{
+        pub fn apply_option<'a>(&'a self, mut info: vk::DescriptorSetLayoutCreateInfoBuilder<'a>) -> vk::DescriptorSetLayoutCreateInfoBuilder {
+            match self {
+                CreateDescriptorSetLayoutOptions::Flags(f) => {
+                    info = info.flags(*f);
+                },
+            }
+            info
+        }
+    }
+
+
+    impl DesciptorStack {
+        pub fn new<T:IEngine>(engine: &T) -> DesciptorStack {
+            DesciptorStack{ device: engine.get_device(), pool: None, outlines: vec![], sets: vec![] }
+        }
+        pub fn add_outline(&mut self, outline: DescriptorSetOutline) -> usize {
+            self.outlines.push(outline);
+            self.outlines.len()-1
+        }
+
+    }
+
+
+    impl IDisposable for DescriptorSetOutline{
+        fn dispose(&mut self) {
+            match self.layout {
+                Some(l) => {
+                    if !self.disposed{
+                        self.disposed = true;
+                        debug!("Destroying descriptor set layout {:?}", l);
+                        unsafe{
+                            self.device.destroy_descriptor_set_layout(l, None);
+                        }
+                    }
+                },
+                None => {},
+            }
+            
+    }
+    }
+
+
+    impl Drop for DescriptorSetOutline{
+        fn drop(&mut self) {
+        self.dispose();
+    }
+    }
+
+}
 pub mod sync{
     use ash::vk;
     use log::debug;
@@ -5144,7 +5301,7 @@ mod tests{
     }
 
     #[test]
-    fn target(){
+    fn allocator_test(){
         match pretty_env_logger::try_init() {
             Ok(_) => {},
             Err(_) => {},
