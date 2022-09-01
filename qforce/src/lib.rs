@@ -4952,6 +4952,11 @@ pub mod descriptor{
 
     pub struct DescriptorSet{
 
+        device: ash::Device,
+        set: vk::DescriptorSet,
+        outline: DescriptorSetOutline,
+        
+    
     }
 
     pub struct DesciptorStack{
