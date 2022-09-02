@@ -4941,6 +4941,9 @@ pub mod descriptor{
     pub enum CreateDescriptorSetLayoutOptions{
         Flags(vk::DescriptorSetLayoutCreateFlags)
     }
+    pub enum CreateDescriptorPoolOptions{
+        Flags(vk::DescriptorPoolCreateFlags)
+    }
 
 
     pub struct DescriptorSetOutline{
@@ -4955,8 +4958,6 @@ pub mod descriptor{
         device: ash::Device,
         set: vk::DescriptorSet,
         outline: DescriptorSetOutline,
-        
-    
     }
 
     pub struct DesciptorStack{
@@ -4965,6 +4966,7 @@ pub mod descriptor{
         outlines: Vec<DescriptorSetOutline>,
         sets: Vec<DescriptorSet>,
     }
+
 
 
     impl DescriptorSetOutline{
@@ -5025,7 +5027,27 @@ pub mod descriptor{
             self.outlines.push(outline);
             self.outlines.len()-1
         }
-
+        pub fn create_sets(&mut self){
+            match self.pool {
+                Some(p) => {
+                    panic!("Cannot create sets more than once")
+                },
+                None => {
+            
+                    
+                    
+            
+                    let c_info = vk::DescriptorPoolCreateInfo::builder()
+                    .max_sets(self.sets.len())
+                    .
+                },
+            }
+           for outline in self.outlines.iter(){
+                let layout = outline.get_layout(&[]);
+                let c_info = vk::DescriptorSetAllocateInfo ::builder().;
+                
+            } 
+        }
     }
 
 
