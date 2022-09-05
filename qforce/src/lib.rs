@@ -3312,7 +3312,7 @@ pub mod memory{
     use std::{sync::Arc, mem::size_of, collections::HashMap};
     use ash::{self, vk};
     use log::debug;
-    use crate::{init::{self,IEngine,PhysicalDevicePropertiesStore, Engine}, IDisposable};
+    use crate::{init::{self,IEngine,PhysicalDevicePropertiesStore, Engine}, IDisposable, descriptor::DescriptorWriteType};
 
     #[derive(Clone)]
     pub enum AlignmentType{
@@ -4604,6 +4604,14 @@ pub mod memory{
                 self.device.cmd_copy_buffer_to_image(cmd, self.buffer, dst.image, dst.layout, &copy);
             }
         }
+        pub fn get_binding(&self) -> DescriptorWriteType {
+            let info = vk::DescriptorBufferInfo::builder()
+            .buffer(self.buffer)
+            .offset(self.home_block.buffer_offset)
+            .range(self.home_block.size)
+            .build();
+            DescriptorWriteType::Buffer([info])
+        }
     }
     impl CreateBufferOptions{
         fn add_options<'a>(&'a self, mut info: vk::BufferCreateInfoBuilder<'a>) -> vk::BufferCreateInfoBuilder {
@@ -4938,9 +4946,11 @@ pub mod descriptor{
         Image([vk::DescriptorImageInfo;1]),
         AccelerationStructure(Option<Box<[vk::AccelerationStructureKHR;1]>>, vk::WriteDescriptorSetAccelerationStructureKHR)
     }
+    #[derive(Clone)]
     pub enum CreateDescriptorSetLayoutOptions{
         Flags(vk::DescriptorSetLayoutCreateFlags)
     }
+    #[derive(Clone)]
     pub enum CreateDescriptorPoolOptions{
         Flags(vk::DescriptorPoolCreateFlags)
     }
@@ -4949,31 +4959,52 @@ pub mod descriptor{
     pub struct DescriptorSetOutline{
         device: ash::Device,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
+        options: Vec<CreateDescriptorSetLayoutOptions>,
         layout: Option<vk::DescriptorSetLayout>,
         disposed: bool,
-    }
-
-    pub struct DescriptorSet{
-
-        device: ash::Device,
-        set: vk::DescriptorSet,
-        outline: DescriptorSetOutline,
     }
 
     pub struct DesciptorStack{
         device: ash::Device,
         pool: Option<vk::DescriptorPool>,
         outlines: Vec<DescriptorSetOutline>,
-        sets: Vec<DescriptorSet>,
+        sets: Vec<vk::DescriptorSet>,
+        disposed: bool,
+    }
+    pub struct DescriptorSet{
+        device: ash::Device,
+        layout: vk::DescriptorSetLayout,
+        set: vk::DescriptorSet,
+        bindings: Vec<vk::DescriptorSetLayoutBinding>,
     }
 
 
 
-    impl DescriptorSetOutline{
-        pub fn new<T:IEngine>(engine: &T) -> DescriptorSetOutline {
-            DescriptorSetOutline{ device: engine.get_device(), bindings: vec![], layout: None, disposed: false }
+    impl CreateDescriptorSetLayoutOptions{
+        pub fn apply_option<'a>(&'a self, mut info: vk::DescriptorSetLayoutCreateInfoBuilder<'a>) -> vk::DescriptorSetLayoutCreateInfoBuilder {
+            match self {
+                CreateDescriptorSetLayoutOptions::Flags(f) => {
+                    info = info.flags(*f);
+                },
+            }
+            info
         }
-        pub fn add_binding(&mut self, ty: vk::DescriptorType, count: u32, stages: vk::ShaderStageFlags){
+    }
+    impl CreateDescriptorPoolOptions{
+        pub fn apply_option<'a>(&'a self, mut info: vk::DescriptorPoolCreateInfoBuilder<'a>) -> vk::DescriptorPoolCreateInfoBuilder{
+            match self {
+                CreateDescriptorPoolOptions::Flags(f) => {
+                    info = info.flags(*f);
+                },
+            }
+            info
+        }
+    }
+    impl DescriptorSetOutline{
+        pub fn new<T:IEngine>(engine: &T, options: &[CreateDescriptorSetLayoutOptions]) -> DescriptorSetOutline {
+            DescriptorSetOutline{ device: engine.get_device(), bindings: vec![], layout: None, disposed: false, options: options.to_vec() }
+        }
+        pub fn add_binding(&mut self, ty: vk::DescriptorType, count: u32, stages: vk::ShaderStageFlags) -> usize {
             match self.layout{
                 Some(_) => panic!("Descriptor set layout already built"),
                 None => {
@@ -4986,14 +5017,15 @@ pub mod descriptor{
                     self.bindings.push(binding);
                 },
             }
+            self.bindings.len()-1
         }
-        pub fn get_layout(&mut self, options: &[CreateDescriptorSetLayoutOptions]) -> vk::DescriptorSetLayout{
+        pub fn get_layout(&mut self) -> vk::DescriptorSetLayout{
             match self.layout {
                 Some(l) => l,
                 None => {
                     let mut c_info = vk::DescriptorSetLayoutCreateInfo::builder()
                     .bindings(&self.bindings);
-                    for option in options.iter(){
+                    for option in self.options.iter(){
                         c_info = option.apply_option(c_info);
                     }
         
@@ -5007,49 +5039,128 @@ pub mod descriptor{
             
         }
     }
-    impl CreateDescriptorSetLayoutOptions{
-        pub fn apply_option<'a>(&'a self, mut info: vk::DescriptorSetLayoutCreateInfoBuilder<'a>) -> vk::DescriptorSetLayoutCreateInfoBuilder {
-            match self {
-                CreateDescriptorSetLayoutOptions::Flags(f) => {
-                    info = info.flags(*f);
-                },
-            }
-            info
-        }
-    }
 
 
     impl DesciptorStack {
         pub fn new<T:IEngine>(engine: &T) -> DesciptorStack {
-            DesciptorStack{ device: engine.get_device(), pool: None, outlines: vec![], sets: vec![] }
+            DesciptorStack{ device: engine.get_device(),
+                 pool: None,
+                 outlines: vec![],
+                 sets: vec![],
+                 disposed: false }
         }
         pub fn add_outline(&mut self, outline: DescriptorSetOutline) -> usize {
             self.outlines.push(outline);
             self.outlines.len()-1
         }
-        pub fn create_sets(&mut self){
+        pub fn create_sets(&mut self, options: &[CreateDescriptorPoolOptions]){
             match self.pool {
-                Some(p) => {
-                    panic!("Cannot create sets more than once")
-                },
+                Some(_) => {}
                 None => {
-            
-                    
-                    
-            
-                    let c_info = vk::DescriptorPoolCreateInfo::builder()
-                    .max_sets(self.sets.len())
-                    .
+                    self.create_pool(options);
                 },
             }
-           for outline in self.outlines.iter(){
-                let layout = outline.get_layout(&[]);
-                let c_info = vk::DescriptorSetAllocateInfo ::builder().;
-                
-            } 
+            
+            let layouts: Vec<vk::DescriptorSetLayout> = self.outlines.iter_mut().map(|i| i.get_layout()).collect();
+            let a_info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(self.pool.expect("Allocating sets with no descriptor pool"))
+            .set_layouts(&layouts);
+            let allocated_sets = unsafe{self.device.allocate_descriptor_sets(&a_info).expect("Could not create descriptor sets")};
+            debug!("Created sets {:?}", allocated_sets);
+            self.sets = allocated_sets;
+            
+        }
+        pub fn get_set(&mut self, set_index: usize) -> DescriptorSet {
+            DescriptorSet{ device: self.device.clone(),
+                 layout: self.outlines[set_index].get_layout(),
+                 set: self.sets[set_index],
+                 bindings: self.outlines[set_index].bindings.clone() }
+            
+        }
+        fn create_pool(&mut self, options: &[CreateDescriptorPoolOptions]){
+            let mut pool_sizes: Vec<vk::DescriptorPoolSize> = Vec::with_capacity(self.outlines.len());         
+            let mut pool: vk::DescriptorPool;
+            for outline in self.outlines.iter(){
+                for (binding) in outline.bindings.iter(){
+                    let found = pool_sizes.iter().enumerate().find(|(_,s)| s.ty == binding.descriptor_type);
+                     match found {
+                        Some((i, _)) => {pool_sizes[i].descriptor_count += 1;},
+                        None => {pool_sizes.push(vk::DescriptorPoolSize::builder().ty(binding.descriptor_type).descriptor_count(1).build());},
+                    }
+                }
+            }
+            
+            let mut c_info = vk::DescriptorPoolCreateInfo::builder()
+            .max_sets(self.outlines.len() as u32)
+            .pool_sizes(&pool_sizes);
+            for option in options.iter(){
+                c_info = option.apply_option(c_info);                
+            }
+            
+            let pool = unsafe{self.device.create_descriptor_pool(&c_info, None).expect("Could not create descriptor pool")};
+            debug!("Created pool {:?}", pool);
+            self.pool = Some(pool);
+            
         }
     }
 
+    impl DescriptorSet{
+        pub fn get_layout(&self) -> vk::DescriptorSetLayout {
+            self.layout
+        }
+        pub fn get_set(&self) -> vk::DescriptorSet {
+            self.set
+        }
+        //Request: (binding index, dst_array_element, writes)
+        pub fn write(&mut self, requests: &mut [(usize, usize, DescriptorWriteType)]){
+            let mut set_writes = vec![];
+            for (binding, start_array_index, write) in requests.iter_mut(){
+                let d_type = self.bindings[*binding].descriptor_type;
+                match write {
+                    DescriptorWriteType::Buffer(b) => {
+                        let write = vk::WriteDescriptorSet::builder()
+                        .dst_set(self.set)
+                        .descriptor_type(d_type)
+                        .dst_binding(*binding as u32)
+                        .dst_array_element(*start_array_index as u32)
+                        .buffer_info(b)
+                        .build();
+                        debug!("Generated descriptor set write {:?}", write);
+                    
+                        set_writes.push(write);
+                    },
+                    DescriptorWriteType::Image(i) => {
+                        let write = vk::WriteDescriptorSet::builder()
+                        .dst_set(self.set)
+                        .descriptor_type(d_type)
+                        .dst_binding(*binding as u32)
+                        .dst_array_element(*start_array_index as u32)
+                        .image_info(i)
+                        .build();
+                        debug!("Generated descriptor set write {:?}", write);
+                    
+                        set_writes.push(write);
+                        
+                    },
+                    DescriptorWriteType::AccelerationStructure(i, a) => {
+                        let write = vk::WriteDescriptorSet::builder()
+                        .dst_set(self.set)
+                        .descriptor_type(d_type)
+                        .dst_binding(*binding as u32)
+                        .push_next(a)
+                        .build();
+                        debug!("Generated descriptor set write {:?}", write);
+                    
+                        set_writes.push(write);
+                        
+                    },
+                }
+            }
+            unsafe{
+                self.device.update_descriptor_sets(&set_writes, &[]);
+            }
+        }
+    }
 
     impl IDisposable for DescriptorSetOutline{
         fn dispose(&mut self) {
@@ -5068,11 +5179,36 @@ pub mod descriptor{
             
     }
     }
+    impl IDisposable for DesciptorStack{
+        fn dispose(&mut self) {
+        if !self.disposed{
+                self.disposed = true;
+                match self.pool{
+                    Some(p) => {
+                        debug!("Destroying descriptor pool {:?}", p);
+                        unsafe{
+                            self.device.destroy_descriptor_pool(p, None);
+                        }
+                    },
+                    None => {}
+                }
+                debug!("Destroying descriptor sets {:?}", self.sets);    
+                for outline in self.outlines.iter_mut(){
+                    outline.dispose();
+                }
+            }   
+        }
+    }
 
 
     impl Drop for DescriptorSetOutline{
         fn drop(&mut self) {
         self.dispose();
+    }
+    }
+    impl Drop for DesciptorStack{
+        fn drop(&mut self) {
+            self.dispose();
     }
     }
 
@@ -5172,14 +5308,129 @@ pub mod sync{
     }
 }
 pub mod ray_tracing{}
-pub mod shader{}
-pub mod compute{}
+#[allow(dead_code, unused)]
+pub mod shader{
+    use std::ffi::CStr;
+
+    use ash::vk;
+    use log::debug;
+
+    use crate::init::IEngine;
+
+    pub struct Shader{
+        device: ash::Device,
+        source: String,
+        module: vk::ShaderModule,       
+    }
+    impl Shader{
+        pub fn new<T: IEngine>(engine: &T, source: String, kind: shaderc::ShaderKind, ep_name: &str, options: Option<&shaderc::CompileOptions>) -> Shader{
+            let module: vk::ShaderModule;
+            let compiler = shaderc::Compiler::new().unwrap();
+            let byte_source = compiler.compile_into_spirv(source.as_str(), kind, "shader.glsl", ep_name, options).unwrap();
+            debug!("Compiled shader {} to binary {:?}", source, byte_source.as_binary());
+            unsafe{
+                let c_info = vk::ShaderModuleCreateInfo::builder().code(byte_source.as_binary()).build();
+                module = engine.get_device().create_shader_module(&c_info, None).unwrap();
+            }
+            Shader { device: engine.get_device(), source, module }
+        }
+        pub fn get_stage(&self, stage: vk::ShaderStageFlags, ep: &CStr) -> vk::PipelineShaderStageCreateInfo{
+            vk::PipelineShaderStageCreateInfo::builder()
+            .stage(stage)
+            .module(self.module)
+            .name(ep)
+            .build()
+        }
+    }
+    impl Drop for Shader{
+        fn drop(&mut self) {
+        unsafe{
+            debug!("Destroying Shader");
+            self.device.destroy_shader_module(self.module, None);
+        }
+        }
+    }
+    
+}
+#[allow(dead_code, unused)]
+pub mod compute{
+    use ash::vk;
+    use log::debug;
+
+    use crate::{init::IEngine, IDisposable};
+
+    pub struct ComputePipeline{
+        device: ash::Device,
+        layout: vk::PipelineLayout,
+        pipeline: vk::Pipeline,
+        c_info: vk::ComputePipelineCreateInfo,
+        push_ranges: Vec<vk::PushConstantRange>,
+        descriptor_sets: Vec<vk::DescriptorSetLayout>,
+        disposed: bool,
+    }
+    impl ComputePipeline{
+        pub fn new<T: IEngine>(engine: &T, push_ranges: &[vk::PushConstantRange], descriptor_sets: &[vk::DescriptorSetLayout], shader: vk::PipelineShaderStageCreateInfo) -> ComputePipeline{
+            let device = engine.get_device();
+            let lc_info = vk::PipelineLayoutCreateInfo::builder()
+            .push_constant_ranges(push_ranges)
+            .set_layouts(descriptor_sets)
+            .build();
+            let layout: vk::PipelineLayout;
+            let c_infos: [vk::ComputePipelineCreateInfo;1];
+            let pipeline: vk::Pipeline;
+
+            unsafe{
+                layout = device.create_pipeline_layout(&lc_info, None).unwrap();
+                c_infos = [vk::ComputePipelineCreateInfo::builder()
+                .stage(shader)
+                .layout(layout)
+                .build()];
+                pipeline = device.create_compute_pipelines(vk::PipelineCache::null(), &c_infos, None).unwrap()[0];
+            }
+            debug!("Created compute pipeline {:?}", pipeline);
+
+            ComputePipeline{ device,
+                 layout,
+                 pipeline,
+                 c_info: c_infos[0],
+                 push_ranges: push_ranges.to_vec(),
+                 descriptor_sets: descriptor_sets.to_vec(),
+                 disposed: false }
+        }
+        pub fn get_pipeline(&self) -> vk::Pipeline{
+            self.pipeline
+        }
+        pub fn get_layout(&self) -> vk::PipelineLayout{
+            self.layout
+        }
+    }
+    impl IDisposable for ComputePipeline{
+        fn dispose(&mut self) {
+            if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying compute pipeline layout {:?}", self.layout);
+                debug!("Destroying compute pipeline {:?}", self.pipeline);
+                unsafe{
+                    self.device.destroy_pipeline(self.pipeline, None);
+                    self.device.destroy_pipeline_layout(self.layout, None);
+                }
+            }
+    }
+    }
+    impl Drop for ComputePipeline{
+        fn drop(&mut self) {
+            self.dispose();
+        }
+    }
+    
+    
+}
 
 #[cfg(test)]
 mod tests{
     use ash::vk;
 
-    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable};
+    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{self, Shader}};
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -5327,6 +5578,7 @@ mod tests{
         
     }
 
+
     #[test]
     fn allocator_test(){
         match pretty_env_logger::try_init() {
@@ -5383,6 +5635,98 @@ mod tests{
 
         assert!(tgt.last().unwrap() == data.last().unwrap());
 
+    }
+    
+    #[test]
+    fn target(){
+        match pretty_env_logger::try_init() {
+            Ok(_) => {},
+            Err(_) => {},
+        };
+        let mut options = vec![];
+        get_vulkan_validate(&mut options);
+        let (engine, _) = Engine::init(&mut options, None);
+
+        let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build(), None).expect("Could not create command pool")};
+        let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+
+        let data:Vec<u32> = (0..100).collect();
+
+        let mem_options = vec![CreateAllocationOptions::MinimumSize(1024*1024*100)];
+        let buffer_options = vec![CreateBufferOptions::MinimumSize(1024*1024)];
+
+        let mut allocator = memory::Allocator::new(&engine);
+        let cpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &mem_options)));
+        let gpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &mem_options)));
+        let buffer_profile = allocator.add_profile(memory::AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options)));
+        let cpu_stack = AllocatorProfileStack::TargetBuffer(cpu_mem_profile, buffer_profile);
+        let gpu_stack = AllocatorProfileStack::TargetBuffer(gpu_mem_profile, buffer_profile);
+
+        let staging = allocator.get_buffer_region::<u32>( &cpu_stack, data.len(), &AlignmentType::Free, &[]);
+        let target = allocator.get_buffer_region::<u32>(&cpu_stack, data.len(), &AlignmentType::Free, &[]);
+        let processing = allocator.get_buffer_region::<u32>(&gpu_stack, data.len(), &AlignmentType::Free, &[]);
+        let binding = processing.get_binding();
+        let mut outline = DescriptorSetOutline::new(&engine, &[]);
+        let b_index = outline.add_binding(vk::DescriptorType::STORAGE_BUFFER, 1, vk::ShaderStageFlags::COMPUTE);
+        let mut stack = DesciptorStack::new(&engine);
+        let proccessing_set = stack.add_outline(outline);
+        stack.create_sets(&[]);
+        let mut set = stack.get_set(proccessing_set);
+        set.write(&mut [(b_index, 0, binding)]);
+    
+        
+        let shader = Shader::new(&engine, String::from(r#"
+        #version 460
+        #extension GL_KHR_vulkan_glsl : enable
+
+        layout(local_size_x = 1) in;
+
+        layout(set = 0, binding = 0) buffer Data {
+            uint[] values;
+        } data;
+
+        void main(){
+            data.values[gl_GlobalInvocationID.x] += 100;
+        }"#), shaderc::ShaderKind::Compute, "main", None);
+
+        
+        let mut compute = crate::compute::ComputePipeline::new(&engine, &[], &[set.get_layout()], shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
+        
+        
+        allocator.copy_from_ram_slice(&data, &staging);
+
+        unsafe{
+            engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
+            staging.copy_to_region(cmd, &processing);
+            let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::MEMORY_WRITE).dst_access_mask(vk::AccessFlags::SHADER_WRITE).build();
+            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::COMPUTE_SHADER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            engine.get_device().cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_pipeline());
+            engine.get_device().cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_layout(), 0, &[set.get_set()], &[]);
+            engine.get_device().cmd_dispatch(cmd, data.len() as u32, 1, 1);
+            let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::SHADER_WRITE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
+            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::COMPUTE_SHADER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            processing.copy_to_region(cmd, &target);
+            engine.get_device().end_command_buffer(cmd).unwrap();
+            let cmds = [cmd];
+            let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
+            engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &[submit], vk::Fence::null()).unwrap();
+            engine.get_device().queue_wait_idle(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0).unwrap();
+        }
+
+        let mut tgt:[u32;100] = [0;100];
+
+        allocator.copy_to_ram_slice(&target, &mut tgt);
+        allocator.dispose();
+        compute.dispose();
+        stack.dispose();
+        unsafe{
+            engine.get_device().destroy_command_pool(pool, None);
+        }
+
+
+
+        assert!(*tgt.last().unwrap() == *data.last().unwrap() + 100);
+        
     }
 
 }
