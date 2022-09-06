@@ -3783,6 +3783,9 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
+        pub fn get_buffer_from_slice<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+            self.get_buffer_region::<O>(profile, slice.len(), alignment, options)
+        }
         pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources {
             let mut img_resources = None;
 
@@ -5312,20 +5315,39 @@ pub mod sync{
             
     }
 }
+#[allow(dead_code,unused)]
 pub mod ray_tracing{
-    pub struct BLAS{
+    use ash::vk;
+
+    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions}};
+
+    pub struct ObjectOutline{
+        vertex_buffer: BufferRegion,
+        index_buffer: BufferRegion,
+        //Closest hit, any hit, intersection
+        shader_group: (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>),
+        miss_group: (Option<vk::PipelineShaderStageCreateInfo>),
+    }
+    pub struct BlasStore{
         device: ash::Device,
         
     }
-    pub struct TLAS{
+    pub struct TlasStore{
         device: ash::Device,
-        
+         
     }
     pub struct ShaderTable{
         
     }
     pub struct RayTacingPipeline{
         device: ash::Device,
+    }
+    
+    
+    impl ObjectOutline{
+        pub fn new<V: Clone>(allocator: &Allocator, vertex_buffer_profile: &AllocatorProfileStack, index_buffer_profile: &AllocatorProfileStack, vertex_data: Vec<V>, index_data: Vec<u32>){
+            let vertex_buffer = allocator.get_buffer_from_slice(vertex_buffer_profile, &vertex_data, &AlignmentType::Free, )
+        }
     }
 }
 #[allow(dead_code, unused)]
