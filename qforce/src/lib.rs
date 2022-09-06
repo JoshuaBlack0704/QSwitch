@@ -5307,7 +5307,15 @@ pub mod sync{
     }
     }
 }
-pub mod ray_tracing{}
+pub mod ray_tracing{
+    pub struct BLAS{
+        device: ash::Device,
+        
+    }
+    pub struct TLAS{}
+    pub struct ShaderTable{}
+    pub struct RayTacingPipeline{}
+}
 #[allow(dead_code, unused)]
 pub mod shader{
     use std::ffi::CStr;
