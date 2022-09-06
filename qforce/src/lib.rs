@@ -5219,11 +5219,7 @@ pub mod sync{
 
     use crate::{init::IEngine, IDisposable};
 
-    pub struct Fence{
-        device: ash::Device,
-        fence: ash::vk::Fence,
-        disposed: bool,
-    }
+
     impl Fence{
         pub fn new<T: IEngine>(engine: &T, start_signaled: bool) -> Fence{
             let fence;
@@ -5306,15 +5302,31 @@ pub mod sync{
             self.dispose();
     }
     }
+    
+    pub struct SyncStageOutline{
+        
+    }
+    
+    pub struct SyncSystem{
+        device: ash::Device,
+            
+    }
 }
 pub mod ray_tracing{
     pub struct BLAS{
         device: ash::Device,
         
     }
-    pub struct TLAS{}
-    pub struct ShaderTable{}
-    pub struct RayTacingPipeline{}
+    pub struct TLAS{
+        device: ash::Device,
+        
+    }
+    pub struct ShaderTable{
+        
+    }
+    pub struct RayTacingPipeline{
+        device: ash::Device,
+    }
 }
 #[allow(dead_code, unused)]
 pub mod shader{
