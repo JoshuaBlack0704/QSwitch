@@ -5379,10 +5379,11 @@ pub mod sync{
 pub mod ray_tracing{
     use ash::vk;
 
-    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions}, command::CommandPool, init::IEngine};
+    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions}, command::CommandPool, init::IEngine, sync::Fence};
 
     pub struct ObjectOutline{
         vertex_buffer: BufferRegion,
+        vertex_format: vk::Format,
         index_buffer: BufferRegion,
         //Closest hit, any hit, intersection
         shader_group: (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>),
@@ -5402,10 +5403,122 @@ pub mod ray_tracing{
     pub struct RayTacingPipeline{
         device: ash::Device,
     }
+    pub struct ObjectAccelerationSystem{
+        device: ash::Device,
+        allocator: Allocator,
+        staging_profile: AllocatorProfileStack, 
+        vertex_profile: AllocatorProfileStack, 
+        index_profile: AllocatorProfileStack, 
+        blas_profile: AllocatorProfileStack, 
+        scratch_profile: AllocatorProfileStack, 
+    }
     
-    
+    impl ObjectAccelerationSystem{
+        pub fn new<T: IEngine>(engine: &T) -> ObjectAccelerationSystem {
+            let device = engine.get_device();
+            
+            let mut allocator = Allocator::new(engine);
+            let stage_mem_options = [CreateAllocationOptions::MinimumSize(1024*1024*20)];
+            let gpu_mem_options = [CreateAllocationOptions::MemoryAllocateFlags(vk::MemoryAllocateFlagsInfo::builder().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS).build()), CreateAllocationOptions::MinimumSize(1024*1024*100)];
+            let buffer_options = [CreateBufferOptions::SizeOverkillFactor(3), CreateBufferOptions::MinimumSize(1024*1024*10)];
+            let stage_mem_profile = AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &stage_mem_options));
+            let gpu_mem_profile = AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &gpu_mem_options));
+            let staging_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::TRANSFER_SRC, &buffer_options));
+            let vertex_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
+                vk::BufferUsageFlags::TRANSFER_SRC
+                     | vk::BufferUsageFlags::TRANSFER_DST
+                     | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                     | vk::BufferUsageFlags::VERTEX_BUFFER
+                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                 &buffer_options));
+            let index_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
+                vk::BufferUsageFlags::TRANSFER_SRC
+                     | vk::BufferUsageFlags::TRANSFER_DST
+                     | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                     | vk::BufferUsageFlags::INDEX_BUFFER
+                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                 &buffer_options));
+            let blas_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
+                vk::BufferUsageFlags::TRANSFER_SRC
+                     | vk::BufferUsageFlags::TRANSFER_DST
+                     | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR
+                     | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                 &buffer_options));
+            let scratch_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER, &buffer_options));
+            
+            let cpu_mem_index = allocator.add_profile(stage_mem_profile);
+            let gpu_mem_index = allocator.add_profile(gpu_mem_profile);
+            let staging_index = allocator.add_profile(staging_profile);
+            let vertex_index = allocator.add_profile(vertex_profile);
+            let index_index = allocator.add_profile(index_profile);
+            let blas_index = allocator.add_profile(blas_profile);
+            let scratch_index = allocator.add_profile(scratch_profile);
+            
+            let staging_profile = AllocatorProfileStack::TargetBuffer(cpu_mem_index, staging_index);
+            let vertex_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, vertex_index);
+            let index_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, index_index);
+            let blas_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, blas_index);
+            let scratch_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, scratch_index);
+            
+            ObjectAccelerationSystem{ device,
+                allocator,
+                staging_profile,
+                vertex_profile,
+                index_profile,
+                blas_profile,
+                scratch_profile }
+        }
+        pub fn add_object<V: Clone>(
+            &mut self,
+            vertex_data: &[V],
+            vertex_format: vk::Format,
+            index_data: &[u32],
+            shader_group: (Option<vk::PipelineShaderStageCreateInfo>,
+            Option<vk::PipelineShaderStageCreateInfo>,
+            Option<vk::PipelineShaderStageCreateInfo>,),
+            miss_shader){
+            let vb_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
+            self.allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
+            self.allocator.copy_from_ram_slice(&index_data, &ib_stage);
+            
+            let vertex_buffer = self.allocator.get_buffer_from_slice(vertex_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let index_buffer = self.allocator.get_buffer_from_slice(index_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+            unsafe{
+                engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                vb_stage.copy_to_region(cmd, &vertex_buffer);
+                ib_stage.copy_to_region(cmd, &index_buffer);
+                engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                let fence = Fence::new(engine, false);
+                
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmds)
+                .build()];
+                
+                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &submit, fence.get_fence());
+                fence.wait_reset();
+            }           
+            
+        }
+    }
     impl ObjectOutline{
-        pub fn new<T:IEngine, V: Clone>(engine: &T, allocator: &Allocator, staging_buffer_profile: &AllocatorProfileStack, vertex_buffer_profile: &AllocatorProfileStack, index_buffer_profile: &AllocatorProfileStack, vertex_data: Vec<V>, index_data: Vec<u32>){
+        pub fn new<T:IEngine, V: Clone>(engine: &T,
+             allocator: &Allocator,
+             staging_buffer_profile: &AllocatorProfileStack,
+             vertex_buffer_profile: &AllocatorProfileStack,
+             index_buffer_profile: &AllocatorProfileStack,
+             vertex_data: Vec<V>,
+             vertex_format: vk::Format,
+             index_data: Vec<u32>,
+             shader_group: (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>),
+             miss_group: Option<vk::PipelineShaderStageCreateInfo>) -> ObjectOutline {
             let vb_stage = allocator.get_buffer_from_slice(staging_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
             let ib_stage = allocator.get_buffer_from_slice(staging_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
             allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
@@ -5432,7 +5545,14 @@ pub mod ray_tracing{
                 .build()];
                 
                 engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &submit, fence.get_fence());
-            }
+                fence.wait_reset();
+            }           
+            
+            ObjectOutline{ vertex_buffer,
+                vertex_format,
+                index_buffer,
+                shader_group,
+                miss_group, }
         }
     }
 }
