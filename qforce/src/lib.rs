@@ -5216,12 +5216,72 @@ pub mod descriptor{
     }
 
 }
+pub mod command{
+    use ash::vk;
+    use log::debug;
+
+    use crate::{init::IEngine, IDisposable};
+
+    pub struct CommandPool{
+        device: ash::Device,
+        command_pool: ash::vk::CommandPool,
+        c_info: ash::vk::CommandPoolCreateInfo,
+        disposed: bool,
+    }
+    impl CommandPool{
+        pub fn new<T: IEngine>(engine: &T, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool {
+    
+            unsafe {
+                let command_pool = engine.get_device().create_command_pool(&c_info, None).unwrap();
+                CommandPool{
+                    device: engine.get_device(),
+                    command_pool,
+                    c_info,
+                    disposed: false,
+                }
+            }
+    
+        }
+        pub fn get_command_buffers(&self, mut a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer> {
+            a_info.command_pool = self.command_pool;
+            unsafe {
+                self.device.allocate_command_buffers(&a_info).unwrap()
+            }
+        }
+        pub fn reset(&self){
+            unsafe {
+                self.device.reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty()).unwrap();
+            }
+        }
+    }
+    impl IDisposable for CommandPool{
+        fn dispose(&mut self) {
+            if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying command pool {:?}", self.command_pool);
+                unsafe{
+                    self.device.destroy_command_pool(self.command_pool, None);
+                }
+            }
+    }
+    }
+    impl Drop for CommandPool {
+        fn drop(&mut self) {
+            self.dispose();
+        }
+    }
+    
+}
 pub mod sync{
     use ash::vk;
     use log::debug;
 
     use crate::{init::IEngine, IDisposable};
 
+    pub struct Fence{
+        device: ash::Device,
+        fence: ash::vk::Fence,
+    }
 
     impl Fence{
         pub fn new<T: IEngine>(engine: &T, start_signaled: bool) -> Fence{
@@ -5319,7 +5379,7 @@ pub mod sync{
 pub mod ray_tracing{
     use ash::vk;
 
-    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions}};
+    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions}, command::CommandPool, init::IEngine};
 
     pub struct ObjectOutline{
         vertex_buffer: BufferRegion,
@@ -5345,8 +5405,34 @@ pub mod ray_tracing{
     
     
     impl ObjectOutline{
-        pub fn new<V: Clone>(allocator: &Allocator, vertex_buffer_profile: &AllocatorProfileStack, index_buffer_profile: &AllocatorProfileStack, vertex_data: Vec<V>, index_data: Vec<u32>){
-            let vertex_buffer = allocator.get_buffer_from_slice(vertex_buffer_profile, &vertex_data, &AlignmentType::Free, )
+        pub fn new<T:IEngine, V: Clone>(engine: &T, allocator: &Allocator, staging_buffer_profile: &AllocatorProfileStack, vertex_buffer_profile: &AllocatorProfileStack, index_buffer_profile: &AllocatorProfileStack, vertex_data: Vec<V>, index_data: Vec<u32>){
+            let vb_stage = allocator.get_buffer_from_slice(staging_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = allocator.get_buffer_from_slice(staging_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
+            allocator.copy_from_ram_slice(&index_data, &ib_stage);
+            
+            let vertex_buffer = allocator.get_buffer_from_slice(vertex_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let index_buffer = allocator.get_buffer_from_slice(index_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+            unsafe{
+                engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                vb_stage.copy_to_region(cmd, &vertex_buffer);
+                ib_stage.copy_to_region(cmd, &index_buffer);
+                engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                let fence = Fence::new(engine, false);
+                
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmds)
+                .build()];
+                
+                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &submit, fence.get_fence());
+            }
         }
     }
 }
