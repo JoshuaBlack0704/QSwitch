@@ -5242,6 +5242,18 @@ pub mod command{
             }
     
         }
+        pub fn new_raw(device: ash::Device, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool {
+            unsafe {
+                let command_pool = device.create_command_pool(&c_info, None).unwrap();
+                CommandPool{
+                    device,
+                    command_pool,
+                    c_info,
+                    disposed: false,
+                }
+            }
+            
+        }
         pub fn get_command_buffers(&self, mut a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer> {
             a_info.command_pool = self.command_pool;
             unsafe {
@@ -5281,6 +5293,7 @@ pub mod sync{
     pub struct Fence{
         device: ash::Device,
         fence: ash::vk::Fence,
+        disposed: bool,
     }
 
     impl Fence{
@@ -5411,6 +5424,7 @@ pub mod ray_tracing{
         index_profile: AllocatorProfileStack, 
         blas_profile: AllocatorProfileStack, 
         scratch_profile: AllocatorProfileStack, 
+        objects: Vec<ObjectOutline>,
     }
     
     impl ObjectAccelerationSystem{
@@ -5466,24 +5480,26 @@ pub mod ray_tracing{
                 vertex_profile,
                 index_profile,
                 blas_profile,
-                scratch_profile }
+                scratch_profile,
+                objects: vec![], }
         }
-        pub fn add_object<V: Clone>(
+        pub fn add_object<T:IEngine, V: Clone>(
             &mut self,
+            engine: &T,
             vertex_data: &[V],
             vertex_format: vk::Format,
             index_data: &[u32],
             shader_group: (Option<vk::PipelineShaderStageCreateInfo>,
             Option<vk::PipelineShaderStageCreateInfo>,
             Option<vk::PipelineShaderStageCreateInfo>,),
-            miss_shader){
+            miss_group: Option<vk::PipelineShaderStageCreateInfo>,) -> usize {
             let vb_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let ib_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &index_data, &AlignmentType::Free, &[]);
             self.allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
             self.allocator.copy_from_ram_slice(&index_data, &ib_stage);
             
-            let vertex_buffer = self.allocator.get_buffer_from_slice(vertex_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let index_buffer = self.allocator.get_buffer_from_slice(index_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let vertex_buffer = self.allocator.get_buffer_from_slice(&self.vertex_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let index_buffer = self.allocator.get_buffer_from_slice(&self.index_profile, &index_data, &AlignmentType::Free, &[]);
             
             let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
@@ -5506,54 +5522,17 @@ pub mod ray_tracing{
                 fence.wait_reset();
             }           
             
-        }
-    }
-    impl ObjectOutline{
-        pub fn new<T:IEngine, V: Clone>(engine: &T,
-             allocator: &Allocator,
-             staging_buffer_profile: &AllocatorProfileStack,
-             vertex_buffer_profile: &AllocatorProfileStack,
-             index_buffer_profile: &AllocatorProfileStack,
-             vertex_data: Vec<V>,
-             vertex_format: vk::Format,
-             index_data: Vec<u32>,
-             shader_group: (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>),
-             miss_group: Option<vk::PipelineShaderStageCreateInfo>) -> ObjectOutline {
-            let vb_stage = allocator.get_buffer_from_slice(staging_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let ib_stage = allocator.get_buffer_from_slice(staging_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
-            allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
-            allocator.copy_from_ram_slice(&index_data, &ib_stage);
-            
-            let vertex_buffer = allocator.get_buffer_from_slice(vertex_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let index_buffer = allocator.get_buffer_from_slice(index_buffer_profile, &vertex_data, &AlignmentType::Free, &[]);
-            
-            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build());
-            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
-            
-            
-            unsafe{
-                engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
-                vb_stage.copy_to_region(cmd, &vertex_buffer);
-                ib_stage.copy_to_region(cmd, &index_buffer);
-                engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
-                
-                let fence = Fence::new(engine, false);
-                
-                let cmds = [cmd];
-                let submit = [vk::SubmitInfo::builder()
-                .command_buffers(&cmds)
-                .build()];
-                
-                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &submit, fence.get_fence());
-                fence.wait_reset();
-            }           
-            
-            ObjectOutline{ vertex_buffer,
+            let outline = ObjectOutline{ vertex_buffer,
                 vertex_format,
                 index_buffer,
                 shader_group,
-                miss_group, }
+                miss_group };
+            
+            self.objects.push(outline);
+            self.objects.len()-1
+                      
         }
+        pub fn 
     }
 }
 #[allow(dead_code, unused)]
@@ -5678,7 +5657,7 @@ pub mod compute{
 mod tests{
     use ash::vk;
 
-    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{self, Shader}};
+    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{self, Shader}, ray_tracing::ObjectAccelerationSystem};
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -5886,7 +5865,7 @@ mod tests{
     }
     
     #[test]
-    fn target(){
+    fn discriptor_test(){
         match pretty_env_logger::try_init() {
             Ok(_) => {},
             Err(_) => {},
@@ -5975,6 +5954,37 @@ mod tests{
 
         assert!(*tgt.last().unwrap() == *data.last().unwrap() + 100);
         
+    }
+    
+    
+    #[repr(C)]
+    #[derive(Clone)]
+    pub struct Vertex{
+        pos: [f32; 3],
+    }    
+    #[test]
+    fn target(){
+        match pretty_env_logger::try_init() {
+            Ok(_) => {},
+            Err(_) => {},
+        };
+        let mut options = vec![];
+        get_vulkan_validate(&mut options);
+        let (engine, _) = Engine::init(&mut options, None);
+        let v_data = [
+            Vertex{pos: [ 0.0, 1.0, 0.0]}, //top
+            Vertex{pos: [ -1.0, -1.0,0.5]},  //left
+            Vertex{pos: [1.0,-1.0,0.5]}, //right
+            Vertex{pos: [0.0, -1.0, -0.5]}, //front  
+        ];
+        let i_data = [
+            3, 2, 0, //fr
+            1, 0, 2, //back
+            1, 3, 0, //fl
+            1,2,3 ]; //bottom
+        
+        let mut acceleration_system = ObjectAccelerationSystem::new(&engine);
+        let tetrahedron = acceleration_system.add_object(&engine, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data, (None, None, None), None);
     }
 
 }
