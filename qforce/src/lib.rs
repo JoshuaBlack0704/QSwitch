@@ -34,7 +34,7 @@ pub mod traits{
     use flume;
     use ash;
     use ash::vk;
-    use crate::{core};
+    use crate::core::{self};
 
     pub trait WindowEventCallback{
         fn window_event_callback(&mut self, event: &winit::event::WindowEvent);
@@ -504,9 +504,9 @@ pub mod core{
                     surface_loader, 
                     surface, 
                     swapchain_loader, 
-                    swapchain: swapchain, 
-                    swapchain_info: swapchain_info, 
-                    swapchain_images: swapchain_images,
+                    swapchain , 
+                    swapchain_info, 
+                    swapchain_images,
                     surface_format,
                     
                  }
@@ -868,9 +868,10 @@ pub mod core{
     }
 
     pub mod memory{
-    use std::{ffi::c_void};
+    use std::ffi::c_void;
+
+    use ash::vk;
     use log::{self, debug};
-    use ash::vk::{self};
     use crate::core;
 
     use crate::traits::{IEngineData, ICommandPool};
@@ -985,7 +986,7 @@ pub mod core{
 
                 let mut store = self.clone();
                 store.destroy_allocation = Some(allocation);
-                Allocation { store: store, allocation, alloc_info: aloc_info, cursor: 0 }
+                Allocation { store, allocation, alloc_info: aloc_info, cursor: 0 }
             }
             #[doc = "Uses a type and count to determine byte size"]
             pub fn allocate_typed<T>(&self, type_index: u32, count: usize, a_m_next: *const c_void) -> Allocation{
@@ -1071,7 +1072,7 @@ pub mod core{
 
                 debug!("Created buffer {:?} on allocation {:?} at {} with size {}", buffer, self.allocation, target_address, reqs.size);
 
-                Buffer { store: store, buffer, c_info, cursor: 0, reqs, allocation_offset: target_address, alloc_info: self.alloc_info }
+                Buffer { store, buffer, c_info, cursor: 0, reqs, allocation_offset: target_address, alloc_info: self.alloc_info }
             }
             pub fn get_buffer_typed<T>(&mut self, usage: vk::BufferUsageFlags, count: usize, queue_families: Option<&[u32]>, flags: vk::BufferCreateFlags, p_next: *const c_void) -> Buffer{
                 let size = std::mem::size_of::<T>() * count;
@@ -1167,7 +1168,7 @@ pub mod core{
                 let mut store = self.store.clone();
                 store.destroy_buffer = None;
                 debug!("Partitioned region from buffer {:?} at {} of size {}", self.buffer, target_address, size);
-                BufferRegion { store: store, buffer: self.buffer, usage: self.c_info.usage, allocation_offset: self.allocation_offset + target_address, buffer_offset: target_address, size: size, alloc_info: self.alloc_info }
+                BufferRegion { store, buffer: self.buffer, usage: self.c_info.usage, allocation_offset: self.allocation_offset + target_address, buffer_offset: target_address, size, alloc_info: self.alloc_info }
             }
             pub fn get_region_typed<T>(&mut self, count: usize, custom_alignment: Option<(bool, u64)>) -> BufferRegion{
                 let size = std::mem::size_of::<T>() * count;
@@ -1421,7 +1422,7 @@ pub mod core{
                 store.destroy_pool = Some(pool);
                 store.destroy_set_layouts = Some(layouts);
 
-                DescriptorStack{ store: store, pool, sets }
+                DescriptorStack{ store, pool, sets }
 
             }
         }        
@@ -3783,7 +3784,7 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
-        pub fn get_buffer_from_slice<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+        pub fn get_buffer_region_from_slice<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
             self.get_buffer_region::<O>(profile, slice.len(), alignment, options)
         }
         pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources {
@@ -4275,7 +4276,7 @@ pub mod memory{
                             let new_block = BufferMemoryBlock { 
                                 allocation_offset: target_allocation_offset, 
                                 buffer_offset: target_buffer_offset, 
-                                size: size, 
+                                size, 
                                 user: old_block.user };
                             let unused_block = BufferMemoryBlock { 
                                 allocation_offset: target_allocation_offset + size, 
@@ -4340,7 +4341,8 @@ pub mod memory{
                     }
                     else {
                         let allocation_offset = ((self.allocation_offset/ *a + 1) * *a);
-                        let buffer_offset = allocation_offset + (self.buffer_offset - self.allocation_offset);
+                        let forward_delta = allocation_offset - self.allocation_offset;
+                        let buffer_offset = self.buffer_offset + forward_delta;
 
                         let size;
                         if self.size < (buffer_offset - self.buffer_offset){
@@ -4614,6 +4616,24 @@ pub mod memory{
             .range(self.home_block.size)
             .build();
             DescriptorWriteType::Buffer([info])
+        }
+        pub fn get_device_address(&self) -> u64 {
+            let address_info = vk::BufferDeviceAddressInfo::builder()
+            .buffer(self.buffer);
+            let address = unsafe{self.device.get_buffer_device_address(&address_info)} + self.home_block.buffer_offset;
+            address
+        }
+        pub fn get_buffer(&self) -> vk::Buffer {
+            self.buffer
+        }
+        pub fn get_buffer_offset(&self) -> u64 {
+            self.home_block.buffer_offset
+        }
+        pub fn get_allocation_offset(&self) -> u64 {
+            self.home_block.allocation_offset
+        }
+        pub fn get_size(&self) -> u64 {
+            self.home_block.size 
         }
     }
     impl CreateBufferOptions{
@@ -5216,6 +5236,7 @@ pub mod descriptor{
     }
 
 }
+#[allow(dead_code, unused)]
 pub mod command{
     use ash::vk;
     use log::debug;
@@ -5225,7 +5246,7 @@ pub mod command{
     pub struct CommandPool{
         device: ash::Device,
         command_pool: ash::vk::CommandPool,
-        c_info: ash::vk::CommandPoolCreateInfo,
+        c_info: vk::CommandPoolCreateInfo,
         disposed: bool,
     }
     impl CommandPool{
@@ -5284,6 +5305,7 @@ pub mod command{
     }
     
 }
+#[allow(dead_code, unused)]
 pub mod sync{
     use ash::vk;
     use log::debug;
@@ -5390,9 +5412,12 @@ pub mod sync{
 }
 #[allow(dead_code,unused)]
 pub mod ray_tracing{
-    use ash::vk;
+    use std::mem::size_of;
 
-    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions}, command::CommandPool, init::IEngine, sync::Fence};
+    use ash::vk;
+    use log::debug;
+
+    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions}, command::CommandPool, init::{IEngine, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable};
 
     pub struct ObjectOutline{
         vertex_buffer: BufferRegion,
@@ -5401,6 +5426,8 @@ pub mod ray_tracing{
         //Closest hit, any hit, intersection
         shader_group: (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>),
         miss_group: (Option<vk::PipelineShaderStageCreateInfo>),
+        blas_region: BufferRegion,
+        acc_struct: vk::AccelerationStructureKHR,
     }
     pub struct BlasStore{
         device: ash::Device,
@@ -5418,6 +5445,8 @@ pub mod ray_tracing{
     }
     pub struct ObjectAccelerationSystem{
         device: ash::Device,
+        acc_loader: ash::extensions::khr::AccelerationStructure,
+        properties: PhysicalDevicePropertiesStore,
         allocator: Allocator,
         staging_profile: AllocatorProfileStack, 
         vertex_profile: AllocatorProfileStack, 
@@ -5425,6 +5454,7 @@ pub mod ray_tracing{
         blas_profile: AllocatorProfileStack, 
         scratch_profile: AllocatorProfileStack, 
         objects: Vec<ObjectOutline>,
+        disposed: bool
     }
     
     impl ObjectAccelerationSystem{
@@ -5458,7 +5488,10 @@ pub mod ray_tracing{
                      | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR
                      | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                  &buffer_options));
-            let scratch_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER, &buffer_options));
+            let scratch_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
+                vk::BufferUsageFlags::STORAGE_BUFFER
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                &buffer_options));
             
             let cpu_mem_index = allocator.add_profile(stage_mem_profile);
             let gpu_mem_index = allocator.add_profile(gpu_mem_profile);
@@ -5475,13 +5508,16 @@ pub mod ray_tracing{
             let scratch_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, scratch_index);
             
             ObjectAccelerationSystem{ device,
+                acc_loader: ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &engine.get_device()),
+                properties: engine.get_property_store(),
                 allocator,
                 staging_profile,
                 vertex_profile,
                 index_profile,
                 blas_profile,
                 scratch_profile,
-                objects: vec![], }
+                objects: vec![],
+                disposed: false, }
         }
         pub fn add_object<T:IEngine, V: Clone>(
             &mut self,
@@ -5493,15 +5529,60 @@ pub mod ray_tracing{
             Option<vk::PipelineShaderStageCreateInfo>,
             Option<vk::PipelineShaderStageCreateInfo>,),
             miss_group: Option<vk::PipelineShaderStageCreateInfo>,) -> usize {
-            let vb_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let ib_stage = self.allocator.get_buffer_from_slice(&self.staging_profile, &index_data, &AlignmentType::Free, &[]);
+            let vb_stage = self.allocator.get_buffer_region_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = self.allocator.get_buffer_region_from_slice(&self.staging_profile, &index_data, &AlignmentType::Free, &[]);
             self.allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
             self.allocator.copy_from_ram_slice(&index_data, &ib_stage);
             
-            let vertex_buffer = self.allocator.get_buffer_from_slice(&self.vertex_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let index_buffer = self.allocator.get_buffer_from_slice(&self.index_profile, &index_data, &AlignmentType::Free, &[]);
+            let vertex_buffer = self.allocator.get_buffer_region_from_slice(&self.vertex_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let vertex_buffer_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
+            let index_buffer = self.allocator.get_buffer_region_from_slice(&self.index_profile, &index_data, &AlignmentType::Free, &[]);
+            let index_device_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
             
-            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build());
+            let triangle_info = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
+            .vertex_format(vertex_format)
+            .vertex_data(vertex_buffer_address)
+            .vertex_stride(size_of::<V>() as u64)
+            .max_vertex(vertex_data.len() as u32)
+            .index_type(vk::IndexType::UINT32)
+            .index_data(index_device_address);
+            let geo_union = vk::AccelerationStructureGeometryDataKHR{triangles: triangle_info.build()};
+            
+            let geo_info = [vk::AccelerationStructureGeometryKHR::builder()
+            .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
+            .geometry(geo_union).build()];
+            
+            let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
+            .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
+            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+            .geometries(&geo_info);
+            
+            let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
+            let primative_count = [(index_data.len()/3) as u32];
+            let sizing = unsafe{self.acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &primative_count)};
+            
+            let blas_region = self.allocator.get_buffer_region::<u8>(&self.blas_profile, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
+            let scratch_region = self.allocator.get_buffer_region::<u8>(&self.scratch_profile, sizing.build_scratch_size as usize, &AlignmentType::Allocation(self.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
+            let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
+            
+            let acc_c_info = vk::AccelerationStructureCreateInfoKHR::builder()
+            .buffer(blas_region.get_buffer())
+            .offset(blas_region.get_buffer_offset())
+            .size(blas_region.get_size())
+            .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL);
+            let acc_struct = unsafe{self.acc_loader.create_acceleration_structure(&acc_c_info, None).expect("Could not create acceleration structre")};
+            
+            let build_info =[ build_info
+            .dst_acceleration_structure(acc_struct)
+            .scratch_data(scratch_device_address)
+            .build()];
+            let build_ranges = [vk::AccelerationStructureBuildRangeInfoKHR::builder()
+            .first_vertex(0)
+            .primitive_count(primative_count[0])
+            .primitive_offset(0)
+            .build()];
+            
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
@@ -5509,6 +5590,12 @@ pub mod ray_tracing{
                 engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
                 vb_stage.copy_to_region(cmd, &vertex_buffer);
                 ib_stage.copy_to_region(cmd, &index_buffer);
+                let mem_barrier =[ vk::MemoryBarrier::builder()
+                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .dst_access_mask(vk::AccessFlags::ACCELERATION_STRUCTURE_READ_KHR)
+                    .build()];
+                self.device.cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_KHR, vk::DependencyFlags::empty(), &mem_barrier, &[], &[]);
+                self.acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &[&build_ranges]);
                 engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
                 
                 let fence = Fence::new(engine, false);
@@ -5518,7 +5605,7 @@ pub mod ray_tracing{
                 .command_buffers(&cmds)
                 .build()];
                 
-                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &submit, fence.get_fence());
+                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence());
                 fence.wait_reset();
             }           
             
@@ -5526,13 +5613,34 @@ pub mod ray_tracing{
                 vertex_format,
                 index_buffer,
                 shader_group,
-                miss_group };
+                miss_group,
+                blas_region,
+                acc_struct, };
             
             self.objects.push(outline);
             self.objects.len()-1
                       
         }
-        pub fn 
+    }
+    impl IDisposable for ObjectAccelerationSystem{
+        fn dispose(&mut self) {
+        if !self.disposed{
+                self.disposed = true;
+                for outline in self.objects.iter_mut(){
+                    debug!("Destroying acceleration structure {:?}", outline.acc_struct);
+                    unsafe{
+                        self.acc_loader.destroy_acceleration_structure(outline.acc_struct, None);
+                    }
+                    
+                }
+                self.allocator.dispose();
+            }
+    }
+    }
+    impl Drop for ObjectAccelerationSystem{
+        fn drop(&mut self) {
+        self.dispose();
+    }
     }
 }
 #[allow(dead_code, unused)]
@@ -5657,7 +5765,7 @@ pub mod compute{
 mod tests{
     use ash::vk;
 
-    use crate::{init::{self, Engine, IEngine}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{self, Shader}, ray_tracing::ObjectAccelerationSystem};
+    use crate::{init::{self, Engine, IEngine, EngineInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{Shader}, ray_tracing::ObjectAccelerationSystem};
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -5968,7 +6076,24 @@ mod tests{
             Ok(_) => {},
             Err(_) => {},
         };
-        let mut options = vec![];
+        
+        let features12 = vk::PhysicalDeviceVulkan12Features::builder()
+        .buffer_device_address(true)
+        .timeline_semaphore(true);
+        let acc_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::builder()
+        .acceleration_structure(true);
+        let ray_tracing_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::builder()
+        .ray_tracing_pipeline(true);
+        let acc_extension = ash::extensions::khr::AccelerationStructure::name().as_ptr();
+        let ray_tracing = ash::extensions::khr::RayTracingPipeline::name().as_ptr();
+        let def_host = ash::extensions::khr::DeferredHostOperations::name().as_ptr();
+        
+        let mut options = vec![
+            EngineInitOptions::DeviceFeatures12(features12.build()),
+            EngineInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
+            EngineInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
+            EngineInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
+        ];
         get_vulkan_validate(&mut options);
         let (engine, _) = Engine::init(&mut options, None);
         let v_data = [
@@ -5984,7 +6109,9 @@ mod tests{
             1,2,3 ]; //bottom
         
         let mut acceleration_system = ObjectAccelerationSystem::new(&engine);
-        let tetrahedron = acceleration_system.add_object(&engine, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data, (None, None, None), None);
+        let _tetrahedron = acceleration_system.add_object(&engine, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data, (None, None, None), None);
+        println!("Won't lose device {:?}", engine.get_device().handle());
+        
     }
 
 }
