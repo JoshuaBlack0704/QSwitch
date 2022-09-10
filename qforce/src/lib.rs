@@ -3909,6 +3909,10 @@ pub mod memory{
             }
         }
         pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion){
+            if dst.home_block.size == 0{
+                debug!("Aborting copy of no data to buffer {:?}", dst.buffer);
+                return;
+            }
             match &mut self.resources[dst.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_from_ram_slice(objects, dst);
@@ -4587,6 +4591,10 @@ pub mod memory{
             }
             }
         pub fn copy_to_region(&self, cmd: vk::CommandBuffer, dst: &BufferRegion){
+            if self.home_block.size == 0{
+                debug!("Aborted copy to region of no size from buffer {:?}", self.buffer);
+                return;
+            }
             let copy = [self.get_copy_info(dst)];
             unsafe{
                 self.device.cmd_copy_buffer(cmd, self.buffer, dst.buffer, &copy);
@@ -5423,8 +5431,8 @@ pub mod ray_tracing{
     use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions, self}, command::CommandPool, init::{IEngine, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable};
 
     pub struct ShaderTable{
-       pub ray_gen: vk::PipelineShaderStageCreateInfo,
-       pub hit_groups: Vec<(Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>)>,
+       pub ray_gen: Vec<vk::PipelineShaderStageCreateInfo>,
+       pub hit_groups: Vec<(vk::RayTracingShaderGroupTypeKHR, (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>))>,
        pub misses: Vec<vk::PipelineShaderStageCreateInfo>,
         
     }
@@ -5441,12 +5449,13 @@ pub mod ray_tracing{
     #[derive(Clone)]
     pub struct RayTracingMemoryProfiles{
         properties: PhysicalDevicePropertiesStore,
-        staging_profile: AllocatorProfileStack, 
-        vertex_profile: AllocatorProfileStack, 
-        index_profile: AllocatorProfileStack, 
-        acc_struct_profile: AllocatorProfileStack, 
-        instance_data_profile: AllocatorProfileStack,
-        scratch_profile: AllocatorProfileStack, 
+        staging: AllocatorProfileStack, 
+        vertex: AllocatorProfileStack, 
+        index: AllocatorProfileStack, 
+        acc_struct: AllocatorProfileStack, 
+        instance_data: AllocatorProfileStack,
+        scratch: AllocatorProfileStack, 
+        shader_table: AllocatorProfileStack,
     }
     pub struct TriangleObjectGeometry{
         vertex_buffer: BufferRegion,
@@ -5482,7 +5491,7 @@ pub mod ray_tracing{
     }
     
     impl RayTacingPipeline{
-        pub fn new<T:IEngine>(engine: &T, sbt: &ShaderTable, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]){
+        pub fn new<T:IEngine>(engine: &T, sbt: &ShaderTable, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]) -> RayTacingPipeline {
             let device = engine.get_device();
             let ray_loader = ash::extensions::khr::RayTracingPipeline::new(&engine.get_instance(), &device);
             let properties = engine.get_property_store();
@@ -5490,27 +5499,33 @@ pub mod ray_tracing{
             let mut stages = vec![];
             let mut groups = vec![];
             
-            stages.push(sbt.ray_gen);
-            groups.push(vk::RayTracingShaderGroupCreateInfoKHR::builder()
-            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-            .general_shader(0)
-            .closest_hit_shader(u32::max_value())
-            .any_hit_shader(u32::max_value())
-            .intersection_shader(u32::max_value()).build());
-            debug!("Added ray gen shader at index 0");
-            for miss in sbt.misses.iter(){
-                groups.push(vk::RayTracingShaderGroupCreateInfoKHR::builder()
+            for ray_gen in sbt.ray_gen.iter(){
+                debug!("Adding ray gen shader at sbt index {:?}", stages.len());
+                let group = vk::RayTracingShaderGroupCreateInfoKHR::builder()
                 .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
                 .general_shader(stages.len() as u32)
-                .closest_hit_shader(u32::max_value())
-                .any_hit_shader(u32::max_value())
-                .intersection_shader(u32::max_value()).build());
-                debug!("Added miss shader at index {}", stages.len());
-                stages.push(*miss);
+                .closest_hit_shader(u32::MAX)
+                .any_hit_shader(u32::MAX)
+                .intersection_shader(u32::MAX)
+                .build();
+                stages.push(*ray_gen);
+                groups.push(group);
             }
-            for (closest_hit, any_hit, intersection) in sbt.hit_groups.iter(){
+            for miss in sbt.misses.iter(){
+                debug!("Adding miss shader at sbt index {:?}", stages.len());
+                let group = vk::RayTracingShaderGroupCreateInfoKHR::builder()
+                .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
+                .general_shader(stages.len() as u32)
+                .closest_hit_shader(u32::MAX)
+                .any_hit_shader(u32::MAX)
+                .intersection_shader(u32::MAX)
+                .build();
+                stages.push(*miss);
+                groups.push(group);
+            }
+            for (geo_hit_type, (closest_hit, any_hit, intersection)) in sbt.hit_groups.iter(){
                 let mut group_builder = vk::RayTracingShaderGroupCreateInfoKHR::builder()
-                .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP);
+                .ty(*geo_hit_type);
                 group_builder = group_builder.general_shader(u32::MAX);
                 match closest_hit {
                     Some(s) => {
@@ -5539,6 +5554,7 @@ pub mod ray_tracing{
                 }
                 groups.push(group_builder.build());
             }
+            
             let lc_info = vk::PipelineLayoutCreateInfo::builder()
             .set_layouts(&set_layouts)
             .push_constant_ranges(&push_constant_ranges)
@@ -5564,10 +5580,87 @@ pub mod ray_tracing{
                 handle_data = ray_loader.get_ray_tracing_shader_group_handles(pipeline, 0, groups.len() as u32, groups.len() * properties.pd_raytracing_properties.shader_group_handle_size as usize).expect("Could not get shader handles")
             };
 
-            let ray_gen_size = (properties.pd_raytracing_properties.shader_group_handle_size * 1) as u64;
-            let miss_size = (properties.pd_raytracing_properties.shader_group_handle_size * sbt.misses.len() as u32) as u64;
-            let hit_group_size = (properties.pd_raytracing_properties.shader_group_handle_size * sbt.hit_groups.len() as u32) as u64;
+            let handle_size = properties.pd_raytracing_properties.shader_group_handle_size;
+            let mut aligned_handle_size = handle_size;
+            let shader_alignment = properties.pd_raytracing_properties.shader_group_handle_alignment;
+            let shader_base_alignment = properties.pd_raytracing_properties.shader_group_base_alignment;
+            
+            while aligned_handle_size % shader_alignment != 0 {
+                aligned_handle_size += 1;
+            }
+            
+            let aligned_handle_size_diff = aligned_handle_size - handle_size;
+            let mut ray_gen_handles = vec![];
+            let mut miss_handles = vec![];
+            let mut hit_handles = vec![];
+            for stage_index in 0..stages.len(){
+                let handle_cursor = stage_index * handle_size as usize;
+                let handle = &handle_data[handle_cursor..handle_cursor+handle_size as usize];
+                if stage_index < sbt.ray_gen.len(){
+                    ray_gen_handles.extend_from_slice(handle);
+                    if aligned_handle_size_diff > 0{
+                        ray_gen_handles.resize_with(ray_gen_handles.len() + aligned_handle_size_diff as usize, || 0);
+                    }
+                    
+                }   
+                else if stage_index < sbt.ray_gen.len() + sbt.misses.len(){
+                    miss_handles.extend_from_slice(handle);
+                    if aligned_handle_size_diff > 0{
+                        miss_handles.resize_with(miss_handles.len() + aligned_handle_size_diff as usize, || 0);
+                    }
+                    
+                }   
+                else{
+                    hit_handles.extend_from_slice(handle);
+                    if aligned_handle_size_diff > 0{
+                        hit_handles.resize_with(hit_handles.len() + aligned_handle_size_diff as usize, || 0);
+                    }
+                    
+                }          
+            }
 
+            let ray_gen_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &ray_gen_handles, &AlignmentType::User(shader_base_alignment as u64), &[]);
+            let miss_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &miss_handles, &AlignmentType::User(shader_base_alignment as u64), &[]);
+            let hit_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &hit_handles, &AlignmentType::User(shader_base_alignment as u64), &[]);
+            
+            let ray_gen_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &ray_gen_handles, &AlignmentType::Free, &[]);
+            let miss_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &miss_handles, &AlignmentType::Free, &[]);
+            let hit_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &hit_handles, &AlignmentType::Free, &[]);
+            
+            allocator.copy_from_ram_slice(&ray_gen_handles, &ray_gen_stage);
+            allocator.copy_from_ram_slice(&miss_handles, &miss_stage);
+            allocator.copy_from_ram_slice(&hit_handles, &hit_stage);
+            
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+            let fence = Fence::new(engine, false);
+            unsafe{
+                device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                ray_gen_stage.copy_to_region(cmd, &ray_gen_region);
+                miss_stage.copy_to_region(cmd, &miss_region);
+                hit_stage.copy_to_region(cmd, &hit_region);
+                device.end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmds)
+                .build()];
+                
+                device.queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                fence.wait_reset();
+            }           
+            
+            RayTacingPipeline{ device,
+                ray_loader,
+                pipeline_layout: layout,
+                pipeline,
+                ray_gen_region,
+                hit_groups_region: hit_region,
+                misses_region: miss_region,
+                disposed: false }
         }
     }
     impl IDisposable for RayTacingPipeline{
@@ -5621,8 +5714,8 @@ pub mod ray_tracing{
             let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
             let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_counts)};
             
-            let tlas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct_profile, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
-            let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch_profile, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
+            let tlas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
+            let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
             let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
             
             let acc_c_info = vk::AccelerationStructureCreateInfoKHR::builder()
@@ -5678,8 +5771,8 @@ pub mod ray_tracing{
             match default{
                 Some(d) => {
                     let default = vec![d; count];
-                    instance_buffer = allocator.get_buffer_region_from_slice(&profiles.instance_data_profile, &default, &AlignmentType::Free, &[]);
-                    let staging_buffer = allocator.get_buffer_region_from_slice(&profiles.staging_profile, &default, &AlignmentType::Free, &[]);
+                    instance_buffer = allocator.get_buffer_region_from_slice(&profiles.instance_data, &default, &AlignmentType::Free, &[]);
+                    let staging_buffer = allocator.get_buffer_region_from_slice(&profiles.staging, &default, &AlignmentType::Free, &[]);
                     allocator.copy_from_ram_slice(&default, &staging_buffer);                    
                     let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
                     let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
@@ -5702,7 +5795,7 @@ pub mod ray_tracing{
                     }           
                 },
                 None => {
-                    instance_buffer = allocator.get_buffer_region::<vk::AccelerationStructureInstanceKHR>(&profiles.instance_data_profile, count, &AlignmentType::Free, &[]);
+                    instance_buffer = allocator.get_buffer_region::<vk::AccelerationStructureInstanceKHR>(&profiles.instance_data, count, &AlignmentType::Free, &[]);
                 },
             }
             instance_buffer
@@ -5741,8 +5834,8 @@ pub mod ray_tracing{
             let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
             let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_counts)};
             
-            let blas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct_profile, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
-            let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch_profile, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
+            let blas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
+            let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
             let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
             
             let acc_c_info = vk::AccelerationStructureCreateInfoKHR::builder()
@@ -5811,14 +5904,14 @@ pub mod ray_tracing{
     }
     impl TriangleObjectGeometry{
         pub fn new<T: IEngine, V: Clone>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32]) -> TriangleObjectGeometry {
-            let vb_stage = allocator.get_buffer_region_from_slice(&profiles.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let ib_stage = allocator.get_buffer_region_from_slice(&profiles.staging_profile, &index_data, &AlignmentType::Free, &[]);
+            let vb_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &index_data, &AlignmentType::Free, &[]);
             allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
             allocator.copy_from_ram_slice(&index_data, &ib_stage);
             
-            let vertex_buffer = allocator.get_buffer_region_from_slice(&profiles.vertex_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let vertex_buffer = allocator.get_buffer_region_from_slice(&profiles.vertex, &vertex_data, &AlignmentType::Free, &[]);
             let vertex_buffer_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
-            let index_buffer = allocator.get_buffer_region_from_slice(&profiles.index_profile, &index_data, &AlignmentType::Free, &[]);
+            let index_buffer = allocator.get_buffer_region_from_slice(&profiles.index, &index_data, &AlignmentType::Free, &[]);
             let index_device_address = vk::DeviceOrHostAddressConstKHR{device_address: index_buffer.get_device_address()};
             
             let triangle_info = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
@@ -5907,6 +6000,12 @@ pub mod ray_tracing{
                 | vk::BufferUsageFlags::TRANSFER_SRC
                 | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
                 &buffer_options));
+            let shader_table_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
+                vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                | vk::BufferUsageFlags::TRANSFER_DST
+                | vk::BufferUsageFlags::TRANSFER_SRC,
+                &buffer_options));
             
             let cpu_mem_index = allocator.add_profile(stage_mem_profile);
             let gpu_mem_index = allocator.add_profile(gpu_mem_profile);
@@ -5916,6 +6015,7 @@ pub mod ray_tracing{
             let blas_index = allocator.add_profile(blas_profile);
             let scratch_index = allocator.add_profile(scratch_profile);
             let instance_index = allocator.add_profile(instance_profile);
+            let shader_table_index = allocator.add_profile(shader_table_profile);
             
             let staging_profile = AllocatorProfileStack::TargetBuffer(cpu_mem_index, staging_index);
             let vertex_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, vertex_index);
@@ -5923,14 +6023,16 @@ pub mod ray_tracing{
             let acc_struct_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, blas_index);
             let scratch_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, scratch_index);
             let instance_data_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, instance_index);
+            let shader_table_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, shader_table_index);
             
             RayTracingMemoryProfiles{ properties: engine.get_property_store(),
-                staging_profile,
-                vertex_profile,
-                index_profile,
-                acc_struct_profile,
-                scratch_profile,
-                instance_data_profile}
+                staging: staging_profile,
+                vertex: vertex_profile,
+                index: index_profile,
+                acc_struct: acc_struct_profile,
+                instance_data: instance_data_profile,
+                scratch: scratch_profile,
+                shader_table: shader_table_profile }
         }
         
     }
@@ -6491,8 +6593,8 @@ mod tests{
         }"#), shaderc::ShaderKind::Miss, "main", Some(&options));
         let main = CString::new("main").unwrap();
         let sbt = ShaderTable{ 
-            ray_gen: ray_gen.get_stage(vk::ShaderStageFlags::RAYGEN_KHR, &main),
-            hit_groups: vec![(Some(closest_hit.get_stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR, &main)), None, None)],
+            ray_gen: vec![ray_gen.get_stage(vk::ShaderStageFlags::RAYGEN_KHR, &main)],
+            hit_groups: vec![(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP, (Some(closest_hit.get_stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR, &main)), None, None))],
             misses: vec![] };
         let ray_pipeline = RayTacingPipeline::new(&engine, &sbt, &ray_tracing_profiles, &mut allocator, &[], &[]);
         
