@@ -5337,6 +5337,7 @@ pub mod sync{
         }
         pub fn wait(&self){
             unsafe{
+                debug!("Waiting on fence {:?}", self.fence);
                 self.device.wait_for_fences(&[self.fence], true, u64::max_value()).expect("Could not wait on fence");
             }
         }
@@ -5417,51 +5418,337 @@ pub mod ray_tracing{
     use ash::vk;
     use log::debug;
 
-    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions}, command::CommandPool, init::{IEngine, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable};
+    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions, self}, command::CommandPool, init::{IEngine, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable};
 
-    pub struct ObjectOutline{
-        vertex_buffer: BufferRegion,
-        vertex_format: vk::Format,
-        index_buffer: BufferRegion,
-        //Closest hit, any hit, intersection
-        shader_group: (Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>),
-        miss_group: (Option<vk::PipelineShaderStageCreateInfo>),
-        blas_region: BufferRegion,
-        acc_struct: vk::AccelerationStructureKHR,
-    }
-    pub struct BlasStore{
-        device: ash::Device,
-        
-    }
-    pub struct TlasStore{
-        device: ash::Device,
-         
-    }
     pub struct ShaderTable{
         
     }
     pub struct RayTacingPipeline{
         device: ash::Device,
     }
-    pub struct ObjectAccelerationSystem{
-        device: ash::Device,
-        acc_loader: ash::extensions::khr::AccelerationStructure,
+    #[derive(Clone)]
+    pub struct RayTracingMemoryProfiles{
         properties: PhysicalDevicePropertiesStore,
-        allocator: Allocator,
         staging_profile: AllocatorProfileStack, 
         vertex_profile: AllocatorProfileStack, 
         index_profile: AllocatorProfileStack, 
-        blas_profile: AllocatorProfileStack, 
+        acc_struct_profile: AllocatorProfileStack, 
+        instance_data_profile: AllocatorProfileStack,
         scratch_profile: AllocatorProfileStack, 
-        objects: Vec<ObjectOutline>,
+    }
+    pub struct TriangleObjectGeometry{
+        vertex_buffer: BufferRegion,
+        index_buffer: BufferRegion,
+        geometry_info: vk::AccelerationStructureGeometryKHR,
+        primative_count: u32
+    }
+    pub struct Blas{
+        device: ash::Device,
+        acc_loader: ash::extensions::khr::AccelerationStructure,
+        profiles: RayTracingMemoryProfiles,
+        blas_region: BufferRegion,
+        blas: vk::AccelerationStructureKHR,
+        disposed: bool,
+    }
+    pub struct BlasObjectOutline{
+        geometry: vk::AccelerationStructureGeometryKHR,
+        primative_count: u32,
+        max_primative_count: u32
+    }
+    pub struct Tlas{
+        device: ash::Device,
+        acc_loader: ash::extensions::khr::AccelerationStructure,
+        profiles: RayTracingMemoryProfiles,
+        tlas: vk::AccelerationStructureKHR,
         disposed: bool
     }
+    pub struct TlasInstanceOutline{
+       pub instance_data: vk::DeviceOrHostAddressConstKHR,
+       pub instance_count: u32,
+       pub instance_count_overkill: u32,
+       pub array_of_pointers: bool,
+    }
     
-    impl ObjectAccelerationSystem{
-        pub fn new<T: IEngine>(engine: &T) -> ObjectAccelerationSystem {
+    impl Tlas{
+        pub fn new<T: IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, instance_outlines: &[TlasInstanceOutline]) -> Tlas {
             let device = engine.get_device();
+            let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &device);
             
-            let mut allocator = Allocator::new(engine);
+            let geometries:Vec<vk::AccelerationStructureGeometryKHR> = instance_outlines.iter().map(|outline| {
+                let instance_data = vk::AccelerationStructureGeometryInstancesDataKHR::builder()
+                .array_of_pointers(outline.array_of_pointers)
+                .data(outline.instance_data)
+                .build();
+                let mut geo_union = vk::AccelerationStructureGeometryDataKHR::default();
+                geo_union.instances = instance_data;
+                vk::AccelerationStructureGeometryKHR::builder()
+                .geometry_type(vk::GeometryTypeKHR::INSTANCES)
+                .geometry(geo_union)
+                .build()
+            }).collect();
+            let primative_counts:Vec<u32> = instance_outlines.iter().map(|outline| {
+                outline.instance_count})
+            .collect();
+            let max_primative_counts:Vec<u32> = instance_outlines.iter().map(|outline| {
+                outline.instance_count * outline.instance_count_overkill
+            }).collect();
+            
+            let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
+            .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
+            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+            .geometries(&geometries);
+            
+            let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
+            let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_counts)};
+            
+            let tlas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct_profile, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
+            let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch_profile, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
+            let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
+            
+            let acc_c_info = vk::AccelerationStructureCreateInfoKHR::builder()
+            .buffer(tlas_region.get_buffer())
+            .offset(tlas_region.get_buffer_offset())
+            .size(tlas_region.get_size())
+            .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL);
+            let acc_struct = unsafe{acc_loader.create_acceleration_structure(&acc_c_info, None).expect("Could not create acceleration structre")};
+            debug!("Created new top level acceleration structure {:?}", acc_struct);
+            
+           
+            let build_info =[ build_info
+            .dst_acceleration_structure(acc_struct)
+            .scratch_data(scratch_device_address)
+            .build()];
+            let build_ranges:Vec<vk::AccelerationStructureBuildRangeInfoKHR> = geometries.iter().enumerate().map(|(index, info)| {
+                vk::AccelerationStructureBuildRangeInfoKHR::builder()
+                .first_vertex(0)
+                .primitive_count(primative_counts[index])
+                .primitive_offset(0)
+                .build()
+            }).collect();
+            let build_ranges = [build_ranges.as_slice()];
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+            let fence = Fence::new(engine, false);
+            unsafe{
+                device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &build_ranges);
+                device.end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmds)
+                .build()];
+                
+                device.queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                fence.wait_reset();
+            }           
+            
+            Tlas{
+                device,
+                acc_loader,
+                profiles: profiles.clone(),
+                tlas: acc_struct,
+                disposed: false, }
+        }
+        pub fn prepare_instance_memory<T:IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, count: usize, default: Option<vk::AccelerationStructureInstanceKHR>) -> BufferRegion {
+            let instance_buffer: BufferRegion;
+            match default{
+                Some(d) => {
+                    let default = vec![d; count];
+                    instance_buffer = allocator.get_buffer_region_from_slice(&profiles.instance_data_profile, &default, &AlignmentType::Free, &[]);
+                    let staging_buffer = allocator.get_buffer_region_from_slice(&profiles.staging_profile, &default, &AlignmentType::Free, &[]);
+                    allocator.copy_from_ram_slice(&default, &staging_buffer);                    
+                    let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+                    let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+                    unsafe{
+                        engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                        staging_buffer.copy_to_region(cmd, &instance_buffer);
+                        engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                        let fence = Fence::new(engine, false);
+                
+                        let cmds = [cmd];
+                        let submit = [vk::SubmitInfo::builder()
+                        .command_buffers(&cmds)
+                        .build()];
+                
+                        engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                        fence.wait_reset();
+                    }           
+                },
+                None => {
+                    instance_buffer = allocator.get_buffer_region::<vk::AccelerationStructureInstanceKHR>(&profiles.instance_data_profile, count, &AlignmentType::Free, &[]);
+                },
+            }
+            instance_buffer
+        }
+    }
+    impl IDisposable for Tlas{
+        fn dispose(&mut self) {
+        if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying top level acceleration structure {:?}", self.tlas);
+                unsafe{
+                    self.acc_loader.destroy_acceleration_structure(self.tlas, None);
+                }
+            }
+    }
+    }
+    impl Drop for Tlas{
+        fn drop(&mut self) {
+        self.dispose();
+    }
+    }
+    impl Blas{
+        pub fn new<T: IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, objects: &[BlasObjectOutline]) -> Blas {
+            let device = engine.get_device();
+            let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &device);
+            let geometries:Vec<vk::AccelerationStructureGeometryKHR> = objects.iter().map(|outline| outline.geometry).collect();
+            let primative_counts:Vec<u32> = objects.iter().map(|outline| outline.primative_count).collect();
+            let max_primative_counts:Vec<u32> = objects.iter().map(|outline| outline.max_primative_count).collect();
+            
+            let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
+            .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
+            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
+            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .geometries(&geometries);
+            
+            let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
+            let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_counts)};
+            
+            let blas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct_profile, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
+            let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch_profile, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
+            let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
+            
+            let acc_c_info = vk::AccelerationStructureCreateInfoKHR::builder()
+            .buffer(blas_region.get_buffer())
+            .offset(blas_region.get_buffer_offset())
+            .size(blas_region.get_size())
+            .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL);
+            let acc_struct = unsafe{acc_loader.create_acceleration_structure(&acc_c_info, None).expect("Could not create acceleration structre")};
+            debug!("Created new bottom level acceleration structure {:?}", acc_struct);
+            
+           
+            let build_info =[ build_info
+            .dst_acceleration_structure(acc_struct)
+            .scratch_data(scratch_device_address)
+            .build()];
+            let build_ranges:Vec<vk::AccelerationStructureBuildRangeInfoKHR> = geometries.iter().enumerate().map(|(index, info)| {
+                vk::AccelerationStructureBuildRangeInfoKHR::builder()
+                .first_vertex(0)
+                .primitive_count(primative_counts[index])
+                .primitive_offset(0)
+                .build()
+            }).collect();
+            
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+            unsafe{
+                device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &[&build_ranges]);
+                device.end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                let fence = Fence::new(engine, false);
+                
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmds)
+                .build()];
+                
+                device.queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                fence.wait();
+            }           
+            
+            Blas{ device, acc_loader, profiles: profiles.clone(), blas_region, blas: acc_struct, disposed: false }
+            
+        }
+        pub fn get_blas_ref(&self) -> vk::AccelerationStructureReferenceKHR {
+            vk::AccelerationStructureReferenceKHR{host_handle: self.blas}
+        }
+    }
+    impl IDisposable for Blas{
+        fn dispose(&mut self) {
+        if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying blas {:?}", self.blas);
+                unsafe{
+                    self.acc_loader.destroy_acceleration_structure(self.blas, None);
+                }
+            }
+        }
+    }
+    impl Drop for Blas{
+        fn drop(&mut self) {
+            self.dispose();
+    }
+    }
+    impl TriangleObjectGeometry{
+        pub fn new<T: IEngine, V: Clone>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32]) -> TriangleObjectGeometry {
+            let vb_stage = allocator.get_buffer_region_from_slice(&profiles.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = allocator.get_buffer_region_from_slice(&profiles.staging_profile, &index_data, &AlignmentType::Free, &[]);
+            allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
+            allocator.copy_from_ram_slice(&index_data, &ib_stage);
+            
+            let vertex_buffer = allocator.get_buffer_region_from_slice(&profiles.vertex_profile, &vertex_data, &AlignmentType::Free, &[]);
+            let vertex_buffer_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
+            let index_buffer = allocator.get_buffer_region_from_slice(&profiles.index_profile, &index_data, &AlignmentType::Free, &[]);
+            let index_device_address = vk::DeviceOrHostAddressConstKHR{device_address: index_buffer.get_device_address()};
+            
+            let triangle_info = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
+            .vertex_format(vertex_format)
+            .vertex_data(vertex_buffer_address)
+            .vertex_stride(size_of::<V>() as u64)
+            .max_vertex(vertex_data.len() as u32)
+            .index_type(vk::IndexType::UINT32)
+            .index_data(index_device_address);
+            let mut geo_union = vk::AccelerationStructureGeometryDataKHR::default();
+            geo_union.triangles = triangle_info.build();
+            
+            let geo_info = vk::AccelerationStructureGeometryKHR::builder()
+            .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
+            .geometry(geo_union).build();
+            
+            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
+            
+            
+            unsafe{
+                engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                vb_stage.copy_to_region(cmd, &vertex_buffer);
+                ib_stage.copy_to_region(cmd, &index_buffer);
+                engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                let fence = Fence::new(engine, false);
+                
+                let cmds = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmds)
+                .build()];
+                
+                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                fence.wait_reset();
+            }           
+            
+            TriangleObjectGeometry{ 
+                vertex_buffer,
+                index_buffer,
+                geometry_info: geo_info,
+                primative_count: (index_data.len()/3) as u32}
+        }
+        pub fn get_blas_outline(&self, primiative_overkill: u32) -> BlasObjectOutline {
+            BlasObjectOutline{ geometry: self.geometry_info, primative_count: self.primative_count, max_primative_count: self.primative_count * primiative_overkill }
+        }
+    }
+    impl RayTracingMemoryProfiles{
+        pub fn new<T: IEngine>(engine: &T, allocator: &mut Allocator) -> RayTracingMemoryProfiles {
             let stage_mem_options = [CreateAllocationOptions::MinimumSize(1024*1024*20)];
             let gpu_mem_options = [CreateAllocationOptions::MemoryAllocateFlags(vk::MemoryAllocateFlagsInfo::builder().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS).build()), CreateAllocationOptions::MinimumSize(1024*1024*100)];
             let buffer_options = [CreateBufferOptions::SizeOverkillFactor(3), CreateBufferOptions::MinimumSize(1024*1024*10)];
@@ -5490,7 +5777,16 @@ pub mod ray_tracing{
                  &buffer_options));
             let scratch_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
                 vk::BufferUsageFlags::STORAGE_BUFFER
-                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                | vk::BufferUsageFlags::TRANSFER_DST
+                | vk::BufferUsageFlags::TRANSFER_SRC,
+                &buffer_options));
+            let instance_profile = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(
+                vk::BufferUsageFlags::STORAGE_BUFFER
+                | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS
+                | vk::BufferUsageFlags::TRANSFER_DST
+                | vk::BufferUsageFlags::TRANSFER_SRC
+                | vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR,
                 &buffer_options));
             
             let cpu_mem_index = allocator.add_profile(stage_mem_profile);
@@ -5500,147 +5796,24 @@ pub mod ray_tracing{
             let index_index = allocator.add_profile(index_profile);
             let blas_index = allocator.add_profile(blas_profile);
             let scratch_index = allocator.add_profile(scratch_profile);
+            let instance_index = allocator.add_profile(instance_profile);
             
             let staging_profile = AllocatorProfileStack::TargetBuffer(cpu_mem_index, staging_index);
             let vertex_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, vertex_index);
             let index_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, index_index);
-            let blas_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, blas_index);
+            let acc_struct_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, blas_index);
             let scratch_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, scratch_index);
+            let instance_data_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, instance_index);
             
-            ObjectAccelerationSystem{ device,
-                acc_loader: ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &engine.get_device()),
-                properties: engine.get_property_store(),
-                allocator,
+            RayTracingMemoryProfiles{ properties: engine.get_property_store(),
                 staging_profile,
                 vertex_profile,
                 index_profile,
-                blas_profile,
+                acc_struct_profile,
                 scratch_profile,
-                objects: vec![],
-                disposed: false, }
+                instance_data_profile}
         }
-        pub fn add_object<T:IEngine, V: Clone>(
-            &mut self,
-            engine: &T,
-            vertex_data: &[V],
-            vertex_format: vk::Format,
-            index_data: &[u32],
-            shader_group: (Option<vk::PipelineShaderStageCreateInfo>,
-            Option<vk::PipelineShaderStageCreateInfo>,
-            Option<vk::PipelineShaderStageCreateInfo>,),
-            miss_group: Option<vk::PipelineShaderStageCreateInfo>,) -> usize {
-            let vb_stage = self.allocator.get_buffer_region_from_slice(&self.staging_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let ib_stage = self.allocator.get_buffer_region_from_slice(&self.staging_profile, &index_data, &AlignmentType::Free, &[]);
-            self.allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
-            self.allocator.copy_from_ram_slice(&index_data, &ib_stage);
-            
-            let vertex_buffer = self.allocator.get_buffer_region_from_slice(&self.vertex_profile, &vertex_data, &AlignmentType::Free, &[]);
-            let vertex_buffer_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
-            let index_buffer = self.allocator.get_buffer_region_from_slice(&self.index_profile, &index_data, &AlignmentType::Free, &[]);
-            let index_device_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
-            
-            let triangle_info = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
-            .vertex_format(vertex_format)
-            .vertex_data(vertex_buffer_address)
-            .vertex_stride(size_of::<V>() as u64)
-            .max_vertex(vertex_data.len() as u32)
-            .index_type(vk::IndexType::UINT32)
-            .index_data(index_device_address);
-            let geo_union = vk::AccelerationStructureGeometryDataKHR{triangles: triangle_info.build()};
-            
-            let geo_info = [vk::AccelerationStructureGeometryKHR::builder()
-            .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
-            .geometry(geo_union).build()];
-            
-            let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
-            .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
-            .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-            .geometries(&geo_info);
-            
-            let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
-            let primative_count = [(index_data.len()/3) as u32];
-            let sizing = unsafe{self.acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &primative_count)};
-            
-            let blas_region = self.allocator.get_buffer_region::<u8>(&self.blas_profile, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
-            let scratch_region = self.allocator.get_buffer_region::<u8>(&self.scratch_profile, sizing.build_scratch_size as usize, &AlignmentType::Allocation(self.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
-            let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
-            
-            let acc_c_info = vk::AccelerationStructureCreateInfoKHR::builder()
-            .buffer(blas_region.get_buffer())
-            .offset(blas_region.get_buffer_offset())
-            .size(blas_region.get_size())
-            .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL);
-            let acc_struct = unsafe{self.acc_loader.create_acceleration_structure(&acc_c_info, None).expect("Could not create acceleration structre")};
-            
-            let build_info =[ build_info
-            .dst_acceleration_structure(acc_struct)
-            .scratch_data(scratch_device_address)
-            .build()];
-            let build_ranges = [vk::AccelerationStructureBuildRangeInfoKHR::builder()
-            .first_vertex(0)
-            .primitive_count(primative_count[0])
-            .primitive_offset(0)
-            .build()];
-            
-            let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
-            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
-            
-            
-            unsafe{
-                engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
-                vb_stage.copy_to_region(cmd, &vertex_buffer);
-                ib_stage.copy_to_region(cmd, &index_buffer);
-                let mem_barrier =[ vk::MemoryBarrier::builder()
-                    .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                    .dst_access_mask(vk::AccessFlags::ACCELERATION_STRUCTURE_READ_KHR)
-                    .build()];
-                self.device.cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER, vk::PipelineStageFlags::ACCELERATION_STRUCTURE_BUILD_KHR, vk::DependencyFlags::empty(), &mem_barrier, &[], &[]);
-                self.acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &[&build_ranges]);
-                engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
-                
-                let fence = Fence::new(engine, false);
-                
-                let cmds = [cmd];
-                let submit = [vk::SubmitInfo::builder()
-                .command_buffers(&cmds)
-                .build()];
-                
-                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence());
-                fence.wait_reset();
-            }           
-            
-            let outline = ObjectOutline{ vertex_buffer,
-                vertex_format,
-                index_buffer,
-                shader_group,
-                miss_group,
-                blas_region,
-                acc_struct, };
-            
-            self.objects.push(outline);
-            self.objects.len()-1
-                      
-        }
-    }
-    impl IDisposable for ObjectAccelerationSystem{
-        fn dispose(&mut self) {
-        if !self.disposed{
-                self.disposed = true;
-                for outline in self.objects.iter_mut(){
-                    debug!("Destroying acceleration structure {:?}", outline.acc_struct);
-                    unsafe{
-                        self.acc_loader.destroy_acceleration_structure(outline.acc_struct, None);
-                    }
-                    
-                }
-                self.allocator.dispose();
-            }
-    }
-    }
-    impl Drop for ObjectAccelerationSystem{
-        fn drop(&mut self) {
-        self.dispose();
-    }
+        
     }
 }
 #[allow(dead_code, unused)]
@@ -5763,9 +5936,11 @@ pub mod compute{
 
 #[cfg(test)]
 mod tests{
-    use ash::vk;
+    use std::ffi::c_void;
 
-    use crate::{init::{self, Engine, IEngine, EngineInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{Shader}, ray_tracing::ObjectAccelerationSystem};
+    use ash::vk::{self, Packed24_8};
+
+    use crate::{init::{self, Engine, IEngine, EngineInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline} };
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -6093,9 +6268,12 @@ mod tests{
             EngineInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
             EngineInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
             EngineInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
+            EngineInitOptions::UseDebugUtils,
         ];
         get_vulkan_validate(&mut options);
         let (engine, _) = Engine::init(&mut options, None);
+        let mut allocator = Allocator::new(&engine);
+        let ray_tracing_profiles = RayTracingMemoryProfiles::new(&engine, &mut allocator);
         let v_data = [
             Vertex{pos: [ 0.0, 1.0, 0.0]}, //top
             Vertex{pos: [ -1.0, -1.0,0.5]},  //left
@@ -6108,10 +6286,28 @@ mod tests{
             1, 3, 0, //fl
             1,2,3 ]; //bottom
         
-        let mut acceleration_system = ObjectAccelerationSystem::new(&engine);
-        let _tetrahedron = acceleration_system.add_object(&engine, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data, (None, None, None), None);
-        println!("Won't lose device {:?}", engine.get_device().handle());
         
+        let object_data = TriangleObjectGeometry::new(&engine, &ray_tracing_profiles, &mut allocator, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data);
+        let blas_outlines = [object_data.get_blas_outline(1)];
+        let blas = Blas::new(&engine, &ray_tracing_profiles, &mut allocator, &blas_outlines);
+        let transform = vk::TransformMatrixKHR{ matrix: 
+            [1.0,0.0,0.0,0.0,
+             0.0,1.0,0.0,0.0,
+             0.0,0.0,1.0,1.0] };
+        let default_instance = vk::AccelerationStructureInstanceKHR{ 
+            transform, 
+            instance_custom_index_and_mask: Packed24_8::new(0, 0xff), 
+            instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8), 
+            acceleration_structure_reference: blas.get_blas_ref()};
+        let instance_buffer = Tlas::prepare_instance_memory(&engine, &ray_tracing_profiles, &mut allocator, 1, Some(default_instance));
+        let instance_data =[ TlasInstanceOutline{ 
+            instance_data: vk::DeviceOrHostAddressConstKHR{device_address: instance_buffer.get_device_address()},
+            instance_count: 1,
+            instance_count_overkill: 1,
+            array_of_pointers: false }];
+        let _tlas = Tlas::new(&engine, &ray_tracing_profiles, &mut allocator, &instance_data);
+        
+        println!("Won't lose device {:?}", engine.get_device().handle());
     }
 
 }
