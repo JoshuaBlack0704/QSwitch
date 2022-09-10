@@ -6468,7 +6468,7 @@ mod tests{
         pos: [f32; 3],
     }    
     #[test]
-    fn target(){
+    fn ray_tracing_test(){
         match pretty_env_logger::try_init() {
             Ok(_) => {},
             Err(_) => {},
