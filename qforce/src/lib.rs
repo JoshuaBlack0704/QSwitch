@@ -5338,13 +5338,15 @@ pub mod sync{
         pub fn wait(&self){
             unsafe{
                 debug!("Waiting on fence {:?}", self.fence);
-                self.device.wait_for_fences(&[self.fence], true, u64::max_value()).expect("Could not wait on fence");
+                let fence = [self.fence];
+                self.device.wait_for_fences(&fence, true, u64::max_value()).expect("Could not wait on fence");
             }
         }
         pub fn wait_reset(&self){
             self.wait();
             unsafe{
-                self.device.reset_fences(&[self.fence]).expect("Could not reset fence");
+                let fence = [self.fence];
+                self.device.reset_fences(&fence).expect("Could not reset fence");
             }
         }
         pub fn get_fence(&self) -> vk::Fence{
@@ -5421,10 +5423,20 @@ pub mod ray_tracing{
     use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions, self}, command::CommandPool, init::{IEngine, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable};
 
     pub struct ShaderTable{
+       pub ray_gen: vk::PipelineShaderStageCreateInfo,
+       pub hit_groups: Vec<(Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>, Option<vk::PipelineShaderStageCreateInfo>)>,
+       pub misses: Vec<vk::PipelineShaderStageCreateInfo>,
         
     }
     pub struct RayTacingPipeline{
         device: ash::Device,
+        ray_loader: ash::extensions::khr::RayTracingPipeline,
+        pipeline_layout: vk::PipelineLayout,
+        pipeline: vk::Pipeline,
+        ray_gen_region: BufferRegion,
+        hit_groups_region: BufferRegion,
+        misses_region: BufferRegion,
+        disposed: bool,
     }
     #[derive(Clone)]
     pub struct RayTracingMemoryProfiles{
@@ -5469,6 +5481,113 @@ pub mod ray_tracing{
        pub array_of_pointers: bool,
     }
     
+    impl RayTacingPipeline{
+        pub fn new<T:IEngine>(engine: &T, sbt: &ShaderTable, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]){
+            let device = engine.get_device();
+            let ray_loader = ash::extensions::khr::RayTracingPipeline::new(&engine.get_instance(), &device);
+            let properties = engine.get_property_store();
+            
+            let mut stages = vec![];
+            let mut groups = vec![];
+            
+            stages.push(sbt.ray_gen);
+            groups.push(vk::RayTracingShaderGroupCreateInfoKHR::builder()
+            .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
+            .general_shader(0)
+            .closest_hit_shader(u32::max_value())
+            .any_hit_shader(u32::max_value())
+            .intersection_shader(u32::max_value()).build());
+            debug!("Added ray gen shader at index 0");
+            for miss in sbt.misses.iter(){
+                groups.push(vk::RayTracingShaderGroupCreateInfoKHR::builder()
+                .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
+                .general_shader(stages.len() as u32)
+                .closest_hit_shader(u32::max_value())
+                .any_hit_shader(u32::max_value())
+                .intersection_shader(u32::max_value()).build());
+                debug!("Added miss shader at index {}", stages.len());
+                stages.push(*miss);
+            }
+            for (closest_hit, any_hit, intersection) in sbt.hit_groups.iter(){
+                let mut group_builder = vk::RayTracingShaderGroupCreateInfoKHR::builder()
+                .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP);
+                group_builder = group_builder.general_shader(u32::MAX);
+                match closest_hit {
+                    Some(s) => {
+                        group_builder = group_builder.closest_hit_shader(stages.len() as u32);
+                        debug!("Added closest_hit shader at index {}", stages.len());
+                        stages.push(*s);
+                    },
+                    None =>  {group_builder = group_builder.closest_hit_shader(u32::MAX);},
+                }
+                match any_hit {
+                    Some(s) => {
+                        group_builder = group_builder.any_hit_shader(stages.len() as u32);
+                        debug!("Added any_hit shader at index {}", stages.len());
+                        
+                        stages.push(*s);
+                    },
+                    None => {group_builder =group_builder.any_hit_shader(u32::MAX);},
+                }
+                match intersection {
+                    Some(s) => {
+                        group_builder = group_builder.intersection_shader(stages.len() as u32);
+                        debug!("Added intersection shader at index {}", stages.len());
+                        stages.push(*s);
+                    },
+                    None => {group_builder =group_builder.intersection_shader(u32::MAX);},
+                }
+                groups.push(group_builder.build());
+            }
+            let lc_info = vk::PipelineLayoutCreateInfo::builder()
+            .set_layouts(&set_layouts)
+            .push_constant_ranges(&push_constant_ranges)
+            .build();
+            let layout = unsafe{device.create_pipeline_layout(&lc_info, None).expect("Could not create pipeline layout")};
+            debug!("Built ray tracing pipeline layout {:?}", layout);
+            let c_info = [vk::RayTracingPipelineCreateInfoKHR::builder()
+            .stages(&stages)
+            .groups(&groups)
+            .max_pipeline_ray_recursion_depth(2)
+            .layout(layout)
+            .build()];
+            let pipeline = unsafe{ray_loader.create_ray_tracing_pipelines(
+                vk::DeferredOperationKHR::null(), 
+                vk::PipelineCache::null(), 
+                &c_info, 
+                None).expect("Could not create ray tracing pipeline")[0]};
+            debug!("Built ray tracing pipeline {:?}", layout);
+            
+            let handle_data;
+
+            let shaders = unsafe {
+                handle_data = ray_loader.get_ray_tracing_shader_group_handles(pipeline, 0, groups.len() as u32, groups.len() * properties.pd_raytracing_properties.shader_group_handle_size as usize).expect("Could not get shader handles")
+            };
+
+            let ray_gen_size = (properties.pd_raytracing_properties.shader_group_handle_size * 1) as u64;
+            let miss_size = (properties.pd_raytracing_properties.shader_group_handle_size * sbt.misses.len() as u32) as u64;
+            let hit_group_size = (properties.pd_raytracing_properties.shader_group_handle_size * sbt.hit_groups.len() as u32) as u64;
+
+        }
+    }
+    impl IDisposable for RayTacingPipeline{
+        fn dispose(&mut self) {
+        if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying pipeline layout {:?}", self.pipeline_layout);
+                debug!("Destroying pipeline {:?}", self.pipeline);
+                unsafe{
+                    self.device.destroy_pipeline_layout(self.pipeline_layout, None);
+                    self.device.destroy_pipeline(self.pipeline, None);
+                }
+            }
+    }
+    }
+    impl Drop for RayTacingPipeline{
+        fn drop(&mut self) {
+        self.dispose();
+    }
+    }
     impl Tlas{
         pub fn new<T: IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, instance_outlines: &[TlasInstanceOutline]) -> Tlas {
             let device = engine.get_device();
@@ -5646,14 +5765,14 @@ pub mod ray_tracing{
                 .primitive_offset(0)
                 .build()
             }).collect();
-            
+            let build_ranges = [build_ranges.as_slice()];
             let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
             unsafe{
                 device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
-                acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &[&build_ranges]);
+                acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &build_ranges);
                 device.end_command_buffer(cmd).expect("Could not end command buffer");
                 
                 let fence = Fence::new(engine, false);
@@ -5936,11 +6055,11 @@ pub mod compute{
 
 #[cfg(test)]
 mod tests{
-    use std::ffi::c_void;
+    use std::ffi::{c_void, CString};
 
     use ash::vk::{self, Packed24_8};
 
-    use crate::{init::{self, Engine, IEngine, EngineInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline} };
+    use crate::{init::{self, Engine, IEngine, EngineInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DesciptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline, ShaderTable, RayTacingPipeline} };
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -5950,7 +6069,8 @@ mod tests{
                     vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
                     vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
                 ];
-        options.push(init::EngineInitOptions::UseValidation(Some(validation_features.to_vec()), None))
+        options.push(init::EngineInitOptions::UseValidation(Some(validation_features.to_vec()), None));
+        options.push(EngineInitOptions::UseDebugUtils);
     }
     #[cfg(not(debug_assertions))]
     fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
@@ -6268,7 +6388,6 @@ mod tests{
             EngineInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
             EngineInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
             EngineInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
-            EngineInitOptions::UseDebugUtils,
         ];
         get_vulkan_validate(&mut options);
         let (engine, _) = Engine::init(&mut options, None);
@@ -6285,7 +6404,97 @@ mod tests{
             1, 0, 2, //back
             1, 3, 0, //fl
             1,2,3 ]; //bottom
-        
+    
+        let mut options = shaderc::CompileOptions::new().unwrap();
+        options.set_target_spirv(shaderc::SpirvVersion::V1_6);
+        let ray_gen = Shader::new(&engine, String::from(r#"
+        #version 460
+        #extension GL_EXT_ray_tracing : require
+        #extension GL_KHR_vulkan_glsl : enable
+
+        layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+        layout(binding = 1, set = 0, rgba32f) uniform image2D image;
+
+        struct hitPayload
+        {
+            bool hit;
+            vec3 hitValue;
+        };
+
+        layout(location = 0) rayPayloadEXT hitPayload prd;
+
+        void main() 
+            {
+                const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+                const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+                vec2 d = inUV * 2.0 - 1.0;
+                vec4 origin    = vec4(0, 0, -1, 1);
+                vec4 target    = vec4(d.x, -d.y, 0, 1);
+                vec4 direction = vec4(normalize(target.xyz - origin.xyz), 0);
+                uint  rayFlags = gl_RayFlagsOpaqueEXT;
+                float tMin     = 0.001;
+                float tMax     = 100000.0;
+                traceRayEXT(topLevelAS, // acceleration structure
+                    rayFlags,       // rayFlags
+                    0xFF,           // cullMask
+                    0,              // sbtRecordOffset
+                    0,              // sbtRecordStride
+                    0,              // missIndex
+                    origin.xyz,     // ray origin
+                    tMin,           // ray min range
+                    direction.xyz,  // ray direction
+                    tMax,           // ray max range
+                    0               // payload (location = 0)
+            );
+                if (d.x > 0 && prd.hit){
+                    prd.hitValue = prd.hitValue * 0.5;
+                }
+                imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
+            }
+
+        "#), shaderc::ShaderKind::RayGeneration, "main", Some(&options));
+        let closest_hit = Shader::new(&engine, String::from(r#"
+        #version 460
+        #extension GL_EXT_ray_tracing : require
+        #extension GL_EXT_nonuniform_qualifier : enable
+
+        struct hitPayload
+        {
+            bool hit;
+            vec3 hitValue;
+        };
+
+        layout(location = 0) rayPayloadInEXT hitPayload hitdata;
+        hitAttributeEXT vec3 attribs;
+
+        void main()
+        {
+            hitdata.hit = true;
+            hitdata.hitValue = vec3(0.2, 0.5, 0.5);
+        }"#), shaderc::ShaderKind::ClosestHit, "main", Some(&options));
+        let miss = Shader::new(&engine, String::from(r#"
+        #version 460
+        #extension GL_EXT_ray_tracing : require
+
+        struct hitPayload
+        {
+            bool hit;
+            vec3 hitValue;
+        };
+
+        layout(location = 0) rayPayloadInEXT hitPayload hitdata;
+
+        void main()
+        {
+            hitdata.hit = false;
+            hitdata.hitValue = vec3(0.0, 0.1, 0.3);
+        }"#), shaderc::ShaderKind::Miss, "main", Some(&options));
+        let main = CString::new("main").unwrap();
+        let sbt = ShaderTable{ 
+            ray_gen: ray_gen.get_stage(vk::ShaderStageFlags::RAYGEN_KHR, &main),
+            hit_groups: vec![(Some(closest_hit.get_stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR, &main)), None, None)],
+            misses: vec![] };
+        let ray_pipeline = RayTacingPipeline::new(&engine, &sbt, &ray_tracing_profiles, &mut allocator, &[], &[]);
         
         let object_data = TriangleObjectGeometry::new(&engine, &ray_tracing_profiles, &mut allocator, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data);
         let blas_outlines = [object_data.get_blas_outline(1)];
@@ -6299,10 +6508,10 @@ mod tests{
             instance_custom_index_and_mask: Packed24_8::new(0, 0xff), 
             instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8), 
             acceleration_structure_reference: blas.get_blas_ref()};
-        let instance_buffer = Tlas::prepare_instance_memory(&engine, &ray_tracing_profiles, &mut allocator, 1, Some(default_instance));
+        let instance_buffer = Tlas::prepare_instance_memory(&engine, &ray_tracing_profiles, &mut allocator, 100, Some(default_instance));
         let instance_data =[ TlasInstanceOutline{ 
             instance_data: vk::DeviceOrHostAddressConstKHR{device_address: instance_buffer.get_device_address()},
-            instance_count: 1,
+            instance_count: 100,
             instance_count_overkill: 1,
             array_of_pointers: false }];
         let _tlas = Tlas::new(&engine, &ray_tracing_profiles, &mut allocator, &instance_data);
