@@ -1815,7 +1815,7 @@ pub mod memory{
                     (self.start_offset, self.size)
                 },
                 AlignmentType::Allocation(a) => {
-                    if *a == 1 || self.start_offset == 0 || *a % self.start_offset == 0{
+                    if *a == 1 || self.start_offset == 0 || self.start_offset % *a == 0{
                         (self.start_offset, self.size)
                     }
                     else {
@@ -1842,7 +1842,7 @@ pub mod memory{
                     (self.allocation_offset, self.buffer_offset, self.size)
                 },
                 AlignmentType::Allocation(a) => {
-                    if *a == 1 || self.allocation_offset == 0 || *a % self.allocation_offset == 0{
+                    if *a == 1 || self.allocation_offset == 0 || self.allocation_offset % *a == 0{
                         (self.allocation_offset, self.buffer_offset, self.size)
                     }
                     else {
@@ -1862,7 +1862,7 @@ pub mod memory{
                     }
                 },
                 AlignmentType::User(a) => {
-                    if *a == 1 || self.buffer_offset == 0 || *a % self.buffer_offset == 0{
+                    if *a == 1 || self.buffer_offset == 0 || self.buffer_offset % *a == 0{
                         (self.allocation_offset, self.buffer_offset, self.size)
                     }
                     else{

@@ -88,7 +88,7 @@ fn main() {
         &[],
     ));
     let image_mem = AllocatorProfileType::Image(ImageAllocatorProfile::new(
-        vk::ImageUsageFlags::STORAGE,
+        vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC,
         vk::Format::B8G8R8A8_UNORM,
         vk::Extent3D::builder()
             .width(4000)
@@ -262,12 +262,15 @@ fn main() {
         &blas_outlines,
     );
     let transform = vk::TransformMatrixKHR {
-        matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0],
+        matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 5.0],
     };
     let default_instance = vk::AccelerationStructureInstanceKHR {
         transform,
         instance_custom_index_and_mask: Packed24_8::new(0, 0xff),
-        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8),
+        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(
+            0,
+            0x00000002 | 0x00000004 as u8,
+        ),
         acceleration_structure_reference: blas.get_blas_ref(),
     };
     let instance_buffer = Tlas::prepare_instance_memory(
@@ -295,17 +298,28 @@ fn main() {
         .get_queue_store()
         .get_queue(vk::QueueFlags::GRAPHICS | vk::QueueFlags::TRANSFER)
         .unwrap();
-    let pool = CommandPool::new(
+    let render_pool = CommandPool::new(
         &engine,
         vk::CommandPoolCreateInfo::builder()
             .queue_family_index(queue_data.1)
             .build(),
     );
-    let cmds = pool.get_command_buffers(
+    let render_cmd = render_pool.get_command_buffers(
         vk::CommandBufferAllocateInfo::builder()
-            .command_buffer_count(2)
+            .command_buffer_count(1)
+            .build(),
+    )[0];
+    let transfer_pool = CommandPool::new(
+        &engine,
+        vk::CommandPoolCreateInfo::builder()
+            .queue_family_index(queue_data.1)
             .build(),
     );
+    let transfer_cmd = transfer_pool.get_command_buffers(
+        vk::CommandBufferAllocateInfo::builder()
+            .command_buffer_count(1)
+            .build(),
+    )[0];
 
     let mut render_target = allocator.get_image_resources(
         &image_profile,
@@ -361,6 +375,8 @@ fn main() {
             winit::event::Event::WindowEvent { window_id, event } => {
                 match event {
                     winit::event::WindowEvent::Resized(_) => {
+                        render_loop_fence.wait();
+                        render_pool.reset();
                         swapchain = SwapchainStore::new(
                             &engine,
                             &[
@@ -380,7 +396,6 @@ fn main() {
                             .depth(1)
                             .build();
 
-                        let cmd = cmds[0];
                         let device = engine.get_device();
                         let ray_loader = ash::extensions::khr::RayTracingPipeline::new(
                             &engine.get_instance(),
@@ -390,16 +405,16 @@ fn main() {
                             ray_pipeline.sbt_addresses;
                         unsafe {
                             device.begin_command_buffer(
-                                cmd,
+                                render_cmd,
                                 &vk::CommandBufferBeginInfo::builder().build(),
                             );
                             device.cmd_bind_pipeline(
-                                cmd,
+                                render_cmd,
                                 vk::PipelineBindPoint::RAY_TRACING_KHR,
                                 ray_pipeline.get_pipeline(),
                             );
                             device.cmd_bind_descriptor_sets(
-                                cmd,
+                                render_cmd,
                                 vk::PipelineBindPoint::RAY_TRACING_KHR,
                                 ray_pipeline.get_pipeline_layout(),
                                 0,
@@ -407,7 +422,7 @@ fn main() {
                                 &[],
                             );
                             ray_loader.cmd_trace_rays(
-                                cmd,
+                                render_cmd,
                                 &ray_gen_address,
                                 &miss_address,
                                 &hit_address,
@@ -417,14 +432,16 @@ fn main() {
                                 1,
                             );
                             device
-                                .end_command_buffer(cmd)
+                                .end_command_buffer(render_cmd)
                                 .expect("Could not end command buffer");
                             render_target
                                 .set_target_extent(extent, vk::Offset3D::builder().build());
                         }
                     }
                     winit::event::WindowEvent::Moved(_) => {}
-                    winit::event::WindowEvent::CloseRequested => {}
+                    winit::event::WindowEvent::CloseRequested => {
+                        *control_flow = winit::event_loop::ControlFlow::Exit;
+                    }
                     winit::event::WindowEvent::Destroyed => {}
                     winit::event::WindowEvent::DroppedFile(_) => {}
                     winit::event::WindowEvent::HoveredFile(_) => {}
@@ -479,6 +496,8 @@ fn main() {
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {
+                render_loop_fence.wait_reset();
+                transfer_pool.reset();
                 let swapchains = [swapchain.get_swapchain()];
                 let (image_index, present_target) = swapchain.get_next_image(
                     u64::MAX,
@@ -493,15 +512,15 @@ fn main() {
                 let transfer_wait_stage = [vk::PipelineStageFlags::TRANSFER];
                 let transfer_signal = [transfer_semaphore.semaphore];
 
-                let render_cmds = [cmds[0]];
-                let transfer_cmd = [cmds[1]];
+                let render_cmds = [render_cmd];
+                let transfer_cmds = [transfer_cmd];
                 let render_submit = vk::SubmitInfo::builder()
                     .command_buffers(&render_cmds)
                     .wait_semaphores(&render_wait_semaphores)
                     .wait_dst_stage_mask(&render_wait_stage)
                     .signal_semaphores(&render_signal);
                 let transfer_submit = vk::SubmitInfo::builder()
-                    .command_buffers(&transfer_cmd)
+                    .command_buffers(&transfer_cmds)
                     .wait_semaphores(&transfer_wait_semaphores)
                     .wait_dst_stage_mask(&transfer_wait_stage)
                     .signal_semaphores(&transfer_signal);
@@ -513,23 +532,53 @@ fn main() {
 
                 unsafe {
                     let device = engine.get_device();
-                    set.write(&mut write_requests);
                     device
                         .begin_command_buffer(
-                            transfer_cmd[0],
+                            transfer_cmd,
                             &vk::CommandBufferBeginInfo::builder()
                                 .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
                                 .build(),
                         )
                         .expect("Could not begin command buffer");
 
-                    let render_target_to_transfer = render_target.transition(vk::AccessFlags::NONE, vk::AccessFlags::TRANSFER_READ, vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
-                    let render_target_to_transfer = render_target_to_transfer.0;
-                    let present_to_transfer = present_target.transition()
-                    
-                    render_target.copy_to_image(transfer_cmd[0], &present_target);
+                    let present_target_to_transfer = present_target.transition(
+                        vk::AccessFlags::NONE,
+                        vk::AccessFlags::TRANSFER_WRITE,
+                        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    );
+                    let present_target_to_transfer = present_target_to_transfer.0;
+
+                    let transfer_transitions = [present_target_to_transfer];
+
+                    device.cmd_pipeline_barrier(
+                        transfer_cmd,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &transfer_transitions,
+                    );
+                    render_target.copy_to_image(transfer_cmd, &present_target);
+                    let present_taret_to_preset = present_target.transition(
+                        vk::AccessFlags::TRANSFER_WRITE,
+                        vk::AccessFlags::NONE,
+                        vk::ImageLayout::PRESENT_SRC_KHR,
+                    );
+                    let present_target_to_present = present_taret_to_preset.0;
+
+                    let reset_transitions = [present_target_to_present];
+                    device.cmd_pipeline_barrier(
+                        transfer_cmd,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags::TRANSFER,
+                        vk::DependencyFlags::empty(),
+                        &[],
+                        &[],
+                        &reset_transitions,
+                    );
                     device
-                        .end_command_buffer(transfer_cmd[0])
+                        .end_command_buffer(transfer_cmd)
                         .expect("Could not end command buffer");
 
                     device.queue_submit(queue_data.0, &submits, render_loop_fence.get_fence());
