@@ -22,6 +22,7 @@ fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
         vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
         vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
+        vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
     ];
     options.push(init::EngineInitOptions::UseValidation(
         Some(validation_features.to_vec()),
@@ -133,7 +134,7 @@ fn main() {
     #version 460
     #extension GL_EXT_ray_tracing : require
     #extension GL_KHR_vulkan_glsl : enable
-
+            
     layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
     layout(binding = 1, set = 0, rgba32f) uniform image2D image;
 
@@ -156,7 +157,8 @@ fn main() {
             uint  rayFlags = gl_RayFlagsOpaqueEXT;
             float tMin     = 0.001;
             float tMax     = 100000.0;
-            traceRayEXT(topLevelAS, // acceleration structure
+            traceRayEXT(
+                topLevelAS, // acceleration structure
                 rayFlags,       // rayFlags
                 0xFF,           // cullMask
                 0,              // sbtRecordOffset
@@ -168,9 +170,6 @@ fn main() {
                 tMax,           // ray max range
                 0               // payload (location = 0)
         );
-            if (d.x > 0 && prd.hit){
-                prd.hitValue = prd.hitValue * 0.5;
-            }
             imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
         }
 
@@ -267,10 +266,7 @@ fn main() {
     let default_instance = vk::AccelerationStructureInstanceKHR {
         transform,
         instance_custom_index_and_mask: Packed24_8::new(0, 0xff),
-        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(
-            0,
-            0x00000002 | 0x00000004 as u8,
-        ),
+        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000001 as u8),
         acceleration_structure_reference: blas.get_blas_ref(),
     };
     let instance_buffer = Tlas::prepare_instance_memory(

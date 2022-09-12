@@ -1862,7 +1862,7 @@ pub mod memory{
                     }
                 },
                 AlignmentType::User(a) => {
-                    if *a == 1 || self.buffer_offset == 0 || self.buffer_offset % *a == 0{
+                    if *a == 1 || self.buffer_offset == 0 || self.buffer_offset & *a == 0{
                         (self.allocation_offset, self.buffer_offset, self.size)
                     }
                     else{
@@ -3159,9 +3159,9 @@ pub mod ray_tracing{
                 }          
             }
 
-            let ray_gen_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &ray_gen_handles, &AlignmentType::User(shader_base_alignment as u64), &[]);
-            let miss_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &miss_handles, &AlignmentType::User(shader_base_alignment as u64), &[]);
-            let hit_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &hit_handles, &AlignmentType::User(shader_base_alignment as u64), &[]);
+            let ray_gen_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &ray_gen_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
+            let miss_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &miss_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
+            let hit_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &hit_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
             
             let ray_gen_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &ray_gen_handles, &AlignmentType::Free, &[]);
             let miss_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &miss_handles, &AlignmentType::Free, &[]);
@@ -3530,7 +3530,9 @@ pub mod ray_tracing{
                 primative_count: (index_data.len()/3) as u32}
         }
         pub fn get_blas_outline(&self, primiative_overkill: u32) -> BlasObjectOutline {
-            BlasObjectOutline{ geometry: self.geometry_info, primative_count: self.primative_count, max_primative_count: self.primative_count * primiative_overkill }
+            BlasObjectOutline{ geometry: self.geometry_info,
+                primative_count: self.primative_count,
+                max_primative_count: self.primative_count * primiative_overkill }
         }
     }
     impl RayTracingMemoryProfiles{
