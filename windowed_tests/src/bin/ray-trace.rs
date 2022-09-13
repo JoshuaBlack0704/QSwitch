@@ -15,6 +15,8 @@ use qforce::ray_tracing::{
 };
 use qforce::shader::Shader;
 use qforce::sync::{Fence, Semaphore};
+use qforce::IDisposable;
+use time::Instant;
 #[cfg(debug_assertions)]
 fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
     println!("Validation Layers Active");
@@ -127,7 +129,7 @@ fn main() {
 
     let mut options = shaderc::CompileOptions::new().unwrap();
     options.set_target_spirv(shaderc::SpirvVersion::V1_6);
-    let ray_gen = Shader::new(
+    let mut ray_gen = Shader::new(
         &engine,
         String::from(
             r#"
@@ -179,7 +181,7 @@ fn main() {
         "main",
         Some(&options),
     );
-    let closest_hit = Shader::new(
+    let mut closest_hit = Shader::new(
         &engine,
         String::from(
             r#"
@@ -206,7 +208,7 @@ fn main() {
         "main",
         Some(&options),
     );
-    let miss = Shader::new(
+    let mut miss = Shader::new(
         &engine,
         String::from(
             r#"
@@ -254,19 +256,19 @@ fn main() {
         &i_data,
     );
     let blas_outlines = [object_data.get_blas_outline(1)];
-    let blas = Blas::new(
+    let mut blas = Blas::new(
         &engine,
         &ray_tracing_profiles,
         &mut allocator,
         &blas_outlines,
     );
     let transform = vk::TransformMatrixKHR {
-        matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 5.0],
+        matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0],
     };
     let default_instance = vk::AccelerationStructureInstanceKHR {
         transform,
         instance_custom_index_and_mask: Packed24_8::new(0, 0xff),
-        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000001 as u8),
+        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8),
         acceleration_structure_reference: blas.get_blas_ref(),
     };
     let instance_buffer = Tlas::prepare_instance_memory(
@@ -284,7 +286,7 @@ fn main() {
         instance_count_overkill: 1,
         array_of_pointers: false,
     }];
-    let tlas = Tlas::new(
+    let mut tlas = Tlas::new(
         &engine,
         &ray_tracing_profiles,
         &mut allocator,
@@ -294,7 +296,7 @@ fn main() {
         .get_queue_store()
         .get_queue(vk::QueueFlags::GRAPHICS | vk::QueueFlags::TRANSFER)
         .unwrap();
-    let render_pool = CommandPool::new(
+    let mut render_pool = CommandPool::new(
         &engine,
         vk::CommandPoolCreateInfo::builder()
             .queue_family_index(queue_data.1)
@@ -305,7 +307,7 @@ fn main() {
             .command_buffer_count(1)
             .build(),
     )[0];
-    let transfer_pool = CommandPool::new(
+    let mut transfer_pool = CommandPool::new(
         &engine,
         vk::CommandPoolCreateInfo::builder()
             .queue_family_index(queue_data.1)
@@ -351,7 +353,7 @@ fn main() {
     ];
     set.write(&mut write_requests);
 
-    let ray_pipeline = RayTacingPipeline::new(
+    let mut ray_pipeline = RayTacingPipeline::new(
         &engine,
         &sbt,
         &ray_tracing_profiles,
@@ -360,10 +362,12 @@ fn main() {
         &[],
     );
 
-    let render_loop_fence = Fence::new(&engine, true);
-    let render_semaphore = Semaphore::new(&engine);
-    let transfer_semaphore = Semaphore::new(&engine);
-    let image_aquire_semaphore = Semaphore::new(&engine);
+    let mut render_loop_fence = Fence::new(&engine, true);
+    let mut render_semaphore = Semaphore::new(&engine);
+    let mut transfer_semaphore = Semaphore::new(&engine);
+    let mut image_aquire_semaphore = Semaphore::new(&engine);
+    let mut running = true;
+    let mut instant = Box::new(Instant::now());
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
         match event {
@@ -371,6 +375,9 @@ fn main() {
             winit::event::Event::WindowEvent { window_id, event } => {
                 match event {
                     winit::event::WindowEvent::Resized(_) => {
+                        if !running {
+                            return;
+                        }
                         render_loop_fence.wait();
                         render_pool.reset();
                         swapchain = SwapchainStore::new(
@@ -437,6 +444,28 @@ fn main() {
                     winit::event::WindowEvent::Moved(_) => {}
                     winit::event::WindowEvent::CloseRequested => {
                         *control_flow = winit::event_loop::ControlFlow::Exit;
+                        running = false;
+                        unsafe {
+                            engine
+                                .get_device()
+                                .device_wait_idle()
+                                .expect("Could not stop device")
+                        };
+                        render_pool.dispose();
+                        transfer_pool.dispose();
+                        ray_pipeline.dispose();
+                        tlas.dispose();
+                        blas.dispose();
+                        allocator.dispose();
+                        d_stack.dispose();
+                        render_loop_fence.dispose();
+                        render_semaphore.dispose();
+                        transfer_semaphore.dispose();
+                        image_aquire_semaphore.dispose();
+                        render_target.dispose();
+                        ray_gen.dispose();
+                        miss.dispose();
+                        closest_hit.dispose();
                     }
                     winit::event::WindowEvent::Destroyed => {}
                     winit::event::WindowEvent::DroppedFile(_) => {}
@@ -492,6 +521,14 @@ fn main() {
             winit::event::Event::Suspended => {}
             winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {
+                println!(
+                    "Time elapsed last frame {} us",
+                    instant.elapsed().whole_microseconds()
+                );
+                *instant = Instant::now();
+                if !running {
+                    return;
+                }
                 render_loop_fence.wait_reset();
                 transfer_pool.reset();
                 let swapchains = [swapchain.get_swapchain()];

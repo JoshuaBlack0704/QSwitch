@@ -3009,6 +3009,7 @@ pub mod ray_tracing{
         profiles: RayTracingMemoryProfiles,
         blas_region: BufferRegion,
         blas: vk::AccelerationStructureKHR,
+        device_address: vk::AccelerationStructureReferenceKHR,
         disposed: bool,
     }
     pub struct BlasObjectOutline{
@@ -3269,7 +3270,7 @@ pub mod ray_tracing{
             
             let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
-            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            //.flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
             .geometries(&geometries);
             
@@ -3402,7 +3403,7 @@ pub mod ray_tracing{
             let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            //.flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
             .geometries(&geometries);
             
             let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
@@ -3453,11 +3454,20 @@ pub mod ray_tracing{
                 fence.wait();
             }           
             
-            Blas{ device, acc_loader, profiles: profiles.clone(), blas_region, blas: acc_struct, disposed: false }
+            let acc_struct_address_info = vk::AccelerationStructureDeviceAddressInfoKHR::builder()
+            .acceleration_structure(acc_struct);
+            let acc_struct_address = unsafe{acc_loader.get_acceleration_structure_device_address(&acc_struct_address_info)};
+            Blas{ device,
+                acc_loader,
+                profiles: profiles.clone(),
+                blas_region,
+                blas: acc_struct,
+                device_address: vk::AccelerationStructureReferenceKHR {device_handle: acc_struct_address},
+                disposed: false, }
             
         }
         pub fn get_blas_ref(&self) -> vk::AccelerationStructureReferenceKHR {
-            vk::AccelerationStructureReferenceKHR{host_handle: self.blas}
+            self.device_address
         }
     }
     impl IDisposable for Blas{
@@ -3500,7 +3510,9 @@ pub mod ray_tracing{
             
             let geo_info = vk::AccelerationStructureGeometryKHR::builder()
             .geometry_type(vk::GeometryTypeKHR::TRIANGLES)
-            .geometry(geo_union).build();
+            .geometry(geo_union)
+            .flags(vk::GeometryFlagsKHR::OPAQUE)
+            .build();
             
             let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
@@ -3620,12 +3632,13 @@ pub mod shader{
     use ash::vk;
     use log::debug;
 
-    use crate::init::IEngine;
+    use crate::{init::IEngine, IDisposable};
 
     pub struct Shader{
         device: ash::Device,
         source: String,
         module: vk::ShaderModule,       
+        disposed: bool
     }
     impl Shader{
         pub fn new<T: IEngine>(engine: &T, source: String, kind: shaderc::ShaderKind, ep_name: &str, options: Option<&shaderc::CompileOptions>) -> Shader{
@@ -3637,7 +3650,7 @@ pub mod shader{
                 let c_info = vk::ShaderModuleCreateInfo::builder().code(byte_source.as_binary()).build();
                 module = engine.get_device().create_shader_module(&c_info, None).unwrap();
             }
-            Shader { device: engine.get_device(), source, module }
+            Shader { device: engine.get_device(), source, module, disposed: false }
         }
         pub fn get_stage(&self, stage: vk::ShaderStageFlags, ep: &CStr) -> vk::PipelineShaderStageCreateInfo{
             vk::PipelineShaderStageCreateInfo::builder()
@@ -3647,12 +3660,20 @@ pub mod shader{
             .build()
         }
     }
+    impl IDisposable for Shader{
+        fn dispose(&mut self) {
+        if !self.disposed{
+                self.disposed = true;
+                debug!("Destroying shader module {:?}", self.module);
+                unsafe{
+                    self.device.destroy_shader_module(self.module, None);
+                }
+            }
+    }
+    }
     impl Drop for Shader{
         fn drop(&mut self) {
-        unsafe{
-            debug!("Destroying Shader");
-            self.device.destroy_shader_module(self.module, None);
-        }
+            self.dispose();
         }
     }
     
