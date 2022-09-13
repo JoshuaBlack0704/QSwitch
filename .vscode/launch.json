@@ -7,22 +7,23 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in library 'qforce'",
+            "name": "Debug target test in library 'qforce'",
             "cargo": {
                 "args": [
                     "test",
+                    "target",
                     "--no-run",
                     "--lib",
-                    "--package=qforce"
+                    "--package=qforce",
                 ],
                 "filter": {
                     "name": "qforce",
                     "kind": "lib"
                 }
             },
-            "args": [],
+            "args": ["target"],
             "cwd": "${workspaceFolder}",
-            "env": {"RUST_LOG":"trace"},
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
         },
         {
             "type": "lldb",
@@ -101,6 +102,63 @@
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": {"RUST_LOG":"trace"},
-        }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug window_test 'init'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=init",
+                    "--package=examples"
+                ],
+                "filter": {
+                    "name": "init",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug window_test 'image-present'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=image-present",
+                    "--package=examples"
+                ],
+                "filter": {
+                    "name": "image-present",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug window_test 'ray-trace-redesign'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=ray-trace-redesign",
+                    "--package=examples"
+                ],
+                "filter": {
+                    "name": "ray-trace-redesign",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
+        },
     ]
 }
