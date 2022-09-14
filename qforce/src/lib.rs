@@ -984,8 +984,49 @@ pub mod memory{
         profile_mapping: HashMap<AllocatorProfileStack, (Vec<usize>, Vec<usize>, Vec<usize>)>,
         channel: (flume::Sender<AllocatorProfileStack>, flume::Receiver<AllocatorProfileStack>),
     }
+    pub struct GeneralMemoryProfiles{
+        pub general_device_index: usize,
+        pub general_host_index: usize,
+        pub storage_buffer_index: usize,
+        pub uniform_buffer_index: usize,
+        pub device_storage: AllocatorProfileStack,
+        pub host_storage: AllocatorProfileStack,
+        pub device_uniform: AllocatorProfileStack,
+        pub host_uniform: AllocatorProfileStack,
+    }
     
 
+    impl GeneralMemoryProfiles{
+        pub fn new(allocator: &mut Allocator, min_buffer_size: u64, min_allocation_size: u64) -> GeneralMemoryProfiles {
+            let buffer_options = [CreateBufferOptions::MinimumSize(min_buffer_size)];
+            let allocation_options = [CreateAllocationOptions::MinimumSize(min_allocation_size)];
+            
+            let gpu_mem = AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &allocation_options));
+            let cpu_mem = AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &allocation_options));
+            let storage_buffer = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options));
+            let uniform_buffer = AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options));
+            
+            let gpu_mem = allocator.add_profile(gpu_mem);
+            let cpu_mem = allocator.add_profile(cpu_mem);
+            let storage_buffer = allocator.add_profile(storage_buffer);
+            let uniform_buffer = allocator.add_profile(uniform_buffer);
+            
+            let device_storage = AllocatorProfileStack::TargetBuffer(gpu_mem, storage_buffer);
+            let host_storage = AllocatorProfileStack::TargetBuffer(cpu_mem, storage_buffer);
+            let device_uniform = AllocatorProfileStack::TargetBuffer(gpu_mem, uniform_buffer);
+            let host_uniform = AllocatorProfileStack::TargetBuffer(cpu_mem, uniform_buffer);
+            
+            GeneralMemoryProfiles{ 
+                general_device_index: gpu_mem,
+                general_host_index: cpu_mem,
+                storage_buffer_index: storage_buffer,
+                uniform_buffer_index: uniform_buffer,
+                device_storage,
+                host_storage,
+                device_uniform,
+                host_uniform }
+        }
+    }
     impl Allocator{
         pub fn new<T:IEngine>(engine: &T) -> Allocator {
             let device = engine.get_device();
@@ -2010,6 +2051,10 @@ pub mod memory{
                     if self.c_info.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
                         AlignmentType::User(self.properties.pd_properties.limits.min_storage_buffer_offset_alignment)
                     }
+                    else if self.c_info.usage.contains(vk::BufferUsageFlags::UNIFORM_BUFFER)
+                    {
+                        AlignmentType::User(self.properties.pd_properties.limits.min_uniform_buffer_offset_alignment)
+                    }
                     else {
                         AlignmentType::Free
                     }
@@ -2144,6 +2189,14 @@ pub mod memory{
         }
         pub fn get_size(&self) -> u64 {
             self.home_block.size 
+        }
+        pub fn get_write(&self) -> DescriptorWriteType {
+            DescriptorWriteType::Buffer(
+            [vk::DescriptorBufferInfo::builder()
+            .buffer(self.buffer)
+            .offset(self.home_block.buffer_offset)
+            .range(self.home_block.size)
+            .build()])
         }
     }
     impl CreateBufferOptions{
@@ -3270,14 +3323,14 @@ pub mod ray_tracing{
             
             let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
-            //.flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
             .geometries(&geometries);
             
             let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
             let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_counts)};
             
-            let tlas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct, sizing.acceleration_structure_size as usize, &AlignmentType::User(256), &[]);
+            let tlas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct, sizing.acceleration_structure_size as usize, &AlignmentType::Allocation(256), &[]);
             let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
             let scratch_device_address = vk::DeviceOrHostAddressKHR{device_address: scratch_region.get_device_address()};
             
@@ -3338,14 +3391,13 @@ pub mod ray_tracing{
             ))
             
         }
-        pub fn prepare_instance_memory<T:IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, count: usize, default: Option<vk::AccelerationStructureInstanceKHR>) -> BufferRegion {
+        pub fn prepare_instance_memory<T:IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, count: usize, default: Option<&[vk::AccelerationStructureInstanceKHR]>) -> BufferRegion {
             let instance_buffer: BufferRegion;
             match default{
                 Some(d) => {
-                    let default = vec![d; count];
-                    instance_buffer = allocator.get_buffer_region_from_slice(&profiles.instance_data, &default, &AlignmentType::Free, &[]);
-                    let staging_buffer = allocator.get_buffer_region_from_slice(&profiles.staging, &default, &AlignmentType::Free, &[]);
-                    allocator.copy_from_ram_slice(&default, &staging_buffer);                    
+                    instance_buffer = allocator.get_buffer_region_from_slice(&profiles.instance_data, d, &AlignmentType::Free, &[]);
+                    let staging_buffer = allocator.get_buffer_region_from_slice(&profiles.staging, d, &AlignmentType::Free, &[]);
+                    allocator.copy_from_ram_slice(d, &staging_buffer);                    
                     let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
                     let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
@@ -3403,7 +3455,7 @@ pub mod ray_tracing{
             let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(vk::AccelerationStructureTypeKHR::BOTTOM_LEVEL)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-            //.flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
             .geometries(&geometries);
             
             let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
@@ -3645,7 +3697,7 @@ pub mod shader{
             let module: vk::ShaderModule;
             let compiler = shaderc::Compiler::new().unwrap();
             let byte_source = compiler.compile_into_spirv(source.as_str(), kind, "shader.glsl", ep_name, options).unwrap();
-            debug!("Compiled shader {} to binary {:?}", source, byte_source.as_binary());
+            //debug!("Compiled shader {} to binary {:?}", source, byte_source.as_binary());
             unsafe{
                 let c_info = vk::ShaderModuleCreateInfo::builder().code(byte_source.as_binary()).build();
                 module = engine.get_device().create_shader_module(&c_info, None).unwrap();
@@ -4202,12 +4254,12 @@ mod tests{
             [1.0,0.0,0.0,0.0,
              0.0,1.0,0.0,0.0,
              0.0,0.0,1.0,1.0] };
-        let default_instance = vk::AccelerationStructureInstanceKHR{ 
+        let default_instance =[ vk::AccelerationStructureInstanceKHR{ 
             transform, 
             instance_custom_index_and_mask: Packed24_8::new(0, 0xff), 
             instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8), 
-            acceleration_structure_reference: blas.get_blas_ref()};
-        let instance_buffer = Tlas::prepare_instance_memory(&engine, &ray_tracing_profiles, &mut allocator, 100, Some(default_instance));
+            acceleration_structure_reference: blas.get_blas_ref()}];
+        let instance_buffer = Tlas::prepare_instance_memory(&engine, &ray_tracing_profiles, &mut allocator, 100, Some(&default_instance));
         let instance_data =[ TlasInstanceOutline{ 
             instance_data: vk::DeviceOrHostAddressConstKHR{device_address: instance_buffer.get_device_address()},
             instance_count: 100,

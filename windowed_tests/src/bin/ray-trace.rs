@@ -1,13 +1,15 @@
 use std::ffi::CString;
+use std::rc::Rc;
 
 use ash::vk::{self, Packed24_8};
+use glam::{Mat4, Vec3, Vec4};
 use qforce::command::CommandPool;
 use qforce::descriptor::{self, DescriptorSetOutline, DescriptorStack, DescriptorWriteType};
 use qforce::init::{self, IEngine, WindowedEngine};
 use qforce::init::{EngineInitOptions, SwapchainStore};
 use qforce::memory::{
     AllocationAllocatorProfile, Allocator, AllocatorProfileStack, AllocatorProfileType,
-    ImageAllocatorProfile,
+    BufferAllocatorProfile, GeneralMemoryProfiles, ImageAllocatorProfile,
 };
 use qforce::ray_tracing::{
     Blas, RayTacingPipeline, RayTracingMemoryProfiles, ShaderTable, Tlas, TlasInstanceOutline,
@@ -24,7 +26,6 @@ fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
         vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
         vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
-        vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
     ];
     options.push(init::EngineInitOptions::UseValidation(
         Some(validation_features.to_vec()),
@@ -41,7 +42,163 @@ fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
 #[derive(Clone)]
 pub struct Vertex {
     pos: [f32; 3],
+    color: [f32; 3],
 }
+
+#[repr(C)]
+#[derive(Clone)]
+pub struct CameraData {
+    camera_translation: [f32; 4 * 4],
+    camera_rotation: [f32; 4 * 4],
+}
+pub struct CameraMovement {
+    w_key: f32,
+    s_key: f32,
+    a_key: f32,
+    d_key: f32,
+    q_key: f32,
+    e_key: f32,
+    r_key: f32,
+    f_key: f32,
+    lshift_key: f32,
+    lctrl_key: f32,
+    camera_translation: Mat4,
+    camera_rotation: Mat4,
+    movement_speed: f32,
+}
+impl CameraMovement {
+    pub fn new(movement_speed: f32) -> CameraMovement {
+        CameraMovement {
+            w_key: 0.0,
+            s_key: 0.0,
+            a_key: 0.0,
+            d_key: 0.0,
+            q_key: 0.0,
+            e_key: 0.0,
+            r_key: 0.0,
+            f_key: 0.0,
+            lshift_key: 0.0,
+            lctrl_key: 0.0,
+            camera_translation: Mat4::IDENTITY,
+            camera_rotation: Mat4::IDENTITY,
+            movement_speed,
+        }
+    }
+    pub fn set_input(&mut self, input: winit::event::KeyboardInput) {
+        match input.state {
+            winit::event::ElementState::Pressed => match input.virtual_keycode {
+                Some(code) => match code {
+                    winit::event::VirtualKeyCode::W => {
+                        self.w_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::S => {
+                        self.s_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::A => {
+                        self.a_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::D => {
+                        self.d_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::LShift => {
+                        self.lshift_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::LControl => {
+                        self.lctrl_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::Q => {
+                        self.q_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::E => {
+                        self.e_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::R => {
+                        self.r_key = 1.0;
+                    }
+                    winit::event::VirtualKeyCode::F => {
+                        self.f_key = 1.0;
+                    }
+                    _ => {}
+                },
+                None => {}
+            },
+            winit::event::ElementState::Released => match input.virtual_keycode {
+                Some(code) => match code {
+                    winit::event::VirtualKeyCode::W => {
+                        self.w_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::S => {
+                        self.s_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::A => {
+                        self.a_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::D => {
+                        self.d_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::LShift => {
+                        self.lshift_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::LControl => {
+                        self.lctrl_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::Q => {
+                        self.q_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::E => {
+                        self.e_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::R => {
+                        self.r_key = 0.0;
+                    }
+                    winit::event::VirtualKeyCode::F => {
+                        self.f_key = 0.0;
+                    }
+                    _ => {}
+                },
+                None => {}
+            },
+        }
+    }
+    pub fn march_camera(&mut self, delta_time: f32) -> CameraData {
+        let mut vector = Vec3::new(
+            self.d_key - self.a_key,
+            self.lshift_key - self.lctrl_key,
+            self.w_key - self.s_key,
+        )
+        .normalize();
+        vector *= self.movement_speed * delta_time;
+        let y_angle = (self.e_key - self.q_key) * 2.0 * delta_time;
+        let x_angle = (self.r_key - self.f_key) * 2.0 * delta_time;
+
+        let mut camera_translation: [f32; 4 * 4] = [0.0; 4 * 4];
+        let mut camera_rotation: [f32; 4 * 4] = [0.0; 4 * 4];
+
+
+
+        if !vector.is_nan(){
+
+            self.camera_translation = self.camera_translation * Mat4::from_translation(self.camera_rotation.transform_vector3(vector));
+            self.camera_translation.write_cols_to_slice(&mut camera_translation);
+        }
+        else{
+            self.camera_translation.write_cols_to_slice(&mut camera_translation);
+        }
+        if y_angle != 0.0 || x_angle != 0.0 {
+            self.camera_rotation = self.camera_rotation * Mat4::from_rotation_y(y_angle) * Mat4::from_rotation_x(x_angle);
+            self.camera_rotation.write_cols_to_slice(&mut camera_rotation);
+        }
+        else{
+            self.camera_rotation.write_cols_to_slice(&mut camera_rotation);
+        }
+        
+        CameraData {
+            camera_translation,
+            camera_rotation,
+        }
+    }
+}
+
 #[allow(unused, dead_code)]
 fn main() {
     let (event_loop, engine);
@@ -86,11 +243,7 @@ fn main() {
         .depth(1)
         .build();
 
-    let gpu_mem = AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-        &[],
-    ));
-    let image_mem = AllocatorProfileType::Image(ImageAllocatorProfile::new(
+    let render_image_profile = AllocatorProfileType::Image(ImageAllocatorProfile::new(
         vk::ImageUsageFlags::STORAGE | vk::ImageUsageFlags::TRANSFER_SRC,
         vk::Format::B8G8R8A8_UNORM,
         vk::Extent3D::builder()
@@ -101,23 +254,29 @@ fn main() {
         &[],
     ));
     let mut allocator = Allocator::new(&engine);
+    let general_profiles =
+        GeneralMemoryProfiles::new(&mut allocator, 10 * 1024 * 1024, 100 * 1024 * 1024);
     let image_profile = AllocatorProfileStack::TargetImage(
-        allocator.add_profile(gpu_mem),
-        allocator.add_profile(image_mem),
+        general_profiles.general_device_index,
+        allocator.add_profile(render_image_profile),
     );
     let ray_tracing_profiles = RayTracingMemoryProfiles::new(&engine, &mut allocator);
     let v_data = [
         Vertex {
             pos: [0.0, 1.0, 0.0],
+            color: [0.0,0.0,0.0],
         }, //top
         Vertex {
             pos: [-1.0, -1.0, 0.5],
+            color: [0.0,0.0,0.0],
         }, //left
         Vertex {
             pos: [1.0, -1.0, 0.5],
+            color: [0.0,0.0,0.0],
         }, //right
         Vertex {
             pos: [0.0, -1.0, -0.5],
+            color: [0.0,0.0,0.0],
         }, //front
     ];
     let i_data = [
@@ -139,6 +298,10 @@ fn main() {
             
     layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
     layout(binding = 1, set = 0, rgba32f) uniform image2D image;
+    layout(binding = 2, set = 0) uniform CameraData {
+        mat4 translation;
+        mat4 rotation;
+    } camera;
 
     struct hitPayload
     {
@@ -153,12 +316,14 @@ fn main() {
             const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
             const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
             vec2 d = inUV * 2.0 - 1.0;
-            vec4 origin    = vec4(0, 0, -1, 1);
-            vec4 target    = vec4(d.x, -d.y, 0, 1);
+            vec4 origin    = vec4(0.0,0.0,-1.0,1.0);
+            vec4 target    = vec4(origin.x + d.x, origin.y + -d.y, origin.z + 1, 1);
             vec4 direction = vec4(normalize(target.xyz - origin.xyz), 0);
+            origin = camera.translation * origin;
+            direction = camera.rotation * direction;
             uint  rayFlags = gl_RayFlagsOpaqueEXT;
             float tMin     = 0.001;
-            float tMax     = 100000.0;
+            float tMax     = 1000.0;
             traceRayEXT(
                 topLevelAS, // acceleration structure
                 rayFlags,       // rayFlags
@@ -172,6 +337,14 @@ fn main() {
                 tMax,           // ray max range
                 0               // payload (location = 0)
         );
+            // if (origin == vec4(0.0,0.0,-1.0,1.0)){
+            // imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
+                
+            // }
+            // else{
+            // imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(1.0,1.0,1.0,1.0));
+                
+            // }
             imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
         }
 
@@ -201,7 +374,7 @@ fn main() {
     void main()
     {
         hitdata.hit = true;
-        hitdata.hitValue = vec3(0.2, 0.5, 0.5);
+        hitdata.hitValue = vec3(0.2, 0.5, 0.5) / (gl_HitTEXT * 0.25);
     }"#,
         ),
         shaderc::ShaderKind::ClosestHit,
@@ -233,6 +406,7 @@ fn main() {
         "main",
         Some(&options),
     );
+
     let main = CString::new("main").unwrap();
     let sbt = ShaderTable {
         ray_gen: vec![ray_gen.get_stage(vk::ShaderStageFlags::RAYGEN_KHR, &main)],
@@ -262,27 +436,51 @@ fn main() {
         &mut allocator,
         &blas_outlines,
     );
-    let transform = vk::TransformMatrixKHR {
-        matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0],
-    };
+    let dimension = 10;
     let default_instance = vk::AccelerationStructureInstanceKHR {
-        transform,
+        transform: vk::TransformMatrixKHR { matrix: [0.0; 12] },
         instance_custom_index_and_mask: Packed24_8::new(0, 0xff),
         instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8),
         acceleration_structure_reference: blas.get_blas_ref(),
     };
+    let mut instances = vec![];
+    for z in 0..dimension {
+        for y in -dimension..dimension {
+            for x in -dimension..dimension {
+                let transform = vk::TransformMatrixKHR {
+                    matrix: [
+                        1.0,
+                        0.0,
+                        0.0,
+                        (x * 3) as f32,
+                        0.0,
+                        1.0,
+                        0.0,
+                        (y * 3) as f32,
+                        0.0,
+                        0.0,
+                        1.0,
+                        (5 + z * 3) as f32,
+                    ],
+                };
+                let mut instance = default_instance.clone();
+                instance.transform = transform;
+                instances.push(instance);
+            }
+        }
+    }
     let instance_buffer = Tlas::prepare_instance_memory(
         &engine,
         &ray_tracing_profiles,
         &mut allocator,
-        1,
-        Some(default_instance),
+        instances.len(),
+        Some(&instances),
     );
     let instance_data = [TlasInstanceOutline {
         instance_data: vk::DeviceOrHostAddressConstKHR {
             device_address: instance_buffer.get_device_address(),
         },
-        instance_count: 1,
+        instance_count: instances.len() as u32,
         instance_count_overkill: 1,
         array_of_pointers: false,
     }];
@@ -332,6 +530,18 @@ fn main() {
     );
     render_target.internal_transition(&engine, vk::ImageLayout::GENERAL);
 
+    let camera_data_stage = allocator.get_buffer_region::<CameraData>(
+        &general_profiles.host_storage,
+        1,
+        &qforce::memory::AlignmentType::Free,
+        &[],
+    );
+    let camera_data_mem = allocator.get_buffer_region::<CameraData>(
+        &general_profiles.device_uniform,
+        1,
+        &qforce::memory::AlignmentType::Free,
+        &[],
+    );
     let mut d_outline = DescriptorSetOutline::new(&engine, &[]);
     let tlas_binding = d_outline.add_binding(
         vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
@@ -343,6 +553,12 @@ fn main() {
         1,
         vk::ShaderStageFlags::RAYGEN_KHR,
     );
+    let camera_data_binding = d_outline.add_binding(
+        vk::DescriptorType::UNIFORM_BUFFER,
+        1,
+        vk::ShaderStageFlags::RAYGEN_KHR,
+    );
+
     let mut d_stack = DescriptorStack::new(&engine);
     let render_set = d_stack.add_outline(d_outline);
     d_stack.create_sets(&[]);
@@ -350,6 +566,7 @@ fn main() {
     let mut write_requests = [
         (0, 0, tlas.get_write()),
         (1, 0, render_target.get_write(None)),
+        (2, 0, camera_data_mem.get_write()),
     ];
     set.write(&mut write_requests);
 
@@ -368,10 +585,11 @@ fn main() {
     let mut image_aquire_semaphore = Semaphore::new(&engine);
     let mut running = true;
     let mut instant = Box::new(Instant::now());
+    let mut delta_time = 0.0;
+    let mut camera = CameraMovement::new(30.0);
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
         match event {
-            winit::event::Event::NewEvents(_) => {}
             winit::event::Event::WindowEvent { window_id, event } => {
                 match event {
                     winit::event::WindowEvent::Resized(_) => {
@@ -411,6 +629,22 @@ fn main() {
                                 render_cmd,
                                 &vk::CommandBufferBeginInfo::builder().build(),
                             );
+
+                            camera_data_stage.copy_to_region(render_cmd, &camera_data_mem);
+                            let memory_barrier = [vk::MemoryBarrier::builder()
+                                .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                                .dst_access_mask(vk::AccessFlags::SHADER_READ)
+                                .build()];
+                            device.cmd_pipeline_barrier(
+                                render_cmd,
+                                vk::PipelineStageFlags::TRANSFER,
+                                vk::PipelineStageFlags::RAY_TRACING_SHADER_KHR,
+                                vk::DependencyFlags::empty(),
+                                &memory_barrier,
+                                &[],
+                                &[],
+                            );
+
                             device.cmd_bind_pipeline(
                                 render_cmd,
                                 vk::PipelineBindPoint::RAY_TRACING_KHR,
@@ -441,7 +675,6 @@ fn main() {
                                 .set_target_extent(extent, vk::Offset3D::builder().build());
                         }
                     }
-                    winit::event::WindowEvent::Moved(_) => {}
                     winit::event::WindowEvent::CloseRequested => {
                         *control_flow = winit::event_loop::ControlFlow::Exit;
                         running = false;
@@ -467,69 +700,24 @@ fn main() {
                         miss.dispose();
                         closest_hit.dispose();
                     }
-                    winit::event::WindowEvent::Destroyed => {}
-                    winit::event::WindowEvent::DroppedFile(_) => {}
-                    winit::event::WindowEvent::HoveredFile(_) => {}
-                    winit::event::WindowEvent::HoveredFileCancelled => {}
-                    winit::event::WindowEvent::ReceivedCharacter(_) => {}
-                    winit::event::WindowEvent::Focused(_) => {}
                     winit::event::WindowEvent::KeyboardInput {
                         device_id,
                         input,
                         is_synthetic,
-                    } => {}
-                    winit::event::WindowEvent::ModifiersChanged(_) => {}
-                    winit::event::WindowEvent::CursorMoved {
-                        device_id,
-                        position,
-                        modifiers,
-                    } => {}
-                    winit::event::WindowEvent::CursorEntered { device_id } => {}
-                    winit::event::WindowEvent::CursorLeft { device_id } => {}
-                    winit::event::WindowEvent::MouseWheel {
-                        device_id,
-                        delta,
-                        phase,
-                        modifiers,
-                    } => {}
-                    winit::event::WindowEvent::MouseInput {
-                        device_id,
-                        state,
-                        button,
-                        modifiers,
-                    } => {}
-                    winit::event::WindowEvent::TouchpadPressure {
-                        device_id,
-                        pressure,
-                        stage,
-                    } => {}
-                    winit::event::WindowEvent::AxisMotion {
-                        device_id,
-                        axis,
-                        value,
-                    } => {}
-                    winit::event::WindowEvent::Touch(_) => {}
-                    winit::event::WindowEvent::ScaleFactorChanged {
-                        scale_factor,
-                        new_inner_size,
-                    } => {}
-                    winit::event::WindowEvent::ThemeChanged(_) => {}
+                    } => {
+                        camera.set_input(input);
+                    }
+                    _ => {}
                 }
             }
-            winit::event::Event::DeviceEvent { device_id, event } => {}
-            winit::event::Event::UserEvent(_) => {}
-            winit::event::Event::Suspended => {}
-            winit::event::Event::Resumed => {}
             winit::event::Event::MainEventsCleared => {
-                println!(
-                    "Time elapsed last frame {} us",
-                    instant.elapsed().whole_microseconds()
-                );
-                *instant = Instant::now();
                 if !running {
                     return;
                 }
                 render_loop_fence.wait_reset();
+                delta_time = instant.elapsed().as_seconds_f32();
+                println!("Frame time {:.3} ms", delta_time*1000.0);
+                *instant = Instant::now();
                 transfer_pool.reset();
                 let swapchains = [swapchain.get_swapchain()];
                 let (image_index, present_target) = swapchain.get_next_image(
@@ -613,14 +801,13 @@ fn main() {
                     device
                         .end_command_buffer(transfer_cmd)
                         .expect("Could not end command buffer");
-
+                    let camera_data = camera.march_camera(delta_time);
+                    allocator.copy_from_ram(&camera_data, 1, &camera_data_stage);
                     device.queue_submit(queue_data.0, &submits, render_loop_fence.get_fence());
                     swapchain.present(queue_data.0, image_index[0], &transfer_signal);
                 }
             }
-            winit::event::Event::RedrawRequested(_) => {}
-            winit::event::Event::RedrawEventsCleared => {}
-            winit::event::Event::LoopDestroyed => {}
+            _ => {}
         }
     });
 }
