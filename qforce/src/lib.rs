@@ -3222,7 +3222,7 @@ pub mod ray_tracing{
             let c_info = [vk::RayTracingPipelineCreateInfoKHR::builder()
             .stages(&stages)
             .groups(&groups)
-            .max_pipeline_ray_recursion_depth(2)
+            .max_pipeline_ray_recursion_depth(1)
             .layout(layout)
             .build()];
             let pipeline = unsafe{ray_loader.create_ray_tracing_pipelines(

@@ -1,76 +1,50 @@
-    #version 460
-    #extension GL_EXT_ray_tracing : require
-    #extension GL_KHR_vulkan_glsl : enable
-            
-    layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-    layout(binding = 1, set = 0, rgba32f) uniform image2D image;
-    layout(binding = 2, set = 0) uniform CameraData {
-        mat4 translation;
-        mat4 rotation;
-        vec4 light_pos;
-    } camera;
-    struct hitPayload 
-    {
-        vec4 hit_pos;
-        vec4 hit_value;
-        bool hit;
-    };
+#version 460
+#extension GL_EXT_ray_tracing : require
+#extension GL_KHR_vulkan_glsl : enable
+        
+layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 1, set = 0, rgba32f) uniform image2D image;
+layout(binding = 2, set = 0) uniform CameraData {
+    mat4 translation;
+    mat4 rotation;
+    vec4 light_pos;
+} camera;
+struct hitPayload 
+{
+    
+    vec4 hit_value;
+    bool hit;
+};
 
-    layout(location = 0) rayPayloadEXT hitPayload prd;
-    layout(location = 1) rayPayloadEXT bool shadowed;
+layout(location = 0) rayPayloadEXT hitPayload prd;
 
-    void main() 
-        {
-            const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-            const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
-            vec2 d = inUV * 2.0 - 1.0;
-            vec4 origin    = vec4(0.0,0.0,-1.0,1.0);
-            vec4 target    = vec4(origin.x + d.x, origin.y + -d.y, origin.z + 1, 1);
-            vec4 direction = vec4(normalize(target.xyz - origin.xyz), 0);
-            origin = camera.translation * origin;
-            direction = camera.rotation * direction;
-            uint  rayFlags = gl_RayFlagsOpaqueEXT;
-            float tMin     = 0.001;
-            float tMax     = 1000.0;
-            
-            //Sendoff
-            traceRayEXT(
-                topLevelAS, // acceleration structure
-                rayFlags,       // rayFlags
-                0xFF,           // cullMask
-                0,              // sbtRecordOffset
-                0,              // sbtRecordStride
-                0,              // missIndex
-                origin.xyz,     // ray origin
-                tMin,           // ray min range
-                direction.xyz,  // ray direction
-                tMax,           // ray max range
-                0               // payload (location = 0)
-        );
-            //Shadow Pass
-             if (prd.hit){
-                 origin = prd.hit_pos;
-                 direction = normalize(camera.light_pos - origin);
-                vec4 light = prd.hit_value;
-                 traceRayEXT(
-                     topLevelAS, // acceleration structure
-                     rayFlags,       // rayFlags
-                     0xFF,           // cullMask
-                     0,              // sbtRecordOffset
-                     0,              // sbtRecordStride
-                     0,              // missIndex
-                     origin.xyz,     // ray origin
-                     tMin,           // ray min range
-                     direction.xyz,  // ray direction
-                     tMax,           // ray max range
-                     0               // payload (location = 0)
-                 );
-            if (!prd.hit){
-                prd.hit_value = light;
-            }
-            else{
-                prd.hit_value = vec4(0.0, 0.1, 0.3, 1.0) * 1.5;
-            }
-             }
-            imageStore(image, ivec2(gl_LaunchIDEXT.xy), prd.hit_value);
-        }
+void main() 
+{
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+    vec2 d = inUV * 2.0 - 1.0;
+    vec4 origin    = vec4(0.0,0.0,-1.0,1.0);
+    vec4 target    = vec4(origin.x + d.x, origin.y + -d.y, origin.z + 1, 1);
+    vec4 direction = vec4(normalize(target.xyz - origin.xyz), 0);
+    origin = camera.translation * origin;
+    direction = camera.rotation * direction;
+    uint  rayFlags = gl_RayFlagsOpaqueEXT;
+    float tMin     = 0.001;
+    float tMax     = 1000.0;
+    
+    //Sendoff
+    traceRayEXT(
+        topLevelAS, // acceleration structure
+        rayFlags,       // rayFlags
+        0xFF,           // cullMask
+        0,              // sbtRecordOffset
+        0,              // sbtRecordStride
+        0,              // missIndex
+        origin.xyz,     // ray origin
+        tMin,           // ray min range
+        direction.xyz,  // ray direction
+        tMax,           // ray max range
+        0               // payload (location = 0)
+    );
+    imageStore(image, ivec2(gl_LaunchIDEXT.xy), prd.hit_value);
+}
