@@ -1,15 +1,14 @@
 use std::ffi::CString;
-use std::rc::Rc;
 
 use ash::vk::{self, Packed24_8};
 use glam::{Mat4, Vec3, Vec4};
 use qforce::command::CommandPool;
-use qforce::descriptor::{self, DescriptorSetOutline, DescriptorStack, DescriptorWriteType};
+use qforce::descriptor::{DescriptorSetOutline, DescriptorStack};
 use qforce::init::{self, IEngine, WindowedEngine};
 use qforce::init::{EngineInitOptions, SwapchainStore};
 use qforce::memory::{
-    AllocationAllocatorProfile, Allocator, AllocatorProfileStack, AllocatorProfileType,
-    BufferAllocatorProfile, GeneralMemoryProfiles, ImageAllocatorProfile,
+    AlignmentType, Allocator, AllocatorProfileStack, AllocatorProfileType, GeneralMemoryProfiles,
+    ImageAllocatorProfile,
 };
 use qforce::ray_tracing::{
     Blas, RayTacingPipeline, RayTracingMemoryProfiles, ShaderTable, Tlas, TlasInstanceOutline,
@@ -50,6 +49,167 @@ pub struct Vertex {
 pub struct CameraData {
     camera_translation: [f32; 4 * 4],
     camera_rotation: [f32; 4 * 4],
+    light_pos: [f32; 4],
+}
+pub struct ShaderStore {
+    standard_ray_gen: Shader,
+    standard_closest_hit: Shader,
+    no_shadow_miss: Shader,
+    shadow_miss: Shader,
+}
+impl ShaderStore {
+    pub fn new<T: IEngine>(engine: &T) {
+        let mut options = shaderc::CompileOptions::new().unwrap();
+        options.set_target_spirv(shaderc::SpirvVersion::V1_6);
+        let mut ray_gen = Shader::new(
+            engine,
+            String::from(
+                r#"
+    #version 460
+    #extension GL_EXT_ray_tracing : require
+    #extension GL_KHR_vulkan_glsl : enable
+            
+    layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
+    layout(binding = 1, set = 0, rgba32f) uniform image2D image;
+    layout(binding = 2, set = 0) uniform CameraData {
+        mat4 translation;
+        mat4 rotation;
+        vec4 light_pos;
+    } camera;
+    struct hitPayload
+    {
+        vec4 hit_pos;
+        vec4 hit_value;
+        bool hit;
+    };
+
+    layout(location = 0) rayPayloadEXT hitPayload prd;
+
+    void main() 
+        {
+            const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+            const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+            vec2 d = inUV * 2.0 - 1.0;
+            vec4 origin    = vec4(0.0,0.0,-1.0,1.0);
+            vec4 target    = vec4(origin.x + d.x, origin.y + -d.y, origin.z + 1, 1);
+            vec4 direction = vec4(normalize(target.xyz - origin.xyz), 0);
+            origin = camera.translation * origin;
+            direction = camera.rotation * direction;
+            uint  rayFlags = gl_RayFlagsOpaqueEXT;
+            float tMin     = 0.001;
+            float tMax     = 1000.0;
+            
+            //Sendoff
+            traceRayEXT(
+                topLevelAS, // acceleration structure
+                rayFlags,       // rayFlags
+                0xFF,           // cullMask
+                0,              // sbtRecordOffset
+                0,              // sbtRecordStride
+                0,              // missIndex
+                origin.xyz,     // ray origin
+                tMin,           // ray min range
+                direction.xyz,  // ray direction
+                tMax,           // ray max range
+                0               // payload (location = 0)
+        );
+            //Shadow Pass
+             if (prd.hit){
+                 origin = prd.hit_pos;
+                 direction = normalize(camera.light_pos - origin);
+                vec4 light = prd.hit_value;
+                 traceRayEXT(
+                     topLevelAS, // acceleration structure
+                     rayFlags,       // rayFlags
+                     0xFF,           // cullMask
+                     0,              // sbtRecordOffset
+                     0,              // sbtRecordStride
+                     0,              // missIndex
+                     origin.xyz,     // ray origin
+                     tMin,           // ray min range
+                     direction.xyz,  // ray direction
+                     tMax,           // ray max range
+                     0               // payload (location = 0)
+                 );
+            if (!prd.hit){
+                prd.hit_value = light;
+            }
+            else{
+                prd.hit_value = vec4(0.0, 0.1, 0.3, 1.0) * 1.5;
+            }
+             }
+            imageStore(image, ivec2(gl_LaunchIDEXT.xy), prd.hit_value);
+        }
+
+    "#,
+            ),
+            shaderc::ShaderKind::RayGeneration,
+            "main",
+            Some(&options),
+        );
+        let mut closest_hit = Shader::new(
+            engine,
+            String::from(
+                r#"
+    #version 460
+    #extension GL_EXT_ray_tracing : require
+    #extension GL_EXT_nonuniform_qualifier : enable
+
+    struct hitPayload
+    {
+        vec4 hit_pos;
+        vec4 hit_value;
+        bool hit;
+    };
+
+    layout(location = 0) rayPayloadInEXT hitPayload hitdata;
+    hitAttributeEXT vec3 attribs;
+
+    void main()
+    {
+        hitdata.hit_pos = vec4(gl_WorldRayOriginEXT + (gl_WorldRayDirectionEXT * gl_HitTEXT),1.0);
+        hitdata.hit_value = vec4(0.2, 0.5, 0.5,1.0);
+        hitdata.hit = true;
+    }"#,
+            ),
+            shaderc::ShaderKind::ClosestHit,
+            "main",
+            Some(&options),
+        );
+        let mut no_shadow_miss = Shader::new(
+            engine,
+            String::from(
+                r#"
+    #version 460
+    #extension GL_EXT_ray_tracing : require
+
+    struct hitPayload
+    {
+        vec4 hit_pos;
+        vec4 hit_value;
+        bool hit;
+    };
+
+    layout(location = 0) rayPayloadInEXT hitPayload hitdata;
+
+    void main()
+    {
+        hitdata.hit_value = vec4(0.0, 0.1, 0.3, 1.0);
+        hitdata.hit = false;
+        
+    }"#,
+            ),
+            shaderc::ShaderKind::Miss,
+            "main",
+            Some(&options),
+        );
+    }
+    pub fn dispose(&mut self) {
+        self.standard_ray_gen.dispose();
+        self.standard_closest_hit.dispose();
+        self.no_shadow_miss.dispose();
+        self.shadow_miss.dispose();
+    }
 }
 pub struct CameraMovement {
     w_key: f32,
@@ -160,7 +320,7 @@ impl CameraMovement {
             },
         }
     }
-    pub fn march_camera(&mut self, delta_time: f32) -> CameraData {
+    pub fn march_camera(&mut self, delta_time: f32, sim_time: f32) -> CameraData {
         let mut vector = Vec3::new(
             self.d_key - self.a_key,
             self.lshift_key - self.lctrl_key,
@@ -174,27 +334,32 @@ impl CameraMovement {
         let mut camera_translation: [f32; 4 * 4] = [0.0; 4 * 4];
         let mut camera_rotation: [f32; 4 * 4] = [0.0; 4 * 4];
 
-
-
-        if !vector.is_nan(){
-
-            self.camera_translation = self.camera_translation * Mat4::from_translation(self.camera_rotation.transform_vector3(vector));
-            self.camera_translation.write_cols_to_slice(&mut camera_translation);
-        }
-        else{
-            self.camera_translation.write_cols_to_slice(&mut camera_translation);
+        if !vector.is_nan() {
+            self.camera_translation = self.camera_translation
+                * Mat4::from_translation(self.camera_rotation.transform_vector3(vector));
+            self.camera_translation
+                .write_cols_to_slice(&mut camera_translation);
+        } else {
+            self.camera_translation
+                .write_cols_to_slice(&mut camera_translation);
         }
         if y_angle != 0.0 || x_angle != 0.0 {
-            self.camera_rotation = self.camera_rotation * Mat4::from_rotation_y(y_angle) * Mat4::from_rotation_x(x_angle);
-            self.camera_rotation.write_cols_to_slice(&mut camera_rotation);
+            self.camera_rotation = self.camera_rotation
+                * Mat4::from_rotation_y(y_angle)
+                * Mat4::from_rotation_x(x_angle);
+            self.camera_rotation
+                .write_cols_to_slice(&mut camera_rotation);
+        } else {
+            self.camera_rotation
+                .write_cols_to_slice(&mut camera_rotation);
         }
-        else{
-            self.camera_rotation.write_cols_to_slice(&mut camera_rotation);
-        }
-        
+
+        let light_angle = sim_time / 5.0;
+        let orbit_radius = 10.0;
         CameraData {
             camera_translation,
             camera_rotation,
+            light_pos: [orbit_radius * light_angle.cos(), 0.0, -1.0, 1.0],
         }
     }
 }
@@ -264,19 +429,19 @@ fn main() {
     let v_data = [
         Vertex {
             pos: [0.0, 1.0, 0.0],
-            color: [0.0,0.0,0.0],
+            color: [0.0, 0.0, 0.0],
         }, //top
         Vertex {
             pos: [-1.0, -1.0, 0.5],
-            color: [0.0,0.0,0.0],
+            color: [0.0, 0.0, 0.0],
         }, //left
         Vertex {
             pos: [1.0, -1.0, 0.5],
-            color: [0.0,0.0,0.0],
+            color: [0.0, 0.0, 0.0],
         }, //right
         Vertex {
             pos: [0.0, -1.0, -0.5],
-            color: [0.0,0.0,0.0],
+            color: [0.0, 0.0, 0.0],
         }, //front
     ];
     let i_data = [
@@ -301,12 +466,13 @@ fn main() {
     layout(binding = 2, set = 0) uniform CameraData {
         mat4 translation;
         mat4 rotation;
+        vec4 light_pos;
     } camera;
-
     struct hitPayload
     {
+        vec4 hit_pos;
+        vec4 hit_value;
         bool hit;
-        vec3 hitValue;
     };
 
     layout(location = 0) rayPayloadEXT hitPayload prd;
@@ -324,6 +490,8 @@ fn main() {
             uint  rayFlags = gl_RayFlagsOpaqueEXT;
             float tMin     = 0.001;
             float tMax     = 1000.0;
+            
+            //Sendoff
             traceRayEXT(
                 topLevelAS, // acceleration structure
                 rayFlags,       // rayFlags
@@ -337,15 +505,32 @@ fn main() {
                 tMax,           // ray max range
                 0               // payload (location = 0)
         );
-            // if (origin == vec4(0.0,0.0,-1.0,1.0)){
-            // imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
-                
-            // }
-            // else{
-            // imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(1.0,1.0,1.0,1.0));
-                
-            // }
-            imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue,1.0));
+            //Shadow Pass
+             if (prd.hit){
+                 origin = prd.hit_pos;
+                 direction = normalize(camera.light_pos - origin);
+                vec4 light = prd.hit_value;
+                 traceRayEXT(
+                     topLevelAS, // acceleration structure
+                     rayFlags,       // rayFlags
+                     0xFF,           // cullMask
+                     0,              // sbtRecordOffset
+                     0,              // sbtRecordStride
+                     0,              // missIndex
+                     origin.xyz,     // ray origin
+                     tMin,           // ray min range
+                     direction.xyz,  // ray direction
+                     tMax,           // ray max range
+                     0               // payload (location = 0)
+                 );
+            if (!prd.hit){
+                prd.hit_value = light;
+            }
+            else{
+                prd.hit_value = vec4(0.0, 0.1, 0.3, 1.0) * 1.5;
+            }
+             }
+            imageStore(image, ivec2(gl_LaunchIDEXT.xy), prd.hit_value);
         }
 
     "#,
@@ -364,8 +549,9 @@ fn main() {
 
     struct hitPayload
     {
+        vec4 hit_pos;
+        vec4 hit_value;
         bool hit;
-        vec3 hitValue;
     };
 
     layout(location = 0) rayPayloadInEXT hitPayload hitdata;
@@ -373,8 +559,9 @@ fn main() {
 
     void main()
     {
+        hitdata.hit_pos = vec4(gl_WorldRayOriginEXT + (gl_WorldRayDirectionEXT * gl_HitTEXT),1.0);
+        hitdata.hit_value = vec4(0.2, 0.5, 0.5,1.0);
         hitdata.hit = true;
-        hitdata.hitValue = vec3(0.2, 0.5, 0.5) / (gl_HitTEXT * 0.25);
     }"#,
         ),
         shaderc::ShaderKind::ClosestHit,
@@ -390,16 +577,18 @@ fn main() {
 
     struct hitPayload
     {
+        vec4 hit_pos;
+        vec4 hit_value;
         bool hit;
-        vec3 hitValue;
     };
 
     layout(location = 0) rayPayloadInEXT hitPayload hitdata;
 
     void main()
     {
+        hitdata.hit_value = vec4(0.0, 0.1, 0.3, 1.0);
         hitdata.hit = false;
-        hitdata.hitValue = vec3(0.0, 0.1, 0.3);
+        
     }"#,
         ),
         shaderc::ShaderKind::Miss,
@@ -436,11 +625,11 @@ fn main() {
         &mut allocator,
         &blas_outlines,
     );
-    let dimension = 10;
+    let dimension = 50;
     let default_instance = vk::AccelerationStructureInstanceKHR {
         transform: vk::TransformMatrixKHR { matrix: [0.0; 12] },
         instance_custom_index_and_mask: Packed24_8::new(0, 0xff),
-        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8),
+        instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000001 as u8),
         acceleration_structure_reference: blas.get_blas_ref(),
     };
     let mut instances = vec![];
@@ -533,15 +722,25 @@ fn main() {
     let camera_data_stage = allocator.get_buffer_region::<CameraData>(
         &general_profiles.host_storage,
         1,
-        &qforce::memory::AlignmentType::Free,
+        &AlignmentType::Free,
         &[],
     );
     let camera_data_mem = allocator.get_buffer_region::<CameraData>(
         &general_profiles.device_uniform,
         1,
-        &qforce::memory::AlignmentType::Free,
+        &AlignmentType::Free,
         &[],
     );
+
+    let object_shader_data = [object_data.get_shader_data()];
+    let object_shader_data_mem = allocator.get_buffer_region_from_slice(
+        &general_profiles.host_storage,
+        &general_profiles.device_storage,
+        &object_shader_data,
+        &AlignmentType::Free,
+        &[],
+    );
+
     let mut d_outline = DescriptorSetOutline::new(&engine, &[]);
     let tlas_binding = d_outline.add_binding(
         vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
@@ -558,6 +757,11 @@ fn main() {
         1,
         vk::ShaderStageFlags::RAYGEN_KHR,
     );
+    let object_shader_data_binding = d_outline.add_binding(
+        vk::DescriptorType::STORAGE_BUFFER,
+        1,
+        vk::ShaderStageFlags::CLOSEST_HIT_KHR,
+    );
 
     let mut d_stack = DescriptorStack::new(&engine);
     let render_set = d_stack.add_outline(d_outline);
@@ -567,6 +771,7 @@ fn main() {
         (0, 0, tlas.get_write()),
         (1, 0, render_target.get_write(None)),
         (2, 0, camera_data_mem.get_write()),
+        (3, 0, object_shader_data_mem.get_write()),
     ];
     set.write(&mut write_requests);
 
@@ -587,6 +792,7 @@ fn main() {
     let mut instant = Box::new(Instant::now());
     let mut delta_time = 0.0;
     let mut camera = CameraMovement::new(30.0);
+    let mut sim_time = 0.0;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
         match event {
@@ -716,7 +922,8 @@ fn main() {
                 }
                 render_loop_fence.wait_reset();
                 delta_time = instant.elapsed().as_seconds_f32();
-                println!("Frame time {:.3} ms", delta_time*1000.0);
+                sim_time += delta_time;
+                println!("Frame time {:.3} ms", delta_time * 1000.0);
                 *instant = Instant::now();
                 transfer_pool.reset();
                 let swapchains = [swapchain.get_swapchain()];
@@ -764,7 +971,7 @@ fn main() {
 
                     let present_target_to_transfer = present_target.transition(
                         vk::AccessFlags::NONE,
-                        vk::AccessFlags::TRANSFER_WRITE,
+                        vk::AccessFlags::MEMORY_WRITE,
                         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
                     );
                     let present_target_to_transfer = present_target_to_transfer.0;
@@ -773,7 +980,7 @@ fn main() {
 
                     device.cmd_pipeline_barrier(
                         transfer_cmd,
-                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags::TOP_OF_PIPE,
                         vk::PipelineStageFlags::TRANSFER,
                         vk::DependencyFlags::empty(),
                         &[],
@@ -781,18 +988,18 @@ fn main() {
                         &transfer_transitions,
                     );
                     render_target.copy_to_image(transfer_cmd, &present_target);
-                    let present_taret_to_preset = present_target.transition(
-                        vk::AccessFlags::TRANSFER_WRITE,
+                    let present_target_to_preset = present_target.transition(
+                        vk::AccessFlags::MEMORY_WRITE,
                         vk::AccessFlags::NONE,
                         vk::ImageLayout::PRESENT_SRC_KHR,
                     );
-                    let present_target_to_present = present_taret_to_preset.0;
+                    let present_target_to_present = present_target_to_preset.0;
 
                     let reset_transitions = [present_target_to_present];
                     device.cmd_pipeline_barrier(
                         transfer_cmd,
                         vk::PipelineStageFlags::TRANSFER,
-                        vk::PipelineStageFlags::TRANSFER,
+                        vk::PipelineStageFlags::BOTTOM_OF_PIPE,
                         vk::DependencyFlags::empty(),
                         &[],
                         &[],
@@ -801,7 +1008,7 @@ fn main() {
                     device
                         .end_command_buffer(transfer_cmd)
                         .expect("Could not end command buffer");
-                    let camera_data = camera.march_camera(delta_time);
+                    let camera_data = camera.march_camera(delta_time, sim_time);
                     allocator.copy_from_ram(&camera_data, 1, &camera_data_stage);
                     device.queue_submit(queue_data.0, &submits, render_loop_fence.get_fence());
                     swapchain.present(queue_data.0, image_index[0], &transfer_signal);

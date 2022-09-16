@@ -232,7 +232,7 @@ pub mod init{
                     .message_type(
                         vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
                             | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+                            //| vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
                     )
                     .pfn_user_callback(Some(vulkan_debug_callback));
 
@@ -815,7 +815,7 @@ pub mod memory{
     use std::{sync::Arc, mem::size_of, collections::HashMap};
     use ash::{self, vk};
     use log::debug;
-    use crate::{init::{self,IEngine,PhysicalDevicePropertiesStore, Engine}, IDisposable, descriptor::DescriptorWriteType, command::CommandPool, sync::Fence};
+    use crate::{init::{self,IEngine,PhysicalDevicePropertiesStore, Engine, QueueStore}, IDisposable, descriptor::DescriptorWriteType, command::CommandPool, sync::Fence};
 
     #[derive(Clone)]
     pub enum AlignmentType{
@@ -983,6 +983,7 @@ pub mod memory{
         resources: Vec<AllocatorResourceType>,
         profile_mapping: HashMap<AllocatorProfileStack, (Vec<usize>, Vec<usize>, Vec<usize>)>,
         channel: (flume::Sender<AllocatorProfileStack>, flume::Receiver<AllocatorProfileStack>),
+        queue_store: QueueStore
     }
     pub struct GeneralMemoryProfiles{
         pub general_device_index: usize,
@@ -1037,7 +1038,44 @@ pub mod memory{
                 resources: vec![],
                 channel: flume::unbounded(),
                 profile_mapping: HashMap::new(),
+                queue_store: engine.get_queue_store(),
             }
+        }
+        pub fn get_buffer_region_from_slice<O: Clone>(&mut self, stage_profile: &AllocatorProfileStack, dst_profile: &AllocatorProfileStack, data: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+            let queue_data = self.queue_store.get_queue(vk::QueueFlags::TRANSFER).unwrap();
+            let stage = self.get_buffer_region_from_template(stage_profile, data, &AlignmentType::Free, &[]);
+            let dst = self.get_buffer_region_from_template(dst_profile, data, alignment, options);
+            
+            self.copy_from_ram_slice(data, &stage);
+            
+            let pool = CommandPool::new_raw(&self.device, vk::CommandPoolCreateInfo::builder()
+                .queue_family_index(queue_data.1)
+                .build()
+            );
+            let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder()
+                .command_buffer_count(1)
+                .build()  
+            )[0];
+            
+            
+            unsafe{
+                self.device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
+                    .build()
+                ).expect("Could not begin command buffer");
+                stage.copy_to_region(cmd, &dst);
+                self.device.end_command_buffer(cmd).expect("Could not end command buffer");
+                
+                let fence = Fence::new_raw(&self.device, false);
+                let cmd = [cmd];
+                let submit = [vk::SubmitInfo::builder()
+                .command_buffers(&cmd)
+                .build()];
+                self.device.queue_submit(queue_data.0, &submit, fence.get_fence()).expect("Could not submit queue");
+                fence.wait();
+            }
+            
+            dst
         }
         pub fn add_profile(&mut self, profile: AllocatorProfileType) -> usize {
             self.settings.push(profile);
@@ -1327,7 +1365,7 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
-        pub fn get_buffer_region_from_slice<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
+        pub fn get_buffer_region_from_template<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion {
             self.get_buffer_region::<O>(profile, slice.len(), alignment, options)
         }
         pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources {
@@ -2332,7 +2370,10 @@ pub mod memory{
             .src_queue_family_index(u32::MAX)
             .dst_queue_family_index(u32::MAX)
             .image(self.image)
-            .subresource_range(self.c_info.subresource_range).build();
+            .subresource_range(self.c_info.subresource_range)
+            .src_access_mask(src_access)
+            .dst_access_mask(dst_access)
+            .build();
             let old_layout = self.layout;
             self.layout = new_layout;
             (transition, old_layout)
@@ -2863,11 +2904,11 @@ pub mod command{
             }
     
         }
-        pub fn new_raw(device: ash::Device, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool {
+        pub fn new_raw(device: &ash::Device, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool {
             unsafe {
                 let command_pool = device.create_command_pool(&c_info, None).unwrap();
                 CommandPool{
-                    device,
+                    device: device.clone(),
                     command_pool,
                     c_info,
                     disposed: false,
@@ -2919,6 +2960,23 @@ pub mod sync{
     }
 
     impl Fence{
+        pub fn new_raw(device: &ash::Device, start_signaled: bool) -> Fence {
+            let fence;
+            let c_info;
+            if start_signaled{
+                c_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
+            }
+            else {
+                c_info = vk::FenceCreateInfo::builder().build();
+            }
+
+            unsafe{
+                fence = device.create_fence(&c_info, None).expect("Could not create fence");
+            }
+            debug!("Created fence {:?}", fence);
+            Fence{ device: device.clone(), fence, disposed: false }
+            
+        }
         pub fn new<T: IEngine>(engine: &T, start_signaled: bool) -> Fence{
             let fence;
             let c_info;
@@ -3054,7 +3112,13 @@ pub mod ray_tracing{
         vertex_buffer: BufferRegion,
         index_buffer: BufferRegion,
         geometry_info: vk::AccelerationStructureGeometryKHR,
-        primative_count: u32
+        primative_count: u32,
+        shader_data: ObjectShaderData,
+    }
+    #[derive(Clone)]
+    pub struct ObjectShaderData{
+        vertex_address: u64,
+        index_address: u64,
     }
     pub struct Blas{
         device: ash::Device,
@@ -3213,13 +3277,13 @@ pub mod ray_tracing{
                 }          
             }
 
-            let ray_gen_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &ray_gen_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
-            let miss_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &miss_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
-            let hit_region = allocator.get_buffer_region_from_slice(&profiles.shader_table, &hit_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
+            let ray_gen_region = allocator.get_buffer_region_from_template(&profiles.shader_table, &ray_gen_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
+            let miss_region = allocator.get_buffer_region_from_template(&profiles.shader_table, &miss_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
+            let hit_region = allocator.get_buffer_region_from_template(&profiles.shader_table, &hit_handles, &AlignmentType::Allocation(shader_base_alignment as u64), &[]);
             
-            let ray_gen_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &ray_gen_handles, &AlignmentType::Free, &[]);
-            let miss_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &miss_handles, &AlignmentType::Free, &[]);
-            let hit_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &hit_handles, &AlignmentType::Free, &[]);
+            let ray_gen_stage = allocator.get_buffer_region_from_template(&profiles.staging, &ray_gen_handles, &AlignmentType::Free, &[]);
+            let miss_stage = allocator.get_buffer_region_from_template(&profiles.staging, &miss_handles, &AlignmentType::Free, &[]);
+            let hit_stage = allocator.get_buffer_region_from_template(&profiles.staging, &hit_handles, &AlignmentType::Free, &[]);
             
             allocator.copy_from_ram_slice(&ray_gen_handles, &ray_gen_stage);
             allocator.copy_from_ram_slice(&miss_handles, &miss_stage);
@@ -3323,7 +3387,7 @@ pub mod ray_tracing{
             
             let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
-            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
+            .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_BUILD)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
             .geometries(&geometries);
             
@@ -3395,8 +3459,8 @@ pub mod ray_tracing{
             let instance_buffer: BufferRegion;
             match default{
                 Some(d) => {
-                    instance_buffer = allocator.get_buffer_region_from_slice(&profiles.instance_data, d, &AlignmentType::Free, &[]);
-                    let staging_buffer = allocator.get_buffer_region_from_slice(&profiles.staging, d, &AlignmentType::Free, &[]);
+                    instance_buffer = allocator.get_buffer_region_from_template(&profiles.instance_data, d, &AlignmentType::Free, &[]);
+                    let staging_buffer = allocator.get_buffer_region_from_template(&profiles.staging, d, &AlignmentType::Free, &[]);
                     allocator.copy_from_ram_slice(d, &staging_buffer);                    
                     let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
                     let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
@@ -3540,14 +3604,14 @@ pub mod ray_tracing{
     }
     impl TriangleObjectGeometry{
         pub fn new<T: IEngine, V: Clone>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32]) -> TriangleObjectGeometry {
-            let vb_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &vertex_data, &AlignmentType::Free, &[]);
-            let ib_stage = allocator.get_buffer_region_from_slice(&profiles.staging, &index_data, &AlignmentType::Free, &[]);
+            let vb_stage = allocator.get_buffer_region_from_template(&profiles.staging, &vertex_data, &AlignmentType::Free, &[]);
+            let ib_stage = allocator.get_buffer_region_from_template(&profiles.staging, &index_data, &AlignmentType::Free, &[]);
             allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
             allocator.copy_from_ram_slice(&index_data, &ib_stage);
             
-            let vertex_buffer = allocator.get_buffer_region_from_slice(&profiles.vertex, &vertex_data, &AlignmentType::Free, &[]);
+            let vertex_buffer = allocator.get_buffer_region_from_template(&profiles.vertex, &vertex_data, &AlignmentType::Free, &[]);
             let vertex_buffer_address = vk::DeviceOrHostAddressConstKHR{device_address: vertex_buffer.get_device_address()};
-            let index_buffer = allocator.get_buffer_region_from_slice(&profiles.index, &index_data, &AlignmentType::Free, &[]);
+            let index_buffer = allocator.get_buffer_region_from_template(&profiles.index, &index_data, &AlignmentType::Free, &[]);
             let index_device_address = vk::DeviceOrHostAddressConstKHR{device_address: index_buffer.get_device_address()};
             
             let triangle_info = vk::AccelerationStructureGeometryTrianglesDataKHR::builder()
@@ -3587,16 +3651,28 @@ pub mod ray_tracing{
                 fence.wait_reset();
             }           
             
+            let shader_data = ObjectShaderData{ 
+                vertex_address: vertex_buffer.get_device_address(),
+                index_address: index_buffer.get_device_address() };
             TriangleObjectGeometry{ 
                 vertex_buffer,
                 index_buffer,
                 geometry_info: geo_info,
-                primative_count: (index_data.len()/3) as u32}
+                primative_count: (index_data.len()/3) as u32,
+                shader_data, }
+        }
+        pub fn get_shader_data(&self) -> ObjectShaderData {
+            self.shader_data.clone()
         }
         pub fn get_blas_outline(&self, primiative_overkill: u32) -> BlasObjectOutline {
             BlasObjectOutline{ geometry: self.geometry_info,
                 primative_count: self.primative_count,
                 max_primative_count: self.primative_count * primiative_overkill }
+        }
+    }
+    impl ObjectShaderData{
+        pub fn new(vertex_address: u64, index_address: u64) -> ObjectShaderData {
+            ObjectShaderData{ vertex_address, index_address }
         }
     }
     impl RayTracingMemoryProfiles{
