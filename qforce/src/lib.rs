@@ -2948,36 +2948,21 @@ pub mod command{
 }
 #[allow(dead_code, unused)]
 pub mod sync{
+    use std::sync::Arc;
+
     use ash::vk;
     use log::debug;
 
     use crate::{init::IEngine, IDisposable};
 
-    pub struct Fence{
-        device: ash::Device,
+    pub struct Fence<E: IEngine>{
+        engine: Arc<E>,
         fence: ash::vk::Fence,
         disposed: bool,
     }
 
-    impl Fence{
-        pub fn new_raw(device: &ash::Device, start_signaled: bool) -> Fence {
-            let fence;
-            let c_info;
-            if start_signaled{
-                c_info = vk::FenceCreateInfo::builder().flags(vk::FenceCreateFlags::SIGNALED).build();
-            }
-            else {
-                c_info = vk::FenceCreateInfo::builder().build();
-            }
-
-            unsafe{
-                fence = device.create_fence(&c_info, None).expect("Could not create fence");
-            }
-            debug!("Created fence {:?}", fence);
-            Fence{ device: device.clone(), fence, disposed: false }
-            
-        }
-        pub fn new<T: IEngine>(engine: &T, start_signaled: bool) -> Fence{
+    impl<E: IEngine> Fence<E>{
+        pub fn new_raw(engine: Arc<E>, start_signaled: bool) -> Fence<E> {
             let fence;
             let c_info;
             if start_signaled{
@@ -2991,7 +2976,8 @@ pub mod sync{
                 fence = engine.get_device().create_fence(&c_info, None).expect("Could not create fence");
             }
             debug!("Created fence {:?}", fence);
-            Fence{ device: engine.get_device(), fence, disposed: false }
+            Fence{ engine, fence, disposed: false }
+            
         }
         pub fn wait(&self){
             unsafe{
@@ -3011,18 +2997,18 @@ pub mod sync{
             self.fence
         }
     }
-    impl IDisposable for Fence{
+    impl<E: IEngine> IDisposable for Fence<E>{
         fn dispose(&mut self) {
         if !self.disposed{
             self.disposed = true;
             debug!("Destroying fence {:?}", self.fence);
             unsafe{
-                self.device.destroy_fence(self.fence, None);
+                self.engine.get_device().destroy_fence(self.fence, None);
             }
         }
     }
     }
-    impl Drop for Fence{
+    impl<E: IEngine> Drop for Fence{
         fn drop(&mut self) {
             self.dispose();
         }
@@ -3362,28 +3348,21 @@ pub mod ray_tracing{
     }
     }
     impl Tlas{
-        pub fn new<T: IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, instance_outlines: &[TlasInstanceOutline]) -> Tlas {
+        pub fn new<T: IEngine>(engine: &T, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator, instance_outline: &TlasInstanceOutline) -> Tlas {
             let device = engine.get_device();
             let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &device);
-            
-            let geometries:Vec<vk::AccelerationStructureGeometryKHR> = instance_outlines.iter().map(|outline| {
-                let instance_data = vk::AccelerationStructureGeometryInstancesDataKHR::builder()
-                .array_of_pointers(outline.array_of_pointers)
-                .data(outline.instance_data)
-                .build();
-                let mut geo_union = vk::AccelerationStructureGeometryDataKHR::default();
-                geo_union.instances = instance_data;
-                vk::AccelerationStructureGeometryKHR::builder()
-                .geometry_type(vk::GeometryTypeKHR::INSTANCES)
-                .geometry(geo_union)
-                .build()
-            }).collect();
-            let primative_counts:Vec<u32> = instance_outlines.iter().map(|outline| {
-                outline.instance_count})
-            .collect();
-            let max_primative_counts:Vec<u32> = instance_outlines.iter().map(|outline| {
-                outline.instance_count * outline.instance_count_overkill
-            }).collect();
+            let instance_data = vk::AccelerationStructureGeometryInstancesDataKHR::builder()
+            .array_of_pointers(instance_outline.array_of_pointers)
+            .data(instance_outline.instance_data)
+            .build();
+            let mut geo_union = vk::AccelerationStructureGeometryDataKHR::default();
+            geo_union.instances = instance_data;
+            let geometries =[vk::AccelerationStructureGeometryKHR::builder()
+            .geometry_type(vk::GeometryTypeKHR::INSTANCES)
+            .geometry(geo_union)
+            .build()];
+            let primative_count = instance_outline.instance_count;
+            let max_primative_count = [instance_outline.instance_count * instance_outline.instance_count_overkill];
             
             let mut build_info = vk::AccelerationStructureBuildGeometryInfoKHR::builder()
             .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
@@ -3392,7 +3371,7 @@ pub mod ray_tracing{
             .geometries(&geometries);
             
             let build_type = vk::AccelerationStructureBuildTypeKHR::DEVICE;
-            let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_counts)};
+            let sizing = unsafe{acc_loader.get_acceleration_structure_build_sizes(build_type, &build_info, &max_primative_count)};
             
             let tlas_region = allocator.get_buffer_region::<u8>(&profiles.acc_struct, sizing.acceleration_structure_size as usize, &AlignmentType::Allocation(256), &[]);
             let scratch_region = allocator.get_buffer_region::<u8>(&profiles.scratch, sizing.build_scratch_size as usize, &AlignmentType::Allocation(profiles.properties.pd_acc_structure_properties.min_acceleration_structure_scratch_offset_alignment as u64), &[]);
@@ -3411,13 +3390,12 @@ pub mod ray_tracing{
             .dst_acceleration_structure(acc_struct)
             .scratch_data(scratch_device_address)
             .build()];
-            let build_ranges:Vec<vk::AccelerationStructureBuildRangeInfoKHR> = geometries.iter().enumerate().map(|(index, info)| {
-                vk::AccelerationStructureBuildRangeInfoKHR::builder()
+            let build_ranges = [vk::AccelerationStructureBuildRangeInfoKHR::builder()
                 .first_vertex(0)
-                .primitive_count(primative_counts[index])
+                .primitive_count(primative_count)
                 .primitive_offset(0)
-                .build()
-            }).collect();
+                .build()];
+;
             let build_ranges = [build_ranges.as_slice()];
             let pool = CommandPool::new(engine, vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
@@ -4336,11 +4314,11 @@ mod tests{
             instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8), 
             acceleration_structure_reference: blas.get_blas_ref()}];
         let instance_buffer = Tlas::prepare_instance_memory(&engine, &ray_tracing_profiles, &mut allocator, 100, Some(&default_instance));
-        let instance_data =[ TlasInstanceOutline{ 
+        let instance_data = TlasInstanceOutline{ 
             instance_data: vk::DeviceOrHostAddressConstKHR{device_address: instance_buffer.get_device_address()},
             instance_count: 100,
             instance_count_overkill: 1,
-            array_of_pointers: false }];
+            array_of_pointers: false };
         let _tlas = Tlas::new(&engine, &ray_tracing_profiles, &mut allocator, &instance_data);
         
         println!("Won't lose device {:?}", engine.get_device().handle());
