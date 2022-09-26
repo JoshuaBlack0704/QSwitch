@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::CString;
+use std::mem::size_of;
+use std::sync::Arc;
 
 use ash::vk::{self, Packed24_8};
 use glam::{Mat4, UVec3, Vec3};
@@ -97,6 +99,7 @@ impl ShapeBuilder {
                     i1 = index;
                 }
                 None => {
+                    i1 = self.vertices.len();
                     self.vertices.push(v1);
                 }
             }
@@ -105,6 +108,7 @@ impl ShapeBuilder {
                     i2 = index;
                 }
                 None => {
+                    i2 = self.vertices.len();
                     self.vertices.push(v2);
                 }
             }
@@ -112,7 +116,10 @@ impl ShapeBuilder {
                 Some((index, _)) => {
                     i3 = index;
                 }
-                None => self.vertices.push(v3),
+                None => {
+                    i3 = self.vertices.len();
+                    self.vertices.push(v3)
+                }
             }
         } else {
             self.vertices.push(v1);
@@ -164,18 +171,18 @@ impl ShapeBuilder {
         indecies
     }
 }
-pub struct ShaderStore {
-    standard_ray_gen: Shader,
-    standard_closest_hit: Shader,
-    standard_miss: Shader,
-    shadow_miss: Shader,
+pub struct ShaderStore<E: IEngine> {
+    standard_ray_gen: Shader<E>,
+    standard_closest_hit: Shader<E>,
+    standard_miss: Shader<E>,
+    shadow_miss: Shader<E>,
 }
-impl ShaderStore {
-    pub fn new<T: IEngine>(engine: &T) -> ShaderStore {
+impl<E: IEngine> ShaderStore<E> {
+    pub fn new(engine: Arc<E>) -> ShaderStore<E> {
         let mut options = shaderc::CompileOptions::new().unwrap();
         options.set_target_spirv(shaderc::SpirvVersion::V1_6);
         let ray_gen = Shader::new(
-            engine,
+            engine.clone(),
             String::from(
                 r#"
                 #version 460
@@ -236,7 +243,7 @@ void main()
             Some(&options),
         );
         let closest_hit = Shader::new(
-            engine,
+            engine.clone(),
             String::from(
                 r#"
                 #version 460
@@ -347,7 +354,7 @@ void main()
             Some(&options),
         );
         let standard_miss = Shader::new(
-            engine,
+            engine.clone(),
             String::from(
                 r#"
                 #version 460
@@ -374,7 +381,7 @@ void main()
             Some(&options),
         );
         let shadow_miss = Shader::new(
-            engine,
+            engine.clone(),
             String::from(
                 r#"
                 #version 460
@@ -555,7 +562,12 @@ impl CameraMovement {
         CameraData {
             camera_translation,
             camera_rotation,
-            light_pos: [orbit_radius * light_angle.cos(), 0.0, 10.0 + orbit_radius * 2.0 * light_angle.sin(), 1.0],
+            light_pos: [
+                orbit_radius * light_angle.cos(),
+                0.0,
+                10.0 + orbit_radius * 2.0 * light_angle.sin(),
+                1.0,
+            ],
             light_color: [1.0, 1.0, 1.0, 1.0],
             light_intensity: 70.0,
         }
@@ -592,7 +604,7 @@ fn main() {
     }
 
     let mut swapchain = SwapchainStore::new(
-        &engine,
+        engine.clone(),
         &[init::CreateSwapchainOptions::ImageUsages(
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
         )],
@@ -616,18 +628,16 @@ fn main() {
             .build(),
         &[],
     ));
-    let mut allocator = Allocator::new(&engine);
+    let mut allocator = Allocator::new(engine.clone());
     let general_profiles =
         GeneralMemoryProfiles::new(&mut allocator, 10 * 1024 * 1024, 100 * 1024 * 1024);
     let image_profile = AllocatorProfileStack::TargetImage(
         general_profiles.general_device_index,
         allocator.add_profile(render_image_profile),
     );
-    let ray_tracing_profiles = RayTracingMemoryProfiles::new(&engine, &mut allocator);
+    let ray_tracing_profiles = RayTracingMemoryProfiles::new(engine.clone(), &mut allocator);
 
-    
-
-    let mut shaders = ShaderStore::new(&engine);
+    let mut shaders = ShaderStore::new(engine.clone());
 
     let main = CString::new("main").unwrap();
     let sbt = ShaderTable {
@@ -672,7 +682,7 @@ fn main() {
     let v_data = Vertex::combine(&p_data, &n_data, &[]);
 
     let tetrahedron_data = TriangleObjectGeometry::new(
-        &engine,
+        engine.clone(),
         &ray_tracing_profiles,
         &mut allocator,
         &v_data,
@@ -681,12 +691,12 @@ fn main() {
     );
 
     let mut shape_builder = ShapeBuilder::new();
-    let p0 = Vec3::new(-50.0, 0.0, -50.0);
-    let p1 = Vec3::new(-50.0, 0.0, 50.0);
-    let p2 = Vec3::new(50.0, 0.0, -50.0);
-    let p3 = Vec3::new(50.0, 0.0, 50.0);
-    shape_builder.add_primitive(p1, p2, p3, true);
-    shape_builder.add_primitive(p1, p0, p3, true);
+    let p0 = Vec3::new(-50.0, 0.0, -50.0); //fl
+    let p1 = Vec3::new(-50.0, 0.0, 50.0); //bl
+    let p2 = Vec3::new(50.0, 0.0, 50.0); //br
+    let p3 = Vec3::new(50.0, 0.0, -50.0); //fr
+    shape_builder.add_primitive(p2, p1, p0, false);
+    shape_builder.add_primitive(p2, p0, p3, false);
 
     let p_data = shape_builder.get_pos_array();
     let n_data = shape_builder.get_normal_array();
@@ -694,7 +704,7 @@ fn main() {
     let v_data = Vertex::combine(&p_data, &n_data, &[]);
 
     let plane_data = TriangleObjectGeometry::new(
-        &engine,
+        engine.clone(),
         &ray_tracing_profiles,
         &mut allocator,
         &v_data,
@@ -705,25 +715,25 @@ fn main() {
     let tetrahedron_blas_outlines = [tetrahedron_data.get_blas_outline(1)];
     let plane_blas_outlines = [plane_data.get_blas_outline(1)];
     let mut tetrahedron_blas = Blas::new(
-        &engine,
+        engine.clone(),
         &ray_tracing_profiles,
         &mut allocator,
         &tetrahedron_blas_outlines,
     );
     let mut plane_blas = Blas::new(
-        &engine,
+        engine.clone(),
         &ray_tracing_profiles,
         &mut allocator,
         &plane_blas_outlines,
     );
     let dimension = 5;
+    let mut instances = vec![];
     let tetahedron_default_instance = vk::AccelerationStructureInstanceKHR {
         transform: vk::TransformMatrixKHR { matrix: [0.0; 12] },
         instance_custom_index_and_mask: Packed24_8::new(0, 0xff),
         instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000001 as u8),
         acceleration_structure_reference: tetrahedron_blas.get_blas_ref(),
     };
-    let mut tetrahedron_instances = vec![];
     for z in 0..dimension {
         for y in -dimension..dimension {
             for x in -dimension..dimension {
@@ -745,53 +755,36 @@ fn main() {
                 };
                 let mut instance = tetahedron_default_instance.clone();
                 instance.transform = transform;
-                tetrahedron_instances.push(instance);
+                instances.push(instance);
             }
         }
     }
-    let tetrahedron_instance_buffer = Tlas::prepare_instance_memory(
-        &engine,
-        &ray_tracing_profiles,
-        &mut allocator,
-        tetrahedron_instances.len(),
-        Some(&tetrahedron_instances),
-    );
     let plane_default_instance = vk::AccelerationStructureInstanceKHR {
-        transform: vk::TransformMatrixKHR { matrix: [
-            1.0,0.0,0.0, 0.0,
-            0.0,1.0,0.0,-30.0,
-            0.0,0.0,1.0, 0.0,
-        ] },
+        transform: vk::TransformMatrixKHR {
+            matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, -30.0, 0.0, 0.0, 1.0, 0.0],
+        },
         instance_custom_index_and_mask: Packed24_8::new(1, 0xff),
         instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000001 as u8),
         acceleration_structure_reference: plane_blas.get_blas_ref(),
     };
-    let mut plane_instances = vec![plane_default_instance];
-    let plane_instance_buffer = Tlas::prepare_instance_memory(
-        &engine,
+    instances.push(plane_default_instance);
+    let instance_buffer = Tlas::prepare_instance_memory(
+        engine.clone(),
         &ray_tracing_profiles,
         &mut allocator,
-        plane_instances.len(),
-        Some(&plane_instances),
+        instances.len(),
+        Some(&instances),
     );
-    let instance_data = [TlasInstanceOutline {
+    let instance_data = TlasInstanceOutline {
         instance_data: vk::DeviceOrHostAddressConstKHR {
-            device_address: tetrahedron_instance_buffer.get_device_address(),
+            device_address: instance_buffer.get_device_address(),
         },
-        instance_count: tetrahedron_instances.len() as u32,
+        instance_count: instances.len() as u32,
         instance_count_overkill: 1,
         array_of_pointers: false,
-    },
-    TlasInstanceOutline {
-        instance_data: vk::DeviceOrHostAddressConstKHR {
-            device_address: plane_instance_buffer.get_device_address(),
-        },
-        instance_count: plane_instances.len() as u32,
-        instance_count_overkill: 1,
-        array_of_pointers: false,
-    }];
+    };
     let mut tlas = Tlas::new(
-        &engine,
+        engine.clone(),
         &ray_tracing_profiles,
         &mut allocator,
         &instance_data,
@@ -801,7 +794,7 @@ fn main() {
         .get_queue(vk::QueueFlags::GRAPHICS | vk::QueueFlags::TRANSFER)
         .unwrap();
     let mut render_pool = CommandPool::new(
-        &engine,
+        engine.clone(),
         vk::CommandPoolCreateInfo::builder()
             .queue_family_index(queue_data.1)
             .build(),
@@ -812,7 +805,7 @@ fn main() {
             .build(),
     )[0];
     let mut transfer_pool = CommandPool::new(
-        &engine,
+        engine.clone(),
         vk::CommandPoolCreateInfo::builder()
             .queue_family_index(queue_data.1)
             .build(),
@@ -834,7 +827,7 @@ fn main() {
         vk::Format::B8G8R8A8_UNORM,
         &[],
     );
-    render_target.internal_transition(&engine, vk::ImageLayout::GENERAL);
+    render_target.internal_transition(vk::ImageLayout::GENERAL);
 
     let camera_data_stage = allocator.get_buffer_region::<CameraData>(
         &general_profiles.host_storage,
@@ -849,7 +842,10 @@ fn main() {
         &[],
     );
 
-    let object_shader_data = [tetrahedron_data.get_shader_data(), plane_data.get_shader_data()];
+    let object_shader_data = [
+        tetrahedron_data.get_shader_data(),
+        plane_data.get_shader_data(),
+    ];
     let object_shader_data_mem = allocator.get_buffer_region_from_slice(
         &general_profiles.host_storage,
         &general_profiles.device_storage,
@@ -858,7 +854,7 @@ fn main() {
         &[],
     );
 
-    let mut d_outline = DescriptorSetOutline::new(&engine, &[]);
+    let mut d_outline = DescriptorSetOutline::new(engine.clone(), &[]);
     let tlas_binding = d_outline.add_binding(
         vk::DescriptorType::ACCELERATION_STRUCTURE_KHR,
         1,
@@ -880,7 +876,7 @@ fn main() {
         vk::ShaderStageFlags::CLOSEST_HIT_KHR,
     );
 
-    let mut d_stack = DescriptorStack::new(&engine);
+    let mut d_stack = DescriptorStack::new(engine.clone());
     let render_set = d_stack.add_outline(d_outline);
     d_stack.create_sets(&[]);
     let mut set = d_stack.get_set(render_set);
@@ -893,7 +889,7 @@ fn main() {
     set.write(&mut write_requests);
 
     let mut ray_pipeline = RayTacingPipeline::new(
-        &engine,
+        engine.clone(),
         &sbt,
         &ray_tracing_profiles,
         &mut allocator,
@@ -901,10 +897,10 @@ fn main() {
         &[],
     );
 
-    let mut render_loop_fence = Fence::new(&engine, true);
-    let mut render_semaphore = Semaphore::new(&engine);
-    let mut transfer_semaphore = Semaphore::new(&engine);
-    let mut image_aquire_semaphore = Semaphore::new(&engine);
+    let mut render_loop_fence = Fence::new(engine.clone(), true);
+    let mut render_semaphore = Semaphore::new(engine.clone());
+    let mut transfer_semaphore = Semaphore::new(engine.clone());
+    let mut image_aquire_semaphore = Semaphore::new(engine.clone());
     let mut running = true;
     let mut instant = Box::new(Instant::now());
     let mut delta_time = 0.0;
@@ -922,7 +918,7 @@ fn main() {
                         render_loop_fence.wait();
                         render_pool.reset();
                         swapchain = SwapchainStore::new(
-                            &engine,
+                            engine.clone(),
                             &[
                                 init::CreateSwapchainOptions::OldSwapchain(&swapchain),
                                 init::CreateSwapchainOptions::ImageUsages(
@@ -942,7 +938,7 @@ fn main() {
 
                         let device = engine.get_device();
                         let ray_loader = ash::extensions::khr::RayTracingPipeline::new(
-                            &engine.get_instance(),
+                            engine.clone().get_instance(),
                             &device,
                         );
                         let (ray_gen_address, miss_address, hit_address) =
@@ -1007,20 +1003,6 @@ fn main() {
                                 .device_wait_idle()
                                 .expect("Could not stop device")
                         };
-                        render_pool.dispose();
-                        transfer_pool.dispose();
-                        ray_pipeline.dispose();
-                        tlas.dispose();
-                        tetrahedron_blas.dispose();
-                        plane_blas.dispose();
-                        allocator.dispose();
-                        d_stack.dispose();
-                        render_loop_fence.dispose();
-                        render_semaphore.dispose();
-                        transfer_semaphore.dispose();
-                        image_aquire_semaphore.dispose();
-                        render_target.dispose();
-                        shaders.dispose();
                     }
                     winit::event::WindowEvent::KeyboardInput {
                         device_id,
@@ -1040,6 +1022,7 @@ fn main() {
                 delta_time = instant.elapsed().as_seconds_f32();
                 sim_time += delta_time;
                 println!("Frame time {:.3} ms", delta_time * 1000.0);
+                println!("{}", size_of::<vk::TransformMatrixKHR>());
                 *instant = Instant::now();
                 transfer_pool.reset();
                 let swapchains = [swapchain.get_swapchain()];
