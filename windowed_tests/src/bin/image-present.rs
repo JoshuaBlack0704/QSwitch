@@ -44,7 +44,7 @@ fn main() {
     }
 
     let mut swapchain = SwapchainStore::new(
-        &engine,
+        engine.clone(),
         &[init::CreateSwapchainOptions::ImageUsages(
             vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
         )],
@@ -60,7 +60,7 @@ fn main() {
 
     let mem_options = vec![CreateAllocationOptions::MinimumSize(1024 * 1024 * 100)];
     let buffer_options = vec![CreateBufferOptions::MinimumSize(1024 * 1024)];
-    let mut allocator = Allocator::new(&engine);
+    let mut allocator = Allocator::new(engine.clone());
 
     let cpu_mem_profile = allocator.add_profile(AllocatorProfileType::Allocation(
         AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &mem_options),
@@ -133,9 +133,9 @@ fn main() {
         &[],
     );
 
-    let mut copy_done = sync::Fence::new(&engine, true);
-    let mut aquire_semaphore = sync::Semaphore::new(&engine);
-    let mut present_semaphore = sync::Semaphore::new(&engine);
+    let mut copy_done = sync::Fence::new(engine.clone(), true);
+    let mut aquire_semaphore = sync::Semaphore::new(engine.clone());
+    let mut present_semaphore = sync::Semaphore::new(engine.clone());
 
     event_loop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
@@ -147,7 +147,7 @@ fn main() {
                 winit::event::WindowEvent::Resized(_) => {
                     copy_done.wait();
                     swapchain = SwapchainStore::new(
-                        &engine,
+                        engine.clone(),
                         &[
                             init::CreateSwapchainOptions::OldSwapchain(&swapchain),
                             init::CreateSwapchainOptions::ImageUsages(
