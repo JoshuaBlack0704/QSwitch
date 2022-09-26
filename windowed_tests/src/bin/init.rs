@@ -1,5 +1,5 @@
 use ash::vk;
-use qforce::init;
+use qvk::init;
 
 #[cfg(debug_assertions)]
 fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {

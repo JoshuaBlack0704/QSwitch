@@ -328,7 +328,7 @@ dependencies = [
  "ash",
  "glam",
  "pretty_env_logger",
- "qforce",
+ "qvk",
  "shaderc",
  "time",
  "winit",
@@ -778,6 +778,7 @@ dependencies = [
  "flume",
  "log",
  "pretty_env_logger",
+ "qvk",
  "shaderc",
  "winit",
 ]
@@ -790,7 +791,7 @@ dependencies = [
  "ash-window 0.10.0",
  "flume",
  "pretty_env_logger",
- "qforce",
+ "qvk",
  "shaderc",
  "winit",
 ]
@@ -808,6 +809,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbe448f377a7d6961e30f5955f9b8d106c3f5e449d493ee1b125c1d43c2b5179"
 dependencies = [
  "proc-macro2",
+]
+
+[[package]]
+name = "qvk"
+version = "0.0.0"
+dependencies = [
+ "ash",
+ "ash-window 0.11.0",
+ "cgmath",
+ "flume",
+ "log",
+ "pretty_env_logger",
+ "shaderc",
+ "winit",
 ]
 
 [[package]]

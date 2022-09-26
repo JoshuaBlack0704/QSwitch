@@ -1,10 +1,9 @@
 [package]
-name = "qforce"
+name = "qvk"
 version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-qvk = {path = "../qvk"}
 ash = {version = "0.37.0", features = ["linked", "debug"]}
 flume = "0.10.14"
 winit = "0.26.0"
