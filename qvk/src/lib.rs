@@ -43,19 +43,19 @@ pub mod init{
         vk::FALSE
     }
 
-    pub trait IEngine {
+    pub trait IVulkanInit {
         fn get_instance(&self) -> &ash::Instance;
         fn get_physical_device(&self) -> &vk::PhysicalDevice;
         fn get_device(&self) -> &ash::Device;
         fn get_property_store(&self) -> &PhysicalDevicePropertiesStore;
         fn get_queue_store(&self) -> &QueueStore;
     }
-    pub trait IWindowedEngine {
+    pub trait IWindowedVulkanInit {
         fn get_surface_loader(&self) -> ash::extensions::khr::Surface;
         fn get_surface(&self) -> vk::SurfaceKHR;
         fn get_window_size(&self) -> PhysicalSize<u32>;
     }
-    pub enum EngineInitOptions<'a>{
+    pub enum VulkanInitOptions<'a>{
         UseValidation(Option<Vec<vk::ValidationFeatureEnableEXT>>, Option<Vec<vk::ValidationFeatureDisableEXT>>),
         UseDebugUtils,
         WindowTitle(&'a str),
@@ -76,13 +76,13 @@ pub mod init{
         DeviceFeaturesRayTracing(vk::PhysicalDeviceRayTracingPipelineFeaturesKHR),
         DeviceFeaturesAccelerationStructure(vk::PhysicalDeviceAccelerationStructureFeaturesKHR),
     }
-    pub enum CreateSwapchainOptions<'a, E: IEngine + IWindowedEngine>{
+    pub enum CreateSwapchainOptions<'a, E: IVulkanInit + IWindowedVulkanInit>{
         TargetFormat(vk::SurfaceFormatKHR),
         SwapchainExtent(vk::Extent2D),
         OldSwapchain(&'a SwapchainStore<E>),
         ImageUsages(vk::ImageUsageFlags),
     }
-    pub struct Engine{
+    pub struct Initalizer{
         instance: ash::Instance,
         physical_device: vk::PhysicalDevice,
         device: ash::Device,
@@ -90,14 +90,14 @@ pub mod init{
         queue_store: QueueStore,
         debug_store: Option<DebugStore>
     }
-    pub struct WindowedEngine{
+    pub struct WindowedInitalizer{
         window: Window,
         surface_loader: ash::extensions::khr::Surface,
         surface: vk::SurfaceKHR,
-        engine: Arc<Engine>,
+        init: Arc<Initalizer>,
     }
-    pub struct SwapchainStore<E:IEngine + IWindowedEngine>{
-        engine: Arc<E>,
+    pub struct SwapchainStore<E:IVulkanInit + IWindowedVulkanInit>{
+        init: Arc<E>,
         swapchain_loader: ash::extensions::khr::Swapchain,
         swapchain: vk::SwapchainKHR,
         c_info: vk::SwapchainCreateInfoKHR,
@@ -126,8 +126,8 @@ pub mod init{
         callback: vk::DebugUtilsMessengerEXT,
     }
 
-    impl Engine{
-        pub fn init(options: &mut [EngineInitOptions], window: Option<&Window>) -> (Arc<Engine>, Option<(ash::extensions::khr::Surface, vk::SurfaceKHR)>) {
+    impl Initalizer{
+        pub fn init(options: &mut [VulkanInitOptions], window: Option<&Window>) -> (Arc<Initalizer>, Option<(ash::extensions::khr::Surface, vk::SurfaceKHR)>) {
             let entry = ash::Entry::linked();
             let app_name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VulkanTriangle\0")};
 
@@ -136,12 +136,12 @@ pub mod init{
             let mut extension_names = vec![]; 
             for option in options.iter(){
                 match option{
-                    EngineInitOptions::UseValidation(_,_) => {
+                    VulkanInitOptions::UseValidation(_,_) => {
                         let name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0")};
                         layer_names.push(name.as_ptr());
                         debug!("Adding Khronos validation layers");
                     },
-                    EngineInitOptions::UseDebugUtils => {
+                    VulkanInitOptions::UseDebugUtils => {
                         extension_names.push(ash::extensions::ext::DebugUtils::name().as_ptr())
                     }
                     _ => {}
@@ -170,7 +170,7 @@ pub mod init{
             .enabled_extension_names(&extension_names);
             for option in options.iter(){
                 match option{
-                    EngineInitOptions::UseValidation(enables, disables) => {
+                    VulkanInitOptions::UseValidation(enables, disables) => {
                         match enables{
                             Some(features) => {
                                 debug!("Enabling extra validation features");
@@ -185,27 +185,27 @@ pub mod init{
                             None => {},
                         }
                     },
-                    EngineInitOptions::ApplicationName(s) => {
+                    VulkanInitOptions::ApplicationName(s) => {
                         app_info = app_info.application_name(s);
                         debug!("None standard app name specified");
                     },
-                    EngineInitOptions::ApplicationVersion(v) => {
+                    VulkanInitOptions::ApplicationVersion(v) => {
                         app_info = app_info.application_version(*v);
                         debug!("None standard app version specified");
                     },
-                    EngineInitOptions::EngineName(s) => {
+                    VulkanInitOptions::EngineName(s) => {
                         app_info = app_info.engine_name(s);
                         debug!("None standard engine name specified");
                     },
-                    EngineInitOptions::EngineVersion(v) => {
+                    VulkanInitOptions::EngineVersion(v) => {
                         app_info = app_info.engine_version(*v);
                         debug!("None standard engine version specified");
                     },
-                    EngineInitOptions::ApiVersion(v) => {
+                    VulkanInitOptions::ApiVersion(v) => {
                         app_info = app_info.api_version(*v);
                         debug!("None standard api version specified");
                     },
-                    EngineInitOptions::InstanceCreateFlags(f) => {instance_c_info = instance_c_info.flags(*f);},
+                    VulkanInitOptions::InstanceCreateFlags(f) => {instance_c_info = instance_c_info.flags(*f);},
                     _ => {},
                 }
             }
@@ -217,7 +217,7 @@ pub mod init{
             let mut debug_store = None;
             match options.iter().find(|option| {
                 let ret = match option{
-                    EngineInitOptions::UseDebugUtils => true,
+                    VulkanInitOptions::UseDebugUtils => true,
                     _ => {false}
                 };
                 ret
@@ -263,31 +263,31 @@ pub mod init{
             let mut features = vk::PhysicalDeviceFeatures2::builder();
             for option in options.iter_mut(){
                 match option {
-                    EngineInitOptions::DeviceExtensions(ext) => {
+                    VulkanInitOptions::DeviceExtensions(ext) => {
                         debug!("Adding device extensions");
                         device_info = device_info.enabled_extension_names(ext)
                     },
-                    EngineInitOptions::DeviceFeatures(f) => {
+                    VulkanInitOptions::DeviceFeatures(f) => {
                         debug!("Adding device features");
                         features = features.features(*f)
                     },
-                    EngineInitOptions::DeviceFeatures12(f) => {
+                    VulkanInitOptions::DeviceFeatures12(f) => {
                         debug!("Adding device vulkan 12 features");
                         features = features.push_next(f)
                     },
-                    EngineInitOptions::DeviceFeatures11(f) => {
+                    VulkanInitOptions::DeviceFeatures11(f) => {
                         debug!("Adding device vulkan 11 features");
                         features = features.push_next(f)
                     },
-                    EngineInitOptions::DeviceFeatures13(f) => {
+                    VulkanInitOptions::DeviceFeatures13(f) => {
                         debug!("Adding device vulkan 13 features");
                         features = features.push_next(f)
                     },
-                    EngineInitOptions::DeviceFeaturesRayTracing(f) => {
+                    VulkanInitOptions::DeviceFeaturesRayTracing(f) => {
                         debug!("Adding device ray tracing features");
                         features = features.push_next(f)
                     },
-                    EngineInitOptions::DeviceFeaturesAccelerationStructure(f) => {
+                    VulkanInitOptions::DeviceFeaturesAccelerationStructure(f) => {
                         debug!("Adding device acceleration structure features");
                         features = features.push_next(f)
                     },
@@ -301,7 +301,7 @@ pub mod init{
 
             let queue_store = QueueStore::new(&instance, &physical_device, &device, &queue_infos.1);
             let props = PhysicalDevicePropertiesStore::new(&instance, &physical_device);
-            (Arc::new(Engine{instance,
+            (Arc::new(Initalizer{instance,
                 physical_device,
                 device,
                 queue_store,
@@ -310,7 +310,7 @@ pub mod init{
                 surface_support)
         }
     }
-    impl IEngine for Engine{
+    impl IVulkanInit for Initalizer{
         fn get_instance(&self) -> &ash::Instance {
         &self.instance
     }
@@ -331,7 +331,7 @@ pub mod init{
         &self.queue_store
     }
     }
-    impl Drop for Engine{
+    impl Drop for Initalizer{
         fn drop(&mut self) {
             unsafe{
                 match &self.debug_store {
@@ -348,8 +348,8 @@ pub mod init{
             }
     }
     }
-    impl WindowedEngine{
-        pub fn init(options: &mut [EngineInitOptions]) -> (winit::event_loop::EventLoop<()>, Arc<WindowedEngine>) {
+    impl WindowedInitalizer{
+        pub fn init(options: &mut [VulkanInitOptions]) -> (winit::event_loop::EventLoop<()>, Arc<WindowedInitalizer>) {
 
             let event_loop = winit::event_loop::EventLoop::new();
             let mut window = winit::window::WindowBuilder::new()
@@ -357,10 +357,10 @@ pub mod init{
                 .with_inner_size(PhysicalSize::new(200 as u32,200 as u32));
             for option in options.iter_mut(){
                 match option{
-                    EngineInitOptions::WindowTitle(s) => window = window.with_title(*s),
-                    EngineInitOptions::WindowInnerSize(s) => window = window.with_inner_size(*s),
-                    EngineInitOptions::WindowResizable(b) =>  window = window.with_resizable(*b),
-                    EngineInitOptions::DeviceExtensions(ext) => {
+                    VulkanInitOptions::WindowTitle(s) => window = window.with_title(*s),
+                    VulkanInitOptions::WindowInnerSize(s) => window = window.with_inner_size(*s),
+                    VulkanInitOptions::WindowResizable(b) =>  window = window.with_resizable(*b),
+                    VulkanInitOptions::DeviceExtensions(ext) => {
                         ext.push(ash::extensions::khr::Swapchain::name().as_ptr());
                     },
                     _ => {}
@@ -372,37 +372,37 @@ pub mod init{
 
             let mut surface = vk::SurfaceKHR::null();
 
-            let (engine, surface_data) = Engine::init(options, Some(&window));
+            let (init, surface_data) = Initalizer::init(options, Some(&window));
 
             drop(options);
 
             let surface_data = surface_data.expect("No surface data found");
 
-            (event_loop, Arc::new(WindowedEngine{ surface_loader: surface_data.0, surface: surface_data.1, engine, window }))
+            (event_loop, Arc::new(WindowedInitalizer{ surface_loader: surface_data.0, surface: surface_data.1, init, window }))
         }
     }
-    impl IEngine for WindowedEngine{
+    impl IVulkanInit for WindowedInitalizer{
         fn get_instance(&self) -> &ash::Instance {
-        self.engine.get_instance()
+        self.init.get_instance()
     }
 
         fn get_physical_device(&self) -> &vk::PhysicalDevice {
-        self.engine.get_physical_device()
+        self.init.get_physical_device()
     }
 
         fn get_device(&self) -> &ash::Device {
-        self.engine.get_device()
+        self.init.get_device()
     }
 
         fn get_property_store(&self) -> &PhysicalDevicePropertiesStore {
-        self.engine.get_property_store()
+        self.init.get_property_store()
     }
 
         fn get_queue_store(&self) -> &QueueStore {
-        self.engine.get_queue_store()
+        self.init.get_queue_store()
     }
     }
-    impl IWindowedEngine for WindowedEngine{
+    impl IWindowedVulkanInit for WindowedInitalizer{
         fn get_surface_loader(&self) -> ash::extensions::khr::Surface {
         self.surface_loader.clone()
     }
@@ -415,7 +415,7 @@ pub mod init{
         self.window.inner_size()
     }
     }
-    impl Drop for WindowedEngine{
+    impl Drop for WindowedInitalizer{
         fn drop(&mut self) {
             unsafe{
                 debug!("Destroying surface {:?}", self.surface);
@@ -492,12 +492,12 @@ pub mod init{
             physical_device
 
         }
-        fn get_queue_infos(instance: &ash::Instance, physical_device: &vk::PhysicalDevice, options: &[EngineInitOptions]) -> (Vec<f32>, Vec<vk::DeviceQueueCreateInfo>) {
+        fn get_queue_infos(instance: &ash::Instance, physical_device: &vk::PhysicalDevice, options: &[VulkanInitOptions]) -> (Vec<f32>, Vec<vk::DeviceQueueCreateInfo>) {
 
             let priorites = vec![1.0];
 
             let create_flags = match options.iter().find(|option| match option {
-                EngineInitOptions::QueueCreateFlags(_) => {
+                VulkanInitOptions::QueueCreateFlags(_) => {
                     debug!("Using non-default queue create flags");
                     true
                 },
@@ -505,7 +505,7 @@ pub mod init{
             }) {
                 Some(option) => {
                     match option {
-                        EngineInitOptions::QueueCreateFlags(flags) => Some(*flags),
+                        VulkanInitOptions::QueueCreateFlags(flags) => Some(*flags),
                         _ => {panic!("What?")}
                     }
                 },
@@ -636,12 +636,12 @@ pub mod init{
             self.pd_mem_budgets
         }
     }
-    impl<E:IEngine + IWindowedEngine> SwapchainStore<E>{
-        pub fn new(engine: Arc<E>, options: &[CreateSwapchainOptions<E>]) -> SwapchainStore<E> {
+    impl<E:IVulkanInit + IWindowedVulkanInit> SwapchainStore<E>{
+        pub fn new(init: Arc<E>, options: &[CreateSwapchainOptions<E>]) -> SwapchainStore<E> {
             
-            let surface_loader = engine.get_surface_loader();
-            let surface = engine.get_surface();
-            let physical_device = engine.get_physical_device();
+            let surface_loader = init.get_surface_loader();
+            let surface = init.get_surface();
+            let physical_device = init.get_physical_device();
 
             let possible_formats = unsafe{surface_loader.get_physical_device_surface_formats(*physical_device, surface).expect("Could not get surface formats")};
             let chosen_format = match options.iter().find(|option| {
@@ -678,7 +678,7 @@ pub mod init{
                 desired_image_count = surface_capabilties.max_image_count;
             }
 
-            let window_size = engine.get_window_size();
+            let window_size = init.get_window_size();
             let surface_resolution = vk::Extent2D::builder().width(window_size.width).height(window_size.height).build();
 
             let pre_transform = if surface_capabilties
@@ -734,14 +734,14 @@ pub mod init{
                 };
             }
 
-            let swapchain_loader = ash::extensions::khr::Swapchain::new(&engine.get_instance(), &engine.get_device());
+            let swapchain_loader = ash::extensions::khr::Swapchain::new(&init.get_instance(), &init.get_device());
             let swapchain  = unsafe{swapchain_loader.create_swapchain(&swapchain_create_info, None).expect("Could not create swapchain")};
             debug!("Created swapchain {:?} of resolution {} x {}",swapchain, surface_resolution.width, surface_resolution.height);
             let images = unsafe{swapchain_loader.get_swapchain_images(swapchain).expect("Could not retrieve swapchain images")};
 
             let images = images.iter().map(|i| {
                 memory::ImageResources::new_from_image(
-                    engine.clone(),
+                    init.clone(),
                     i.clone(), 
                     vk::ImageLayout::UNDEFINED, 
                     surface_resolution.into(), 
@@ -757,7 +757,7 @@ pub mod init{
             }).collect();
 
             SwapchainStore{ 
-                engine,
+                init,
                 swapchain_loader,
                 swapchain,
                 c_info: swapchain_create_info.build(),
@@ -806,7 +806,7 @@ pub mod init{
             }
         }
     }
-    impl<T:IEngine + IWindowedEngine> IDisposable for SwapchainStore<T>{
+    impl<T:IVulkanInit + IWindowedVulkanInit> IDisposable for SwapchainStore<T>{
         fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
@@ -817,7 +817,7 @@ pub mod init{
             }
         }
     }
-    impl<T:IEngine + IWindowedEngine> Drop for SwapchainStore<T>{
+    impl<T:IVulkanInit + IWindowedVulkanInit> Drop for SwapchainStore<T>{
         fn drop(&mut self) {
             self.dispose();
         }
@@ -828,7 +828,7 @@ pub mod memory{
     use std::{sync::Arc, mem::size_of, collections::HashMap};
     use ash::{self, vk};
     use log::debug;
-    use crate::{init::{self,IEngine,PhysicalDevicePropertiesStore, Engine, QueueStore}, IDisposable, descriptor::DescriptorWriteType, command::CommandPool, sync::Fence};
+    use crate::{init::{self,IVulkanInit,PhysicalDevicePropertiesStore, Initalizer, QueueStore}, IDisposable, descriptor::DescriptorWriteType, command::CommandPool, sync::Fence};
 
     #[derive(Clone)]
     pub enum AlignmentType{
@@ -881,7 +881,7 @@ pub mod memory{
             Buffer(BufferAllocatorProfile),
             Image(ImageAllocatorProfile),
         }
-    pub enum AllocatorResourceType<T:IEngine>{
+    pub enum AllocatorResourceType<T:IVulkanInit>{
             Allocation(Allocation<T>),
             Buffer(Buffer<T>),
             Image(Image<T>),
@@ -906,8 +906,8 @@ pub mod memory{
         size: u64,
         user: Arc<bool>,
     }
-    pub struct Allocation<T: IEngine>{
-        engine: Arc<T>,
+    pub struct Allocation<T: IVulkanInit>{
+        init: Arc<T>,
         memory_type: vk::MemoryPropertyFlags,
         allocation: vk::DeviceMemory,
         c_info: vk::MemoryAllocateInfo,
@@ -915,8 +915,8 @@ pub mod memory{
         disposed: bool,
         allocation_resource_index: usize,
     }
-    pub struct Buffer<T: IEngine>{
-        engine: Arc<T>,
+    pub struct Buffer<T: IVulkanInit>{
+        init: Arc<T>,
         buffer: vk::Buffer,
         mem_reqs: vk::MemoryRequirements,
         c_info: vk::BufferCreateInfo,
@@ -926,8 +926,8 @@ pub mod memory{
         buffer_resource_index: usize,
         allocation_resource_index: usize
     }
-    pub struct BufferRegion<T: IEngine>{
-        engine: Arc<T>,
+    pub struct BufferRegion<T: IVulkanInit>{
+        init: Arc<T>,
         buffer: vk::Buffer,
         memory_type: vk::MemoryPropertyFlags,
         memory_index: u32,
@@ -937,8 +937,8 @@ pub mod memory{
         buffer_resource_index: usize,
         allocation_resource_index: usize,
     }
-    pub struct Image<T: IEngine>{
-        engine: Arc<T>,
+    pub struct Image<T: IVulkanInit>{
+        init: Arc<T>,
         image: vk::Image,
         mem_reqs: vk::MemoryRequirements,
         c_info: vk::ImageCreateInfo,
@@ -949,8 +949,8 @@ pub mod memory{
         image_resource_index: usize,
     }
     #[derive(Clone)]
-    pub struct ImageResources<T: IEngine>{
-        engine: Arc<T>,
+    pub struct ImageResources<T: IVulkanInit>{
+        init: Arc<T>,
         image: vk::Image,
         layout: vk::ImageLayout,
         view: vk::ImageView,
@@ -984,8 +984,8 @@ pub mod memory{
         extent: vk::Extent3D,
         options: Vec<CreateImageOptions>,
     }
-    pub struct Allocator<T: IEngine>{
-        engine: Arc<T>,
+    pub struct Allocator<T: IVulkanInit>{
+        init: Arc<T>,
         settings: Vec<AllocatorProfileType>,
         resources: Vec<AllocatorResourceType<T>>,
         profile_mapping: HashMap<AllocatorProfileStack, (Vec<usize>, Vec<usize>, Vec<usize>)>,
@@ -1004,7 +1004,7 @@ pub mod memory{
     
 
     impl GeneralMemoryProfiles{
-        pub fn new<E:IEngine>(allocator: &mut Allocator<E>, min_buffer_size: u64, min_allocation_size: u64) -> GeneralMemoryProfiles {
+        pub fn new<E:IVulkanInit>(allocator: &mut Allocator<E>, min_buffer_size: u64, min_allocation_size: u64) -> GeneralMemoryProfiles {
             let buffer_options = [CreateBufferOptions::MinimumSize(min_buffer_size)];
             let allocation_options = [CreateAllocationOptions::MinimumSize(min_allocation_size)];
             
@@ -1034,26 +1034,26 @@ pub mod memory{
                 host_uniform }
         }
     }
-    impl<T: IEngine> Allocator<T>{
-        pub fn new(engine: Arc<T>) -> Allocator<T> {
-            let device = engine.get_device();
-            let mut properties = engine.get_property_store();
+    impl<E: IVulkanInit> Allocator<E>{
+        pub fn new(init: Arc<E>) -> Allocator<E> {
+            let device = init.get_device();
+            let mut properties = init.get_property_store();
             Allocator{ 
-                engine, 
+                init, 
                 settings: vec![],
                 resources: vec![],
                 channel: flume::unbounded(),
                 profile_mapping: HashMap::new(),
             }
         }
-        pub fn get_buffer_region_from_slice<O: Clone>(&mut self, stage_profile: &AllocatorProfileStack, dst_profile: &AllocatorProfileStack, data: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<T> {
-            let queue_data = self.engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap();
+        pub fn get_buffer_region_from_slice<O: Clone>(&mut self, stage_profile: &AllocatorProfileStack, dst_profile: &AllocatorProfileStack, data: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<E> {
+            let queue_data = self.init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap();
             let stage = self.get_buffer_region_from_template(stage_profile, data, &AlignmentType::Free, &[]);
             let dst = self.get_buffer_region_from_template(dst_profile, data, alignment, options);
             
             self.copy_from_ram_slice(data, &stage);
             
-            let pool = CommandPool::new(self.engine.clone(), vk::CommandPoolCreateInfo::builder()
+            let pool = CommandPool::new(self.init.clone(), vk::CommandPoolCreateInfo::builder()
                 .queue_family_index(queue_data.1)
                 .build()
             );
@@ -1064,19 +1064,19 @@ pub mod memory{
             
             
             unsafe{
-                self.engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder()
+                self.init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT)
                     .build()
                 ).expect("Could not begin command buffer");
                 stage.copy_to_region(cmd, &dst);
-                self.engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                self.init.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
                 
-                let fence = Fence::new(self.engine.clone(), false);
+                let fence = Fence::new(self.init.clone(), false);
                 let cmd = [cmd];
                 let submit = [vk::SubmitInfo::builder()
                 .command_buffers(&cmd)
                 .build()];
-                self.engine.get_device().queue_submit(queue_data.0, &submit, fence.get_fence()).expect("Could not submit queue");
+                self.init.get_device().queue_submit(queue_data.0, &submit, fence.get_fence()).expect("Could not submit queue");
                 fence.wait();
             }
             
@@ -1110,8 +1110,8 @@ pub mod memory{
                 },
             }
         }
-        pub fn create_allocation<O>(&self, properties: vk::MemoryPropertyFlags, object_count: usize, options: &mut [CreateAllocationOptions]) -> Allocation<T> {
-            let type_index = self.engine.get_property_store().get_memory_index(properties);
+        pub fn create_allocation<O>(&self, properties: vk::MemoryPropertyFlags, object_count: usize, options: &mut [CreateAllocationOptions]) -> Allocation<E> {
+            let type_index = self.init.get_property_store().get_memory_index(properties);
             let size = size_of::<O>() * object_count;
 
             let mut c_info = vk::MemoryAllocateInfo::builder()
@@ -1120,7 +1120,7 @@ pub mod memory{
             for option in options.iter_mut(){
                 c_info = option.add_options(c_info);
             }
-            let allocation = unsafe{self.engine.get_device().allocate_memory(&c_info, None).expect("Could not allocate memory")};
+            let allocation = unsafe{self.init.get_device().allocate_memory(&c_info, None).expect("Could not allocate memory")};
             debug!("Created memory {:?} of size {} on type {}", allocation, c_info.allocation_size, type_index);
 
             let default_block = AllocationMemoryBlock{ 
@@ -1130,7 +1130,7 @@ pub mod memory{
             };
 
             Allocation{ 
-                engine: self.engine.clone(), 
+                init: self.init.clone(), 
                 memory_type: properties, 
                 allocation, 
                 c_info: c_info.build(), 
@@ -1140,7 +1140,7 @@ pub mod memory{
                 }
         
         }
-        pub fn create_buffer<O>(&self, usage: vk::BufferUsageFlags, object_count: usize, options: &[CreateBufferOptions]) -> Buffer<T> {
+        pub fn create_buffer<O>(&self, usage: vk::BufferUsageFlags, object_count: usize, options: &[CreateBufferOptions]) -> Buffer<E> {
             let buffer_size = size_of::<O>() * object_count;
 
             let mut c_info = vk::BufferCreateInfo::builder()
@@ -1151,12 +1151,12 @@ pub mod memory{
                 c_info = option.add_options(c_info);
             }
 
-            let buffer = unsafe{self.engine.get_device().create_buffer(&c_info, None).expect("Could not create buffer")};
-            let mem_reqs = unsafe{self.engine.get_device().get_buffer_memory_requirements(buffer)};
+            let buffer = unsafe{self.init.get_device().create_buffer(&c_info, None).expect("Could not create buffer")};
+            let mem_reqs = unsafe{self.init.get_device().get_buffer_memory_requirements(buffer)};
             debug!("Created buffer {:?}", buffer);
             
             Buffer{ 
-                engine: self.engine.clone(), 
+                init: self.init.clone(), 
                 buffer, 
                 mem_reqs, 
                 c_info: c_info.build(), 
@@ -1166,7 +1166,7 @@ pub mod memory{
                 allocation_resource_index: 0,
                 }
         }
-        pub fn create_image(&self, usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> Image<T> {
+        pub fn create_image(&self, usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> Image<E> {
             let mut c_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
@@ -1217,12 +1217,12 @@ pub mod memory{
                 }
             }
 
-            let image = unsafe{self.engine.get_device().create_image(&c_info, None).expect("Could not create image")};
-            let mem_reqs = unsafe{self.engine.get_device().get_image_memory_requirements(image)};
+            let image = unsafe{self.init.get_device().create_image(&c_info, None).expect("Could not create image")};
+            let mem_reqs = unsafe{self.init.get_device().get_image_memory_requirements(image)};
             debug!("Created image {:?}", image);
 
             Image{ 
-                engine: self.engine.clone(), 
+                init: self.init.clone(), 
                 image, 
                 mem_reqs, 
                 c_info: c_info.build(), 
@@ -1233,7 +1233,7 @@ pub mod memory{
 
                 }
         }
-        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<T>{
+        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<E>{
             let mut region = None;
             
             match profile{
@@ -1369,10 +1369,10 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
-        pub fn get_buffer_region_from_template<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<T> {
+        pub fn get_buffer_region_from_template<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<E> {
             self.get_buffer_region::<O>(profile, slice.len(), alignment, options)
         }
-        pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources<T> {
+        pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources<E> {
             let mut img_resources = None;
 
             match profile {
@@ -1484,7 +1484,7 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
-        pub fn copy_from_ram<O>(&mut self, src: *const O, object_count: usize, dst: &BufferRegion<T>){
+        pub fn copy_from_ram<O>(&mut self, src: *const O, object_count: usize, dst: &BufferRegion<E>){
             match &mut self.resources[dst.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_from_ram(src, object_count, dst)
@@ -1493,7 +1493,7 @@ pub mod memory{
                 AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
             }
         }
-        pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion<T>){
+        pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion<E>){
             if dst.home_block.size == 0{
                 debug!("Aborting copy of no data to buffer {:?}", dst.buffer);
                 return;
@@ -1506,7 +1506,7 @@ pub mod memory{
                 AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
             }
         }
-        pub fn copy_to_ram<O>(&self, src: &BufferRegion<T>, dst: *mut O, object_count: usize, ){
+        pub fn copy_to_ram<O>(&self, src: &BufferRegion<E>, dst: *mut O, object_count: usize, ){
             match &self.resources[src.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_to_ram(src, dst, object_count)
@@ -1515,7 +1515,7 @@ pub mod memory{
                 AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
             }
         }
-        pub fn copy_to_ram_slice<O>(&self, src: &BufferRegion<T>, dst: &mut [O]){
+        pub fn copy_to_ram_slice<O>(&self, src: &BufferRegion<E>, dst: &mut [O]){
             match &self.resources[src.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_to_ram_slice(src, dst)
@@ -1969,7 +1969,7 @@ pub mod memory{
     }
     
     
-    impl<E:IEngine> Allocation<E>{
+    impl<E:IVulkanInit> Allocation<E>{
         pub fn bind_buffer(&mut self, buffer: &mut Buffer<E>) -> Result<(), MemoryBlockError> {
             match self.blocks.try_get_region(buffer.mem_reqs.size, AlignmentType::Allocation(buffer.mem_reqs.alignment)){
                 Ok(block_index) => {
@@ -1981,7 +1981,7 @@ pub mod memory{
                     };
         
                     unsafe{
-                        self.engine.get_device().bind_buffer_memory(buffer.buffer, self.allocation, block.start_offset);
+                        self.init.get_device().bind_buffer_memory(buffer.buffer, self.allocation, block.start_offset);
                     }
         
                     let default_block = BufferMemoryBlock{ 
@@ -2009,7 +2009,7 @@ pub mod memory{
                     };
         
                     unsafe{
-                        self.engine.get_device().bind_image_memory(image.image, self.allocation, block.start_offset);
+                        self.init.get_device().bind_image_memory(image.image, self.allocation, block.start_offset);
                     }
                     
                     image.memory_info = Some((self.memory_type, self.c_info.memory_type_index, block));
@@ -2031,10 +2031,10 @@ pub mod memory{
     
             unsafe {
                 debug!("Copying {} objects of size {} from {:?} to allocation {:?} at {} targeting buffer {:?}", object_count, size_of::<O>(), src, target_allocation, target_offset, dst.buffer);
-                let dst = (self.engine.get_device().map_memory(target_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *mut u8).offset(target_offset as isize) as *mut O;
+                let dst = (self.init.get_device().map_memory(target_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *mut u8).offset(target_offset as isize) as *mut O;
                 std::ptr::copy_nonoverlapping(src, dst, object_count);
-                self.engine.get_device().flush_mapped_memory_ranges(&vec![mapped_range]).unwrap();
-                self.engine.get_device().unmap_memory(target_allocation);
+                self.init.get_device().flush_mapped_memory_ranges(&vec![mapped_range]).unwrap();
+                self.init.get_device().unmap_memory(target_allocation);
             }
         }
         pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion<E>){
@@ -2054,10 +2054,10 @@ pub mod memory{
     
             unsafe {
                 debug!("Copying {} objects of size {} to {:?} from allocation {:?} at {}", object_count, size_of::<O>(), dst, src_allocation, src.home_block.allocation_offset);
-                let src = (self.engine.get_device().map_memory(src_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *const u8).offset(src_offset as isize) as *const O;
-                self.engine.get_device().invalidate_mapped_memory_ranges(&vec![mapped_range]).unwrap();
+                let src = (self.init.get_device().map_memory(src_allocation, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap() as *const u8).offset(src_offset as isize) as *const O;
+                self.init.get_device().invalidate_mapped_memory_ranges(&vec![mapped_range]).unwrap();
                 std::ptr::copy_nonoverlapping(src, dst, object_count);
-                self.engine.get_device().unmap_memory(src_allocation);
+                self.init.get_device().unmap_memory(src_allocation);
             }
         }
         pub fn copy_to_ram_slice<O>(&self, src: &BufferRegion<E>, dst: &mut [O]){
@@ -2082,7 +2082,7 @@ pub mod memory{
         }
     }
     
-    impl<E:IEngine> Buffer<E>{
+    impl<E:IVulkanInit> Buffer<E>{
         pub fn get_region<O>(&mut self, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> Result<BufferRegion<E>, MemoryBlockError> {
 
             match &mut self.memory_info  {
@@ -2091,11 +2091,11 @@ pub mod memory{
             let alignment = match alignment {
                 AlignmentType::Free => {
                     if self.c_info.usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-                        AlignmentType::User(self.engine.get_property_store().pd_properties.limits.min_storage_buffer_offset_alignment)
+                        AlignmentType::User(self.init.get_property_store().pd_properties.limits.min_storage_buffer_offset_alignment)
                     }
                     else if self.c_info.usage.contains(vk::BufferUsageFlags::UNIFORM_BUFFER)
                     {
-                        AlignmentType::User(self.engine.get_property_store().pd_properties.limits.min_uniform_buffer_offset_alignment)
+                        AlignmentType::User(self.init.get_property_store().pd_properties.limits.min_uniform_buffer_offset_alignment)
                     }
                     else {
                         AlignmentType::Free
@@ -2116,7 +2116,7 @@ pub mod memory{
                         size: size as u64, 
                         user: Arc::new(true) };
                     Ok(BufferRegion{ 
-                        engine: self.engine.clone(), 
+                        init: self.init.clone(), 
                         buffer: self.buffer, 
                         memory_type: *t, 
                         memory_index: *ti, 
@@ -2137,13 +2137,13 @@ pub mod memory{
 
             }
     }
-    impl<E:IEngine> BufferRegion<E>{
+    impl<E:IVulkanInit> BufferRegion<E>{
         pub fn get_region<O>(&mut self, object_count: usize, alignment: AlignmentType, options: &[CreateBufferRegionOptions]) -> Result<BufferRegion<E>, MemoryBlockError> {
             let size = size_of::<O>() * object_count;
             let alignment = match alignment {
                 AlignmentType::Free => {
                     if self.buffer_usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-                        AlignmentType::User(self.engine.get_property_store().pd_properties.limits.min_storage_buffer_offset_alignment)
+                        AlignmentType::User(self.init.get_property_store().pd_properties.limits.min_storage_buffer_offset_alignment)
                     }
                     else {
                         AlignmentType::Free
@@ -2164,7 +2164,7 @@ pub mod memory{
                         size: size as u64, 
                         user: Arc::new(true) };
                     Ok(BufferRegion{ 
-                        engine: self.engine.clone(), 
+                        init: self.init.clone(), 
                         buffer: self.buffer, 
                         memory_type: self.memory_type, 
                         memory_index: self.memory_index, 
@@ -2186,7 +2186,7 @@ pub mod memory{
             }
             let copy = [self.get_copy_info(dst)];
             unsafe{
-                self.engine.get_device().cmd_copy_buffer(cmd, self.buffer, dst.buffer, &copy);
+                self.init.get_device().cmd_copy_buffer(cmd, self.buffer, dst.buffer, &copy);
                 debug!("Recorded copy of {} bytes from buffer {:?} at {} to buffer {:?} at {}", copy[0].size, self.buffer, copy[0].src_offset, dst.buffer, copy[0].dst_offset);
             }
 
@@ -2203,7 +2203,7 @@ pub mod memory{
             .image_extent(dst.target_extent)
             .build()];
             unsafe{
-                self.engine.get_device().cmd_copy_buffer_to_image(cmd, self.buffer, dst.image, dst.layout, &copy);
+                self.init.get_device().cmd_copy_buffer_to_image(cmd, self.buffer, dst.image, dst.layout, &copy);
             }
         }
         pub fn get_binding(&self) -> DescriptorWriteType {
@@ -2217,7 +2217,7 @@ pub mod memory{
         pub fn get_device_address(&self) -> u64 {
             let address_info = vk::BufferDeviceAddressInfo::builder()
             .buffer(self.buffer);
-            let address = unsafe{self.engine.get_device().get_buffer_device_address(&address_info)} + self.home_block.buffer_offset;
+            let address = unsafe{self.init.get_device().get_buffer_device_address(&address_info)} + self.home_block.buffer_offset;
             address
         }
         pub fn get_buffer(&self) -> vk::Buffer {
@@ -2263,7 +2263,7 @@ pub mod memory{
         }
     }
     
-    impl<E:IEngine> Image<E>{
+    impl<E:IVulkanInit> Image<E>{
         pub fn get_resources(&self, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources<E> {
             
             match &self.memory_info{
@@ -2303,7 +2303,7 @@ pub mod memory{
                 }
             }
             
-            let view = unsafe{self.engine.get_device().create_image_view(&c_info, None).expect("Could not create image view")};
+            let view = unsafe{self.init.get_device().create_image_view(&c_info, None).expect("Could not create image view")};
             debug!("Created image view {:?}", view);
 
             let target_extent = self.c_info.extent;
@@ -2315,7 +2315,7 @@ pub mod memory{
             .build();
 
             ImageResources{ 
-                engine: self.engine.clone(), 
+                init: self.init.clone(), 
                 image: self.image, 
                 layout, 
                 view, 
@@ -2340,7 +2340,7 @@ pub mod memory{
             self.c_info.extent
         }
     }
-    impl<E:IEngine> ImageResources<E>{
+    impl<E:IVulkanInit> ImageResources<E>{
         pub fn get_view(&self) -> vk::ImageView {
             self.view
         }
@@ -2383,23 +2383,23 @@ pub mod memory{
             (transition, old_layout)
         }   
         pub fn internal_transition(&mut self, new_layout: vk::ImageLayout) -> vk::ImageLayout {
-            let queue_data = self.engine.get_queue_store().get_queue(vk::QueueFlags::GRAPHICS).unwrap();
-            let pool = CommandPool::new(self.engine.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(queue_data.1).build());
+            let queue_data = self.init.get_queue_store().get_queue(vk::QueueFlags::GRAPHICS).unwrap();
+            let pool = CommandPool::new(self.init.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(queue_data.1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             unsafe{
                 let (transition, old_layout)= self.transition(vk::AccessFlags::NONE, vk::AccessFlags::NONE, new_layout);
                 let transition = [transition];
-                self.engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
-                self.engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &transition);
-                self.engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                self.init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                self.init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::ALL_COMMANDS, vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(), &[], &[], &transition);
+                self.init.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
                 
                 let cmd = [cmd];
                 let submit = [vk::SubmitInfo::builder()
                 .command_buffers(&cmd)
                 .build()];
-                let fence = Fence::new(self.engine.clone(), false);
-                self.engine.get_device().queue_submit(queue_data.0, &submit, fence.get_fence());
+                let fence = Fence::new(self.init.clone(), false);
+                self.init.get_device().queue_submit(queue_data.0, &submit, fence.get_fence());
                 fence.wait();
                 old_layout
             }
@@ -2412,7 +2412,7 @@ pub mod memory{
             .image_extent(self.target_extent)
             .build()];
             unsafe{
-                self.engine.get_device().cmd_copy_image_to_buffer(cmd, self.image, self.layout, dst.buffer, &copy);
+                self.init.get_device().cmd_copy_image_to_buffer(cmd, self.image, self.layout, dst.buffer, &copy);
             }
         }
         pub fn copy_to_image(&self, cmd: vk::CommandBuffer, dst: &ImageResources<E>){
@@ -2425,10 +2425,10 @@ pub mod memory{
             .build()];
 
             unsafe{
-                self.engine.get_device().cmd_copy_image(cmd, self.image, self.layout, dst.image, dst.layout, &copy);
+                self.init.get_device().cmd_copy_image(cmd, self.image, self.layout, dst.image, dst.layout, &copy);
             }
         }
-        pub fn new_from_image(engine: Arc<E>, image: vk::Image, layout: vk::ImageLayout, extent: vk::Extent3D, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources<E> {
+        pub fn new_from_image(init: Arc<E>, image: vk::Image, layout: vk::ImageLayout, extent: vk::Extent3D, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) -> ImageResources<E> {
             let mut layout = layout;
             let sizzle = vk::ComponentMapping::builder()
             .a(vk::ComponentSwizzle::A)
@@ -2464,7 +2464,7 @@ pub mod memory{
                 }
             }
             
-            let view = unsafe{engine.get_device().create_image_view(&c_info, None).expect("Could not create image view")};
+            let view = unsafe{init.get_device().create_image_view(&c_info, None).expect("Could not create image view")};
             debug!("Created image view {:?}", view);
 
             let target_extent = extent;
@@ -2476,7 +2476,7 @@ pub mod memory{
             .build();
 
             ImageResources{ 
-                engine, 
+                init, 
                 image, 
                 layout, 
                 view, 
@@ -2494,18 +2494,18 @@ pub mod memory{
     }
     
 
-    impl<E:IEngine> IDisposable for Allocation<E>{
+    impl<E:IVulkanInit> IDisposable for Allocation<E>{
             fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying allocation {:?}", self.allocation);
                 unsafe{
-                    self.engine.get_device().free_memory(self.allocation, None);
+                    self.init.get_device().free_memory(self.allocation, None);
                 }
             }
         }
     }
-    impl<E:IEngine> IDisposable for Buffer<E>{
+    impl<E:IVulkanInit> IDisposable for Buffer<E>{
             fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
@@ -2515,13 +2515,13 @@ pub mod memory{
                     None => todo!(),
                 }
                 unsafe{
-                    self.engine.get_device().destroy_buffer(self.buffer, None);
+                    self.init.get_device().destroy_buffer(self.buffer, None);
                 }
             }
             
         }
     }
-    impl<E:IEngine> IDisposable for Image<E>{
+    impl<E:IVulkanInit> IDisposable for Image<E>{
             fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
@@ -2531,23 +2531,23 @@ pub mod memory{
                     None => todo!(),
                 }
                 unsafe{
-                    self.engine.get_device().destroy_image(self.image, None);
+                    self.init.get_device().destroy_image(self.image, None);
                 }
             }
         }
     }
-    impl<E:IEngine> IDisposable for ImageResources<E>{
+    impl<E:IVulkanInit> IDisposable for ImageResources<E>{
             fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying image view {:?}", self.view);
                 unsafe{
-                    self.engine.get_device().destroy_image_view(self.view, None);
+                    self.init.get_device().destroy_image_view(self.view, None);
                 }
             }
         }
     }
-    impl<E:IEngine> IDisposable for Allocator<E>{
+    impl<E:IVulkanInit> IDisposable for Allocator<E>{
         fn dispose(&mut self) {
             let mut allocations = vec![];
 
@@ -2570,27 +2570,27 @@ pub mod memory{
     }
     
 
-    impl<E:IEngine> Drop for Allocator<E>{
+    impl<E:IVulkanInit> Drop for Allocator<E>{
         fn drop(&mut self) {
         self.dispose();
         }
     }
-    impl<E:IEngine> Drop for Allocation<E>{
+    impl<E:IVulkanInit> Drop for Allocation<E>{
         fn drop(&mut self) {
             self.dispose();
     }
     }
-    impl<E:IEngine> Drop for Buffer<E>{
+    impl<E:IVulkanInit> Drop for Buffer<E>{
             fn drop(&mut self) {
                 self.dispose();
         }
     }
-    impl<E:IEngine> Drop for Image<E>{
+    impl<E:IVulkanInit> Drop for Image<E>{
             fn drop(&mut self) {
                 self.dispose();
         }
     }
-    impl<E:IEngine> Drop for ImageResources<E>{
+    impl<E:IVulkanInit> Drop for ImageResources<E>{
         fn drop(&mut self) {
             self.dispose();
         }
@@ -2604,7 +2604,7 @@ pub mod descriptor{
     use ash::vk;
     use log::debug;
 
-    use crate::{init::IEngine, IDisposable};
+    use crate::{init::IVulkanInit, IDisposable};
 
     #[derive(Clone)]
     pub enum DescriptorWriteType{
@@ -2622,23 +2622,23 @@ pub mod descriptor{
     }
 
 
-    pub struct DescriptorSetOutline<E:IEngine>{
-        engine: Arc<E>,
+    pub struct DescriptorSetOutline<E:IVulkanInit>{
+        init: Arc<E>,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
         options: Vec<CreateDescriptorSetLayoutOptions>,
         layout: Option<vk::DescriptorSetLayout>,
         disposed: bool,
     }
 
-    pub struct DescriptorStack<E:IEngine>{
-        engine: Arc<E>,
+    pub struct DescriptorStack<E:IVulkanInit>{
+        init: Arc<E>,
         pool: Option<vk::DescriptorPool>,
         outlines: Vec<DescriptorSetOutline<E>>,
         sets: Vec<vk::DescriptorSet>,
         disposed: bool,
     }
-    pub struct DescriptorSet<E:IEngine>{
-        engine: Arc<E>,
+    pub struct DescriptorSet<E:IVulkanInit>{
+        init: Arc<E>,
         layout: vk::DescriptorSetLayout,
         set: vk::DescriptorSet,
         bindings: Vec<vk::DescriptorSetLayoutBinding>,
@@ -2666,10 +2666,10 @@ pub mod descriptor{
             info
         }
     }
-    impl<E:IEngine> DescriptorSetOutline<E>{
-        pub fn new(engine: Arc<E>, options: &[CreateDescriptorSetLayoutOptions]) -> DescriptorSetOutline<E> {
+    impl<E:IVulkanInit> DescriptorSetOutline<E>{
+        pub fn new(init: Arc<E>, options: &[CreateDescriptorSetLayoutOptions]) -> DescriptorSetOutline<E> {
             DescriptorSetOutline{ 
-                engine,
+                init,
                 bindings: vec![],
                 options: options.to_vec(),
                 layout: None,
@@ -2701,7 +2701,7 @@ pub mod descriptor{
                         c_info = option.apply_option(c_info);
                     }
         
-                    let layout = unsafe{self.engine.get_device().create_descriptor_set_layout(&c_info, None).expect("Could not create descriptor set layout")};
+                    let layout = unsafe{self.init.get_device().create_descriptor_set_layout(&c_info, None).expect("Could not create descriptor set layout")};
                     debug!("Created descriptor set layout {:?}", layout);
                     self.layout = Some(layout);
                     layout
@@ -2713,10 +2713,10 @@ pub mod descriptor{
     }
 
 
-    impl<E:IEngine> DescriptorStack<E> {
-        pub fn new(engine: Arc<E>) -> DescriptorStack<E> {
+    impl<E:IVulkanInit> DescriptorStack<E> {
+        pub fn new(init: Arc<E>) -> DescriptorStack<E> {
             DescriptorStack{ 
-                engine,
+                init,
                 pool: None,
                 outlines: vec![],
                 sets: vec![],
@@ -2739,14 +2739,14 @@ pub mod descriptor{
             let a_info = vk::DescriptorSetAllocateInfo::builder()
             .descriptor_pool(self.pool.expect("Allocating sets with no descriptor pool"))
             .set_layouts(&layouts);
-            let allocated_sets = unsafe{self.engine.get_device().allocate_descriptor_sets(&a_info).expect("Could not create descriptor sets")};
+            let allocated_sets = unsafe{self.init.get_device().allocate_descriptor_sets(&a_info).expect("Could not create descriptor sets")};
             debug!("Created sets {:?}", allocated_sets);
             self.sets = allocated_sets;
             
         }
         pub fn get_set(&mut self, set_index: usize) -> DescriptorSet<E> {
             DescriptorSet{ 
-                engine: self.engine.clone(),
+                init: self.init.clone(),
                 layout: self.outlines[set_index].get_layout(),
                 set: self.sets[set_index],
                 bindings: self.outlines[set_index].bindings.clone(),
@@ -2773,14 +2773,14 @@ pub mod descriptor{
                 c_info = option.apply_option(c_info);                
             }
             
-            let pool = unsafe{self.engine.get_device().create_descriptor_pool(&c_info, None).expect("Could not create descriptor pool")};
+            let pool = unsafe{self.init.get_device().create_descriptor_pool(&c_info, None).expect("Could not create descriptor pool")};
             debug!("Created pool {:?}", pool);
             self.pool = Some(pool);
             
         }
     }
 
-    impl<E:IEngine> DescriptorSet<E>{
+    impl<E:IVulkanInit> DescriptorSet<E>{
         pub fn get_layout(&self) -> vk::DescriptorSetLayout {
             self.layout
         }
@@ -2835,12 +2835,12 @@ pub mod descriptor{
                 }
             }
             unsafe{
-                self.engine.get_device().update_descriptor_sets(&set_writes, &[]);
+                self.init.get_device().update_descriptor_sets(&set_writes, &[]);
             }
         }
     }
 
-    impl<E:IEngine> IDisposable for DescriptorSetOutline<E>{
+    impl<E:IVulkanInit> IDisposable for DescriptorSetOutline<E>{
         fn dispose(&mut self) {
             match self.layout {
                 Some(l) => {
@@ -2848,7 +2848,7 @@ pub mod descriptor{
                         self.disposed = true;
                         debug!("Destroying descriptor set layout {:?}", l);
                         unsafe{
-                            self.engine.get_device().destroy_descriptor_set_layout(l, None);
+                            self.init.get_device().destroy_descriptor_set_layout(l, None);
                         }
                     }
                 },
@@ -2857,7 +2857,7 @@ pub mod descriptor{
             
     }
     }
-    impl<E:IEngine> IDisposable for DescriptorStack<E>{
+    impl<E:IVulkanInit> IDisposable for DescriptorStack<E>{
         fn dispose(&mut self) {
         if !self.disposed{
                 self.disposed = true;
@@ -2865,7 +2865,7 @@ pub mod descriptor{
                     Some(p) => {
                         debug!("Destroying descriptor pool {:?}", p);
                         unsafe{
-                            self.engine.get_device().destroy_descriptor_pool(p, None);
+                            self.init.get_device().destroy_descriptor_pool(p, None);
                         }
                     },
                     None => {}
@@ -2879,12 +2879,12 @@ pub mod descriptor{
     }
 
 
-    impl<E:IEngine> Drop for DescriptorSetOutline<E>{
+    impl<E:IVulkanInit> Drop for DescriptorSetOutline<E>{
         fn drop(&mut self) {
         self.dispose();
     }
     }
-    impl<E:IEngine> Drop for DescriptorStack<E>{
+    impl<E:IVulkanInit> Drop for DescriptorStack<E>{
         fn drop(&mut self) {
             self.dispose();
     }
@@ -2898,21 +2898,21 @@ pub mod command{
     use ash::vk;
     use log::debug;
 
-    use crate::{init::IEngine, IDisposable};
+    use crate::{init::IVulkanInit, IDisposable};
 
-    pub struct CommandPool<E:IEngine>{
-        engine: Arc<E>,
+    pub struct CommandPool<E:IVulkanInit>{
+        init: Arc<E>,
         command_pool: ash::vk::CommandPool,
         c_info: vk::CommandPoolCreateInfo,
         disposed: bool,
     }
-    impl<E:IEngine> CommandPool<E>{
-        pub fn new(engine: Arc<E>, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool<E> {
+    impl<E:IVulkanInit> CommandPool<E>{
+        pub fn new(init: Arc<E>, c_info: ash::vk::CommandPoolCreateInfo) -> CommandPool<E> {
     
             unsafe {
-                let command_pool = engine.get_device().create_command_pool(&c_info, None).unwrap();
+                let command_pool = init.get_device().create_command_pool(&c_info, None).unwrap();
                 CommandPool{
-                    engine,
+                    init,
                     command_pool,
                     c_info,
                     disposed: false,
@@ -2923,27 +2923,27 @@ pub mod command{
         pub fn get_command_buffers(&self, mut a_info: vk::CommandBufferAllocateInfo) -> Vec<vk::CommandBuffer> {
             a_info.command_pool = self.command_pool;
             unsafe {
-                self.engine.get_device().allocate_command_buffers(&a_info).unwrap()
+                self.init.get_device().allocate_command_buffers(&a_info).unwrap()
             }
         }
         pub fn reset(&self){
             unsafe {
-                self.engine.get_device().reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty()).unwrap();
+                self.init.get_device().reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty()).unwrap();
             }
         }
     }
-    impl<E:IEngine> IDisposable for CommandPool<E>{
+    impl<E:IVulkanInit> IDisposable for CommandPool<E>{
         fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying command pool {:?}", self.command_pool);
                 unsafe{
-                    self.engine.get_device().destroy_command_pool(self.command_pool, None);
+                    self.init.get_device().destroy_command_pool(self.command_pool, None);
                 }
             }
     }
     }
-    impl<E:IEngine> Drop for CommandPool<E> {
+    impl<E:IVulkanInit> Drop for CommandPool<E> {
         fn drop(&mut self) {
             self.dispose();
         }
@@ -2957,16 +2957,16 @@ pub mod sync{
     use ash::vk;
     use log::debug;
 
-    use crate::{init::IEngine, IDisposable};
+    use crate::{init::IVulkanInit, IDisposable};
 
-    pub struct Fence<E: IEngine>{
-        engine: Arc<E>,
+    pub struct Fence<E: IVulkanInit>{
+        init: Arc<E>,
         fence: ash::vk::Fence,
         disposed: bool,
     }
 
-    impl<E: IEngine> Fence<E>{
-        pub fn new(engine: Arc<E>, start_signaled: bool) -> Fence<E> {
+    impl<E: IVulkanInit> Fence<E>{
+        pub fn new(init: Arc<E>, start_signaled: bool) -> Fence<E> {
             let fence;
             let c_info;
             if start_signaled{
@@ -2977,76 +2977,76 @@ pub mod sync{
             }
 
             unsafe{
-                fence = engine.get_device().create_fence(&c_info, None).expect("Could not create fence");
+                fence = init.get_device().create_fence(&c_info, None).expect("Could not create fence");
             }
             debug!("Created fence {:?}", fence);
-            Fence{ engine, fence, disposed: false }
+            Fence{ init, fence, disposed: false }
             
         }
         pub fn wait(&self){
             unsafe{
                 debug!("Waiting on fence {:?}", self.fence);
                 let fence = [self.fence];
-                self.engine.get_device().wait_for_fences(&fence, true, u64::max_value()).expect("Could not wait on fence");
+                self.init.get_device().wait_for_fences(&fence, true, u64::max_value()).expect("Could not wait on fence");
             }
         }
         pub fn wait_reset(&self){
             self.wait();
             unsafe{
                 let fence = [self.fence];
-                self.engine.get_device().reset_fences(&fence).expect("Could not reset fence");
+                self.init.get_device().reset_fences(&fence).expect("Could not reset fence");
             }
         }
         pub fn get_fence(&self) -> vk::Fence{
             self.fence
         }
     }
-    impl<E: IEngine> IDisposable for Fence<E>{
+    impl<E: IVulkanInit> IDisposable for Fence<E>{
         fn dispose(&mut self) {
         if !self.disposed{
             self.disposed = true;
             debug!("Destroying fence {:?}", self.fence);
             unsafe{
-                self.engine.get_device().destroy_fence(self.fence, None);
+                self.init.get_device().destroy_fence(self.fence, None);
             }
         }
     }
     }
-    impl<E: IEngine> Drop for Fence<E>{
+    impl<E: IVulkanInit> Drop for Fence<E>{
         fn drop(&mut self) {
             self.dispose();
         }
     }
 
-    pub struct Semaphore<E:IEngine>{
-        engine: Arc<E>,
+    pub struct Semaphore<E:IVulkanInit>{
+        init: Arc<E>,
         pub semaphore: vk::Semaphore,
         disposed: bool,
     }
-    impl<E:IEngine> Semaphore<E>{
-        pub fn new(engine: Arc<E>) -> Semaphore<E> {
-            let device = engine.get_device();
+    impl<E:IVulkanInit> Semaphore<E>{
+        pub fn new(init: Arc<E>) -> Semaphore<E> {
+            let device = init.get_device();
             let c_info = vk::SemaphoreCreateInfo::builder().build();
             let semaphore = unsafe{device.create_semaphore(&c_info, None).expect("Could not create semaphore")};
             debug!("Created semaphore {:?}", semaphore);
 
             Semaphore{
-                engine,
+                init,
                 semaphore,
                 disposed: false,
             }
         }
     }
-    impl<E:IEngine> IDisposable for Semaphore<E>{
+    impl<E:IVulkanInit> IDisposable for Semaphore<E>{
         fn dispose(&mut self) {
         if !self.disposed{
             self.disposed = true;
             debug!("Destroying semaphore {:?}", self.semaphore);
-            unsafe{self.engine.get_device().destroy_semaphore(self.semaphore, None)};
+            unsafe{self.init.get_device().destroy_semaphore(self.semaphore, None)};
         }
     }
     }
-    impl<E:IEngine> Drop for Semaphore<E>{
+    impl<E:IVulkanInit> Drop for Semaphore<E>{
         fn drop(&mut self) {
             self.dispose();
     }
@@ -3068,7 +3068,7 @@ pub mod ray_tracing{
     use ash::vk;
     use log::debug;
 
-    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions, self}, command::CommandPool, init::{IEngine, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable, descriptor::DescriptorWriteType};
+    use crate::{memory::{BufferRegion, Allocator, AllocatorProfileStack, AlignmentType, CreateBufferOptions, AllocatorProfileType, BufferAllocatorProfile, AllocatorResourceType, AllocationAllocatorProfile, CreateAllocationOptions, self}, command::CommandPool, init::{IVulkanInit, PhysicalDevicePropertiesStore}, sync::Fence, IDisposable, descriptor::DescriptorWriteType};
 
     pub struct ShaderTable{
        pub ray_gen: Vec<vk::PipelineShaderStageCreateInfo>,
@@ -3076,8 +3076,8 @@ pub mod ray_tracing{
        pub misses: Vec<vk::PipelineShaderStageCreateInfo>,
         
     }
-    pub struct RayTacingPipeline<E:IEngine>{
-        engine: Arc<E>,
+    pub struct RayTacingPipeline<E:IVulkanInit>{
+        init: Arc<E>,
         ray_loader: ash::extensions::khr::RayTracingPipeline,
         pipeline_layout: vk::PipelineLayout,
         pipeline: vk::Pipeline,
@@ -3098,7 +3098,7 @@ pub mod ray_tracing{
         scratch: AllocatorProfileStack, 
         shader_table: AllocatorProfileStack,
     }
-    pub struct TriangleObjectGeometry<E:IEngine>{
+    pub struct TriangleObjectGeometry<E:IVulkanInit>{
         vertex_buffer: BufferRegion<E>,
         index_buffer: BufferRegion<E>,
         geometry_info: vk::AccelerationStructureGeometryKHR,
@@ -3110,8 +3110,8 @@ pub mod ray_tracing{
         vertex_address: u64,
         index_address: u64,
     }
-    pub struct Blas<E:IEngine>{
-        engine: Arc<E>,
+    pub struct Blas<E:IVulkanInit>{
+        init: Arc<E>,
         acc_loader: ash::extensions::khr::AccelerationStructure,
         profiles: RayTracingMemoryProfiles,
         blas_region: BufferRegion<E>,
@@ -3124,8 +3124,8 @@ pub mod ray_tracing{
         primative_count: u32,
         max_primative_count: u32
     }
-    pub struct Tlas<E:IEngine>{
-        engine: Arc<E>,
+    pub struct Tlas<E:IVulkanInit>{
+        init: Arc<E>,
         acc_loader: ash::extensions::khr::AccelerationStructure,
         profiles: RayTracingMemoryProfiles,
         tlas: [vk::AccelerationStructureKHR;1],
@@ -3138,11 +3138,11 @@ pub mod ray_tracing{
        pub array_of_pointers: bool,
     }
     
-    impl<E:IEngine> RayTacingPipeline<E>{
-        pub fn new(engine: Arc<E>, sbt: &ShaderTable, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]) -> RayTacingPipeline<E> {
-            let device = engine.get_device();
-            let ray_loader = ash::extensions::khr::RayTracingPipeline::new(&engine.get_instance(), &device);
-            let properties = engine.get_property_store();
+    impl<E:IVulkanInit> RayTacingPipeline<E>{
+        pub fn new(init: Arc<E>, sbt: &ShaderTable, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, set_layouts: &[vk::DescriptorSetLayout], push_constant_ranges: &[vk::PushConstantRange]) -> RayTacingPipeline<E> {
+            let device = init.get_device();
+            let ray_loader = ash::extensions::khr::RayTracingPipeline::new(&init.get_instance(), &device);
+            let properties = init.get_property_store();
             
             let mut stages = vec![];
             let mut groups = vec![];
@@ -3279,11 +3279,11 @@ pub mod ray_tracing{
             allocator.copy_from_ram_slice(&miss_handles, &miss_stage);
             allocator.copy_from_ram_slice(&hit_handles, &hit_stage);
             
-            let pool = CommandPool::new(engine.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let pool = CommandPool::new(init.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
-            let fence = Fence::new(engine.clone(), false);
+            let fence = Fence::new(init.clone(), false);
             unsafe{
                 device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
                 ray_gen_stage.copy_to_region(cmd, &ray_gen_region);
@@ -3297,7 +3297,7 @@ pub mod ray_tracing{
                 .command_buffers(&cmds)
                 .build()];
                 
-                device.queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                device.queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
                 fence.wait_reset();
             }           
             
@@ -3316,7 +3316,7 @@ pub mod ray_tracing{
             .size(hit_region.get_size())
             .stride(aligned_handle_size as u64)
             .build();
-            RayTacingPipeline{ engine,
+            RayTacingPipeline{ init,
                 ray_loader,
                 pipeline_layout: layout,
                 pipeline,
@@ -3334,28 +3334,28 @@ pub mod ray_tracing{
             self.pipeline_layout
         }
     }
-    impl<E:IEngine> IDisposable for RayTacingPipeline<E>{
+    impl<E:IVulkanInit> IDisposable for RayTacingPipeline<E>{
         fn dispose(&mut self) {
         if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying pipeline layout {:?}", self.pipeline_layout);
                 debug!("Destroying pipeline {:?}", self.pipeline);
                 unsafe{
-                    self.engine.get_device().destroy_pipeline_layout(self.pipeline_layout, None);
-                    self.engine.get_device().destroy_pipeline(self.pipeline, None);
+                    self.init.get_device().destroy_pipeline_layout(self.pipeline_layout, None);
+                    self.init.get_device().destroy_pipeline(self.pipeline, None);
                 }
             }
     }
     }
-    impl<E:IEngine> Drop for RayTacingPipeline<E>{
+    impl<E:IVulkanInit> Drop for RayTacingPipeline<E>{
         fn drop(&mut self) {
         self.dispose();
     }
     }
-    impl<E:IEngine> Tlas<E>{
-        pub fn new(engine: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, instance_outline: &TlasInstanceOutline) -> Tlas<E>{
-            let device = engine.get_device();
-            let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &device);
+    impl<E:IVulkanInit> Tlas<E>{
+        pub fn new(init: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, instance_outline: &TlasInstanceOutline) -> Tlas<E>{
+            let device = init.get_device();
+            let acc_loader = ash::extensions::khr::AccelerationStructure::new(&init.get_instance(), &device);
             let instance_data = vk::AccelerationStructureGeometryInstancesDataKHR::builder()
             .array_of_pointers(instance_outline.array_of_pointers)
             .data(instance_outline.instance_data)
@@ -3402,11 +3402,11 @@ pub mod ray_tracing{
                 .build()];
 ;
             let build_ranges = [build_ranges.as_slice()];
-            let pool = CommandPool::new(engine.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let pool = CommandPool::new(init.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
-            let fence = Fence::new(engine.clone(), false);
+            let fence = Fence::new(init.clone(), false);
             unsafe{
                 device.begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
                 acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &build_ranges);
@@ -3418,12 +3418,12 @@ pub mod ray_tracing{
                 .command_buffers(&cmds)
                 .build()];
                 
-                device.queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                device.queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
                 fence.wait_reset();
             }           
             
             Tlas{
-                engine,
+                init,
                 acc_loader,
                 profiles: profiles.clone(),
                 tlas: [acc_struct],
@@ -3439,30 +3439,30 @@ pub mod ray_tracing{
             ))
             
         }
-        pub fn prepare_instance_memory(engine: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, count: usize, default: Option<&[vk::AccelerationStructureInstanceKHR]>) -> BufferRegion<E> {
+        pub fn prepare_instance_memory(init: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, count: usize, default: Option<&[vk::AccelerationStructureInstanceKHR]>) -> BufferRegion<E> {
             let instance_buffer: BufferRegion<E>;
             match default{
                 Some(d) => {
                     instance_buffer = allocator.get_buffer_region_from_template(&profiles.instance_data, d, &AlignmentType::Free, &[]);
                     let staging_buffer = allocator.get_buffer_region_from_template(&profiles.staging, d, &AlignmentType::Free, &[]);
                     allocator.copy_from_ram_slice(d, &staging_buffer);                    
-                    let pool = CommandPool::new(engine.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+                    let pool = CommandPool::new(init.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
                     let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
                     unsafe{
-                        engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                        init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
                         staging_buffer.copy_to_region(cmd, &instance_buffer);
-                        engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                        init.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
                 
-                        let fence = Fence::new(engine.clone(), false);
+                        let fence = Fence::new(init.clone(), false);
                 
                         let cmds = [cmd];
                         let submit = [vk::SubmitInfo::builder()
                         .command_buffers(&cmds)
                         .build()];
                 
-                        engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                        init.get_device().queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
                         fence.wait_reset();
                     }           
                 },
@@ -3476,7 +3476,7 @@ pub mod ray_tracing{
             self.tlas[0]
         }
     }
-    impl<E:IEngine> IDisposable for Tlas<E>{
+    impl<E:IVulkanInit> IDisposable for Tlas<E>{
         fn dispose(&mut self) {
         if !self.disposed{
                 self.disposed = true;
@@ -3487,15 +3487,15 @@ pub mod ray_tracing{
             }
     }
     }
-    impl<E:IEngine> Drop for Tlas<E>{
+    impl<E:IVulkanInit> Drop for Tlas<E>{
         fn drop(&mut self) {
         self.dispose();
     }
     }
-    impl<E:IEngine> Blas<E>{
-        pub fn new(engine: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, objects: &[BlasObjectOutline]) -> Blas<E> {
-            let device = engine.get_device();
-            let acc_loader = ash::extensions::khr::AccelerationStructure::new(&engine.get_instance(), &device);
+    impl<E:IVulkanInit> Blas<E>{
+        pub fn new(init: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, objects: &[BlasObjectOutline]) -> Blas<E> {
+            let device = init.get_device();
+            let acc_loader = ash::extensions::khr::AccelerationStructure::new(&init.get_instance(), &device);
             let geometries:Vec<vk::AccelerationStructureGeometryKHR> = objects.iter().map(|outline| outline.geometry).collect();
             let primative_counts:Vec<u32> = objects.iter().map(|outline| outline.primative_count).collect();
             let max_primative_counts:Vec<u32> = objects.iter().map(|outline| outline.max_primative_count).collect();
@@ -3534,7 +3534,7 @@ pub mod ray_tracing{
                 .build()
             }).collect();
             let build_ranges = [build_ranges.as_slice()];
-            let pool = CommandPool::new(engine.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let pool = CommandPool::new(init.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
@@ -3543,21 +3543,21 @@ pub mod ray_tracing{
                 acc_loader.cmd_build_acceleration_structures(cmd, &build_info, &build_ranges);
                 device.end_command_buffer(cmd).expect("Could not end command buffer");
                 
-                let fence = Fence::new(engine.clone(), false);
+                let fence = Fence::new(init.clone(), false);
                 
                 let cmds = [cmd];
                 let submit = [vk::SubmitInfo::builder()
                 .command_buffers(&cmds)
                 .build()];
                 
-                device.queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                device.queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
                 fence.wait();
             }           
             
             let acc_struct_address_info = vk::AccelerationStructureDeviceAddressInfoKHR::builder()
             .acceleration_structure(acc_struct);
             let acc_struct_address = unsafe{acc_loader.get_acceleration_structure_device_address(&acc_struct_address_info)};
-            Blas{ engine,
+            Blas{ init,
                 acc_loader,
                 profiles: profiles.clone(),
                 blas_region,
@@ -3570,7 +3570,7 @@ pub mod ray_tracing{
             self.device_address
         }
     }
-    impl<E:IEngine> IDisposable for Blas<E>{
+    impl<E:IVulkanInit> IDisposable for Blas<E>{
         fn dispose(&mut self) {
         if !self.disposed{
                 self.disposed = true;
@@ -3581,13 +3581,13 @@ pub mod ray_tracing{
             }
         }
     }
-    impl<E:IEngine> Drop for Blas<E>{
+    impl<E:IVulkanInit> Drop for Blas<E>{
         fn drop(&mut self) {
             self.dispose();
     }
     }
-    impl<E:IEngine> TriangleObjectGeometry<E>{
-        pub fn new<V: Clone>(engine: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32]) -> TriangleObjectGeometry<E> {
+    impl<E:IVulkanInit> TriangleObjectGeometry<E>{
+        pub fn new<V: Clone>(init: Arc<E>, profiles: &RayTracingMemoryProfiles, allocator: &mut Allocator<E>, vertex_data: &[V], vertex_format: vk::Format, index_data: &[u32]) -> TriangleObjectGeometry<E> {
             let vb_stage = allocator.get_buffer_region_from_template(&profiles.staging, &vertex_data, &AlignmentType::Free, &[]);
             let ib_stage = allocator.get_buffer_region_from_template(&profiles.staging, &index_data, &AlignmentType::Free, &[]);
             allocator.copy_from_ram_slice(&vertex_data, &vb_stage);
@@ -3614,24 +3614,24 @@ pub mod ray_tracing{
             .flags(vk::GeometryFlagsKHR::OPAQUE)
             .build();
             
-            let pool = CommandPool::new(engine.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
+            let pool = CommandPool::new(init.clone(), vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build());
             let cmd = pool.get_command_buffers(vk::CommandBufferAllocateInfo::builder().command_buffer_count(1).build())[0];
             
             
             unsafe{
-                engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
+                init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).expect("Could not begin command buffer");
                 vb_stage.copy_to_region(cmd, &vertex_buffer);
                 ib_stage.copy_to_region(cmd, &index_buffer);
-                engine.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
+                init.get_device().end_command_buffer(cmd).expect("Could not end command buffer");
                 
-                let fence = Fence::new(engine.clone(), false);
+                let fence = Fence::new(init.clone(), false);
                 
                 let cmds = [cmd];
                 let submit = [vk::SubmitInfo::builder()
                 .command_buffers(&cmds)
                 .build()];
                 
-                engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
+                init.get_device().queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &submit, fence.get_fence()).expect("Could not submit queue");
                 fence.wait_reset();
             }           
             
@@ -3660,7 +3660,7 @@ pub mod ray_tracing{
         }
     }
     impl RayTracingMemoryProfiles{
-        pub fn new<E: IEngine>(engine: Arc<E>, allocator: &mut Allocator<E>) -> RayTracingMemoryProfiles {
+        pub fn new<E: IVulkanInit>(init: Arc<E>, allocator: &mut Allocator<E>) -> RayTracingMemoryProfiles {
             let stage_mem_options = [CreateAllocationOptions::MinimumSize(1024*1024*20)];
             let gpu_mem_options = [CreateAllocationOptions::MemoryAllocateFlags(vk::MemoryAllocateFlagsInfo::builder().flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS).build()), CreateAllocationOptions::MinimumSize(1024*1024*100)];
             let buffer_options = [CreateBufferOptions::SizeOverkillFactor(3), CreateBufferOptions::MinimumSize(1024*1024*10)];
@@ -3725,7 +3725,7 @@ pub mod ray_tracing{
             let instance_data_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, instance_index);
             let shader_table_profile = AllocatorProfileStack::TargetBuffer(gpu_mem_index, shader_table_index);
             
-            RayTracingMemoryProfiles{ properties: engine.get_property_store().clone(),
+            RayTracingMemoryProfiles{ properties: init.get_property_store().clone(),
                 staging: staging_profile,
                 vertex: vertex_profile,
                 index: index_profile,
@@ -3744,26 +3744,26 @@ pub mod shader{
     use ash::vk;
     use log::debug;
 
-    use crate::{init::IEngine, IDisposable};
+    use crate::{init::IVulkanInit, IDisposable};
 
-    pub struct Shader<E:IEngine>{
-        engine: Arc<E>,
+    pub struct Shader<E:IVulkanInit>{
+        init: Arc<E>,
         source: String,
         module: vk::ShaderModule,       
         disposed: bool
     }
-    impl<E:IEngine> Shader<E>{
-        pub fn new(engine: Arc<E>, source: String, kind: shaderc::ShaderKind, ep_name: &str, options: Option<&shaderc::CompileOptions>) -> Shader<E>{
+    impl<E:IVulkanInit> Shader<E>{
+        pub fn new(init: Arc<E>, source: String, kind: shaderc::ShaderKind, ep_name: &str, options: Option<&shaderc::CompileOptions>) -> Shader<E>{
             let module: vk::ShaderModule;
             let compiler = shaderc::Compiler::new().unwrap();
             let byte_source = compiler.compile_into_spirv(source.as_str(), kind, "shader.glsl", ep_name, options).unwrap();
             //debug!("Compiled shader {} to binary {:?}", source, byte_source.as_binary());
             unsafe{
                 let c_info = vk::ShaderModuleCreateInfo::builder().code(byte_source.as_binary()).build();
-                module = engine.get_device().create_shader_module(&c_info, None).unwrap();
+                module = init.get_device().create_shader_module(&c_info, None).unwrap();
             }
             Shader { 
-                engine,
+                init,
                 source,
                 module,
                 disposed: false,
@@ -3777,18 +3777,18 @@ pub mod shader{
             .build()
         }
     }
-    impl<E:IEngine> IDisposable for Shader<E>{
+    impl<E:IVulkanInit> IDisposable for Shader<E>{
         fn dispose(&mut self) {
         if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying shader module {:?}", self.module);
                 unsafe{
-                    self.engine.get_device().destroy_shader_module(self.module, None);
+                    self.init.get_device().destroy_shader_module(self.module, None);
                 }
             }
     }
     }
-    impl<E:IEngine> Drop for Shader<E>{
+    impl<E:IVulkanInit> Drop for Shader<E>{
         fn drop(&mut self) {
             self.dispose();
         }
@@ -3802,10 +3802,10 @@ pub mod compute{
     use ash::vk;
     use log::debug;
 
-    use crate::{init::IEngine, IDisposable};
+    use crate::{init::IVulkanInit, IDisposable};
 
-    pub struct ComputePipeline<E:IEngine>{
-        engine: Arc<E>,
+    pub struct ComputePipeline<E:IVulkanInit>{
+        init: Arc<E>,
         layout: vk::PipelineLayout,
         pipeline: vk::Pipeline,
         c_info: vk::ComputePipelineCreateInfo,
@@ -3813,9 +3813,9 @@ pub mod compute{
         descriptor_sets: Vec<vk::DescriptorSetLayout>,
         disposed: bool,
     }
-    impl<E:IEngine> ComputePipeline<E>{
-        pub fn new(engine: Arc<E>, push_ranges: &[vk::PushConstantRange], descriptor_sets: &[vk::DescriptorSetLayout], shader: vk::PipelineShaderStageCreateInfo) -> ComputePipeline<E>{
-            let device = engine.get_device();
+    impl<E:IVulkanInit> ComputePipeline<E>{
+        pub fn new(init: Arc<E>, push_ranges: &[vk::PushConstantRange], descriptor_sets: &[vk::DescriptorSetLayout], shader: vk::PipelineShaderStageCreateInfo) -> ComputePipeline<E>{
+            let device = init.get_device();
             let lc_info = vk::PipelineLayoutCreateInfo::builder()
             .push_constant_ranges(push_ranges)
             .set_layouts(descriptor_sets)
@@ -3835,7 +3835,7 @@ pub mod compute{
             debug!("Created compute pipeline {:?}", pipeline);
 
             ComputePipeline{ 
-                engine,
+                init,
                 layout,
                 pipeline,
                 c_info: c_infos[0],
@@ -3851,20 +3851,20 @@ pub mod compute{
             self.layout
         }
     }
-    impl<E:IEngine> IDisposable for ComputePipeline<E>{
+    impl<E:IVulkanInit> IDisposable for ComputePipeline<E>{
         fn dispose(&mut self) {
             if !self.disposed{
                 self.disposed = true;
                 debug!("Destroying compute pipeline layout {:?}", self.layout);
                 debug!("Destroying compute pipeline {:?}", self.pipeline);
                 unsafe{
-                    self.engine.get_device().destroy_pipeline(self.pipeline, None);
-                    self.engine.get_device().destroy_pipeline_layout(self.layout, None);
+                    self.init.get_device().destroy_pipeline(self.pipeline, None);
+                    self.init.get_device().destroy_pipeline_layout(self.layout, None);
                 }
             }
     }
     }
-    impl<E:IEngine> Drop for ComputePipeline<E>{
+    impl<E:IVulkanInit> Drop for ComputePipeline<E>{
         fn drop(&mut self) {
             self.dispose();
         }
@@ -3879,21 +3879,21 @@ mod tests{
 
     use ash::vk::{self, Packed24_8};
 
-    use crate::{init::{self, Engine, IEngine, EngineInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DescriptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline, ShaderTable, RayTacingPipeline} };
+    use crate::{init::{self, Initalizer, IVulkanInit, VulkanInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DescriptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline, ShaderTable, RayTacingPipeline} };
 
     #[cfg(debug_assertions)]
-    fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
+    fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>){
         println!("Validation Layers Active");
         let validation_features = [
                     vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
                     vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
                     vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
                 ];
-        options.push(init::EngineInitOptions::UseValidation(Some(validation_features.to_vec()), None));
-        options.push(EngineInitOptions::UseDebugUtils);
+        options.push(init::VulkanInitOptions::UseValidation(Some(validation_features.to_vec()), None));
+        options.push(VulkanInitOptions::UseDebugUtils);
     }
     #[cfg(not(debug_assertions))]
-    fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>){
+    fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>){
         println!("Validation Layers Inactive");
     }
 
@@ -3905,17 +3905,17 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (engine, _) = Engine::init(&mut options, None);
+        let (init, _) = Initalizer::init(&mut options, None);
 
-        let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
-        let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+        let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
+        let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
         const WIDTH:u32 = 1024;
         const HEIGHT:u32 = 1024;
         let extent = vk::Extent3D::builder().width(WIDTH).height(HEIGHT).depth(1).build();
 
         let data:Vec<u32> = vec![u32::from_be_bytes([255,0,0,0]);(WIDTH*HEIGHT) as usize];
 
-        let allocator = Allocator::new(engine.clone());
+        let allocator = Allocator::new(init.clone());
 
         let mut cpu_mem = allocator.create_allocation::<u32>(vk::MemoryPropertyFlags::HOST_COHERENT, data.len() * 2, &mut []);
         let mut cpu_buffer = allocator.create_buffer::<u32>(vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, data.len()*2, &[]);
@@ -3939,27 +3939,27 @@ mod tests{
         cpu_mem.copy_from_ram_slice(&data, &staging);
 
         unsafe{
-            engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
+            init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
             let (to_transfer_dst, _) = processing.transition(vk::AccessFlags::NONE, vk::AccessFlags::TRANSFER_WRITE, vk::ImageLayout::TRANSFER_DST_OPTIMAL); 
             
-            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TOP_OF_PIPE,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[], &[], &[to_transfer_dst]);
+            init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TOP_OF_PIPE,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[], &[], &[to_transfer_dst]);
             
             staging.copy_to_image(cmd, &processing);
             
             //let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::TRANSFER_WRITE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
             let (to_transfer_src, _) = processing.transition(vk::AccessFlags::TRANSFER_WRITE, vk::AccessFlags::TRANSFER_READ, vk::ImageLayout::TRANSFER_SRC_OPTIMAL); 
-            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[], &[], &[to_transfer_src]);
+            init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[], &[], &[to_transfer_src]);
             
             processing.copy_to_buffer(cmd, &target);
             
-            engine.get_device().end_command_buffer(cmd).unwrap();
+            init.get_device().end_command_buffer(cmd).unwrap();
             
             
             
             let cmds = [cmd];
             let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
-            engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
-            engine.get_device().queue_wait_idle(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
+            init.get_device().queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
+            init.get_device().queue_wait_idle(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
         }
 
         let mut tgt:Vec<u32> = vec![0;(WIDTH*HEIGHT) as usize];
@@ -3969,7 +3969,7 @@ mod tests{
         assert!(tgt.last().unwrap() == data.last().unwrap());
 
         unsafe{
-            engine.get_device().destroy_command_pool(pool, None);
+            init.get_device().destroy_command_pool(pool, None);
         }
     }
 
@@ -3982,11 +3982,11 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (engine, _) = Engine::init(&mut options, None);
+        let (init, _) = Initalizer::init(&mut options, None);
 
-        let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
-        let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
-        let allocator = Allocator::new(engine.clone());
+        let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
+        let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+        let allocator = Allocator::new(init.clone());
 
         let data:Vec<u64> = (0..100).collect();
 
@@ -4004,23 +4004,23 @@ mod tests{
         cpu_mem.copy_from_ram_slice(&data, &staging);
 
         unsafe{
-            engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
+            init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
             staging.copy_to_region(cmd, &processing);
             let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::MEMORY_WRITE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
-            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
             processing.copy_to_region(cmd, &target);
-            engine.get_device().end_command_buffer(cmd).unwrap();
+            init.get_device().end_command_buffer(cmd).unwrap();
             let cmds = [cmd];
             let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
-            engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
-            engine.get_device().queue_wait_idle(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
+            init.get_device().queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
+            init.get_device().queue_wait_idle(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
         }
 
         let mut tgt:[u64;100] = [0;100];
 
         cpu_mem.copy_to_ram_slice(&target, &mut tgt);
         unsafe{
-            engine.get_device().destroy_command_pool(pool, None);
+            init.get_device().destroy_command_pool(pool, None);
         }
 
         assert!(tgt.last().unwrap() == data.last().unwrap());
@@ -4037,17 +4037,17 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (engine, _) = Engine::init(&mut options, None);
+        let (init, _) = Initalizer::init(&mut options, None);
 
-        let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
-        let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+        let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
+        let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
 
         let data:Vec<u64> = (0..100).collect();
 
         let mem_options = vec![CreateAllocationOptions::MinimumSize(1024*1024*100)];
         let buffer_options = vec![CreateBufferOptions::MinimumSize(1024*1024)];
 
-        let mut allocator = memory::Allocator::new(engine.clone());
+        let mut allocator = memory::Allocator::new(init.clone());
         let cpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &mem_options)));
         let gpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &mem_options)));
         let buffer_profile = allocator.add_profile(memory::AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options)));
@@ -4061,16 +4061,16 @@ mod tests{
         allocator.copy_from_ram_slice(&data, &staging);
 
         unsafe{
-            engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
+            init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
             staging.copy_to_region(cmd, &processing);
             let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::MEMORY_WRITE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
-            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
             processing.copy_to_region(cmd, &target);
-            engine.get_device().end_command_buffer(cmd).unwrap();
+            init.get_device().end_command_buffer(cmd).unwrap();
             let cmds = [cmd];
             let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
-            engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
-            engine.get_device().queue_wait_idle(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
+            init.get_device().queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0, &[submit], vk::Fence::null()).unwrap();
+            init.get_device().queue_wait_idle(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().0).unwrap();
         }
 
         let mut tgt:[u64;100] = [0;100];
@@ -4078,7 +4078,7 @@ mod tests{
         allocator.copy_to_ram_slice(&target, &mut tgt);
         allocator.dispose();
         unsafe{
-            engine.get_device().destroy_command_pool(pool, None);
+            init.get_device().destroy_command_pool(pool, None);
         }
 
 
@@ -4095,17 +4095,17 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (engine, _) = Engine::init(&mut options, None);
+        let (init, _) = Initalizer::init(&mut options, None);
 
-        let pool = unsafe{engine.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build(), None).expect("Could not create command pool")};
-        let cmd = unsafe{engine.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
+        let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build(), None).expect("Could not create command pool")};
+        let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
 
         let data:Vec<u32> = (0..100).collect();
 
         let mem_options = vec![CreateAllocationOptions::MinimumSize(1024*1024*100)];
         let buffer_options = vec![CreateBufferOptions::MinimumSize(1024*1024)];
 
-        let mut allocator = memory::Allocator::new(engine.clone());
+        let mut allocator = memory::Allocator::new(init.clone());
         let cpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::HOST_COHERENT, &mem_options)));
         let gpu_mem_profile = allocator.add_profile(memory::AllocatorProfileType::Allocation(AllocationAllocatorProfile::new(vk::MemoryPropertyFlags::DEVICE_LOCAL, &mem_options)));
         let buffer_profile = allocator.add_profile(memory::AllocatorProfileType::Buffer(BufferAllocatorProfile::new(vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, &buffer_options)));
@@ -4116,16 +4116,16 @@ mod tests{
         let target = allocator.get_buffer_region::<u32>(&cpu_stack, data.len(), &AlignmentType::Free, &[]);
         let processing = allocator.get_buffer_region::<u32>(&gpu_stack, data.len(), &AlignmentType::Free, &[]);
         let binding = processing.get_binding();
-        let mut outline = DescriptorSetOutline::new(engine.clone(), &[]);
+        let mut outline = DescriptorSetOutline::new(init.clone(), &[]);
         let b_index = outline.add_binding(vk::DescriptorType::STORAGE_BUFFER, 1, vk::ShaderStageFlags::COMPUTE);
-        let mut stack = DescriptorStack::new(engine.clone());
+        let mut stack = DescriptorStack::new(init.clone());
         let proccessing_set = stack.add_outline(outline);
         stack.create_sets(&[]);
         let mut set = stack.get_set(proccessing_set);
         set.write(&mut [(b_index, 0, binding)]);
     
         
-        let shader = Shader::new(engine.clone(), String::from(r#"
+        let shader = Shader::new(init.clone(), String::from(r#"
         #version 460
         #extension GL_KHR_vulkan_glsl : enable
 
@@ -4140,27 +4140,27 @@ mod tests{
         }"#), shaderc::ShaderKind::Compute, "main", None);
 
         
-        let mut compute = crate::compute::ComputePipeline::new(engine.clone(), &[], &[set.get_layout()], shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
+        let mut compute = crate::compute::ComputePipeline::new(init.clone(), &[], &[set.get_layout()], shader.get_stage(vk::ShaderStageFlags::COMPUTE, &std::ffi::CString::new("main").unwrap()));
         
         
         allocator.copy_from_ram_slice(&data, &staging);
 
         unsafe{
-            engine.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
+            init.get_device().begin_command_buffer(cmd, &vk::CommandBufferBeginInfo::builder().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT).build()).unwrap();
             staging.copy_to_region(cmd, &processing);
             let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::MEMORY_WRITE).dst_access_mask(vk::AccessFlags::SHADER_WRITE).build();
-            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::COMPUTE_SHADER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
-            engine.get_device().cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_pipeline());
-            engine.get_device().cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_layout(), 0, &[set.get_set()], &[]);
-            engine.get_device().cmd_dispatch(cmd, data.len() as u32, 1, 1);
+            init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::TRANSFER,  vk::PipelineStageFlags::COMPUTE_SHADER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            init.get_device().cmd_bind_pipeline(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_pipeline());
+            init.get_device().cmd_bind_descriptor_sets(cmd, vk::PipelineBindPoint::COMPUTE, compute.get_layout(), 0, &[set.get_set()], &[]);
+            init.get_device().cmd_dispatch(cmd, data.len() as u32, 1, 1);
             let mem_barrier = vk::MemoryBarrier::builder().src_access_mask(vk::AccessFlags::SHADER_WRITE).dst_access_mask(vk::AccessFlags::MEMORY_READ).build();
-            engine.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::COMPUTE_SHADER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
+            init.get_device().cmd_pipeline_barrier(cmd, vk::PipelineStageFlags::COMPUTE_SHADER,  vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[mem_barrier], &[], &[]);
             processing.copy_to_region(cmd, &target);
-            engine.get_device().end_command_buffer(cmd).unwrap();
+            init.get_device().end_command_buffer(cmd).unwrap();
             let cmds = [cmd];
             let submit = vk::SubmitInfo::builder().command_buffers(&cmds).build();
-            engine.get_device().queue_submit(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &[submit], vk::Fence::null()).unwrap();
-            engine.get_device().queue_wait_idle(engine.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0).unwrap();
+            init.get_device().queue_submit(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0, &[submit], vk::Fence::null()).unwrap();
+            init.get_device().queue_wait_idle(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().0).unwrap();
         }
 
         let mut tgt:[u32;100] = [0;100];
@@ -4170,7 +4170,7 @@ mod tests{
         compute.dispose();
         stack.dispose();
         unsafe{
-            engine.get_device().destroy_command_pool(pool, None);
+            init.get_device().destroy_command_pool(pool, None);
         }
 
 
@@ -4204,15 +4204,15 @@ mod tests{
         let def_host = ash::extensions::khr::DeferredHostOperations::name().as_ptr();
         
         let mut options = vec![
-            EngineInitOptions::DeviceFeatures12(features12.build()),
-            EngineInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
-            EngineInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
-            EngineInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
+            VulkanInitOptions::DeviceFeatures12(features12.build()),
+            VulkanInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
+            VulkanInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
+            VulkanInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
         ];
         get_vulkan_validate(&mut options);
-        let (engine, _) = Engine::init(&mut options, None);
-        let mut allocator = Allocator::new(engine.clone());
-        let ray_tracing_profiles = RayTracingMemoryProfiles::new(engine.clone(), &mut allocator);
+        let (init, _) = Initalizer::init(&mut options, None);
+        let mut allocator = Allocator::new(init.clone());
+        let ray_tracing_profiles = RayTracingMemoryProfiles::new(init.clone(), &mut allocator);
         let v_data = [
             Vertex{pos: [ 0.0, 1.0, 0.0]}, //top
             Vertex{pos: [ -1.0, -1.0,0.5]},  //left
@@ -4227,7 +4227,7 @@ mod tests{
     
         let mut options = shaderc::CompileOptions::new().unwrap();
         options.set_target_spirv(shaderc::SpirvVersion::V1_6);
-        let ray_gen = Shader::new(engine.clone(), String::from(r#"
+        let ray_gen = Shader::new(init.clone(), String::from(r#"
         #version 460
         #extension GL_EXT_ray_tracing : require
         #extension GL_KHR_vulkan_glsl : enable
@@ -4273,7 +4273,7 @@ mod tests{
             }
 
         "#), shaderc::ShaderKind::RayGeneration, "main", Some(&options));
-        let closest_hit = Shader::new(engine.clone(), String::from(r#"
+        let closest_hit = Shader::new(init.clone(), String::from(r#"
         #version 460
         #extension GL_EXT_ray_tracing : require
         #extension GL_EXT_nonuniform_qualifier : enable
@@ -4292,7 +4292,7 @@ mod tests{
             hitdata.hit = true;
             hitdata.hitValue = vec3(0.2, 0.5, 0.5);
         }"#), shaderc::ShaderKind::ClosestHit, "main", Some(&options));
-        let miss = Shader::new(engine.clone(), String::from(r#"
+        let miss = Shader::new(init.clone(), String::from(r#"
         #version 460
         #extension GL_EXT_ray_tracing : require
 
@@ -4314,11 +4314,11 @@ mod tests{
             ray_gen: vec![ray_gen.get_stage(vk::ShaderStageFlags::RAYGEN_KHR, &main)],
             hit_groups: vec![(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP, (Some(closest_hit.get_stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR, &main)), None, None))],
             misses: vec![] };
-        let ray_pipeline = RayTacingPipeline::new(engine.clone(), &sbt, &ray_tracing_profiles, &mut allocator, &[], &[]);
+        let ray_pipeline = RayTacingPipeline::new(init.clone(), &sbt, &ray_tracing_profiles, &mut allocator, &[], &[]);
         
-        let object_data = TriangleObjectGeometry::new(engine.clone(), &ray_tracing_profiles, &mut allocator, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data);
+        let object_data = TriangleObjectGeometry::new(init.clone(), &ray_tracing_profiles, &mut allocator, &v_data, vk::Format::R32G32B32_SFLOAT, &i_data);
         let blas_outlines = [object_data.get_blas_outline(1)];
-        let blas = Blas::new(engine.clone(), &ray_tracing_profiles, &mut allocator, &blas_outlines);
+        let blas = Blas::new(init.clone(), &ray_tracing_profiles, &mut allocator, &blas_outlines);
         let transform = vk::TransformMatrixKHR{ matrix: 
             [1.0,0.0,0.0,0.0,
              0.0,1.0,0.0,0.0,
@@ -4328,15 +4328,15 @@ mod tests{
             instance_custom_index_and_mask: Packed24_8::new(0, 0xff), 
             instance_shader_binding_table_record_offset_and_flags: Packed24_8::new(0, 0x00000002 as u8), 
             acceleration_structure_reference: blas.get_blas_ref()}];
-        let instance_buffer = Tlas::prepare_instance_memory(engine.clone(), &ray_tracing_profiles, &mut allocator, 100, Some(&default_instance));
+        let instance_buffer = Tlas::prepare_instance_memory(init.clone(), &ray_tracing_profiles, &mut allocator, 100, Some(&default_instance));
         let instance_data = TlasInstanceOutline{ 
             instance_data: vk::DeviceOrHostAddressConstKHR{device_address: instance_buffer.get_device_address()},
             instance_count: 100,
             instance_count_overkill: 1,
             array_of_pointers: false };
-        let _tlas = Tlas::new(engine.clone(), &ray_tracing_profiles, &mut allocator, &instance_data);
+        let _tlas = Tlas::new(init.clone(), &ray_tracing_profiles, &mut allocator, &instance_data);
         
-        println!("Won't lose device {:?}", engine.get_device().handle());
+        println!("Won't lose device {:?}", init.get_device().handle());
     }
 
 }

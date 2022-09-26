@@ -1,6 +1,6 @@
 use ash::vk;
 use qvk::{
-    init::{self, IEngine, SwapchainStore, WindowedEngine},
+    init::{self, IVulkanInit, SwapchainStore, WindowedInitalizer},
     memory::{
         AlignmentType, AllocationAllocatorProfile, Allocator, AllocatorProfileStack,
         AllocatorProfileType, BufferAllocatorProfile, CreateAllocationOptions, CreateBufferOptions,
@@ -10,20 +10,20 @@ use qvk::{
 };
 
 #[cfg(debug_assertions)]
-fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
+fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>) {
     println!("Validation Layers Active");
     let validation_features = [
         vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
         //vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
     ];
-    options.push(init::EngineInitOptions::UseValidation(
+    options.push(init::VulkanInitOptions::UseValidation(
         Some(validation_features.to_vec()),
         None,
     ))
 }
 #[cfg(not(debug_assertions))]
-fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
+fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>) {
     println!("Validation Layers Inactive");
 }
 
@@ -36,11 +36,11 @@ fn main() {
             Err(_) => {}
         };
         let mut engine_options = vec![
-            init::EngineInitOptions::UseDebugUtils,
-            init::EngineInitOptions::DeviceExtensions(vec![]),
+            init::VulkanInitOptions::UseDebugUtils,
+            init::VulkanInitOptions::DeviceExtensions(vec![]),
         ];
         get_vulkan_validate(&mut engine_options);
-        (event_loop, engine) = WindowedEngine::init(&mut engine_options);
+        (event_loop, engine) = WindowedInitalizer::init(&mut engine_options);
     }
 
     let mut swapchain = SwapchainStore::new(

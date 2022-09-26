@@ -2,20 +2,20 @@ use ash::vk;
 use qvk::init;
 
 #[cfg(debug_assertions)]
-fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
+fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>) {
     println!("Validation Layers Active");
     let validation_features = [
         vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
         vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
     ];
-    options.push(init::EngineInitOptions::UseValidation(
+    options.push(init::VulkanInitOptions::UseValidation(
         Some(validation_features.to_vec()),
         None,
     ))
 }
 #[cfg(not(debug_assertions))]
-fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
+fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>) {
     println!("Validation Layers Inactive");
 }
 
@@ -43,14 +43,14 @@ fn main() {
             .buffer_device_address(true)
             .build();
         let mut engine_options = vec![
-            init::EngineInitOptions::UseDebugUtils,
-            init::EngineInitOptions::DeviceExtensions(device_extension_names_raw.to_vec()),
-            init::EngineInitOptions::DeviceFeatures12(features12),
-            init::EngineInitOptions::DeviceFeaturesRayTracing(ray_features),
-            init::EngineInitOptions::DeviceFeaturesAccelerationStructure(acc_features),
+            init::VulkanInitOptions::UseDebugUtils,
+            init::VulkanInitOptions::DeviceExtensions(device_extension_names_raw.to_vec()),
+            init::VulkanInitOptions::DeviceFeatures12(features12),
+            init::VulkanInitOptions::DeviceFeaturesRayTracing(ray_features),
+            init::VulkanInitOptions::DeviceFeaturesAccelerationStructure(acc_features),
         ];
         get_vulkan_validate(&mut engine_options);
-        (event_loop, engine) = init::WindowedEngine::init(&mut engine_options);
+        (event_loop, engine) = init::WindowedInitalizer::init(&mut engine_options);
     }
 
     let mut swapchain = init::SwapchainStore::new(

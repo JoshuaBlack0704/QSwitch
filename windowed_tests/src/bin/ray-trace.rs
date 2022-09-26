@@ -6,8 +6,8 @@ use ash::vk::{self, Packed24_8};
 use glam::{Mat4, UVec3, Vec3};
 use qvk::command::CommandPool;
 use qvk::descriptor::{DescriptorSetOutline, DescriptorStack};
-use qvk::init::{self, IEngine, WindowedEngine};
-use qvk::init::{EngineInitOptions, SwapchainStore};
+use qvk::init::{self, IVulkanInit, WindowedInitalizer};
+use qvk::init::{SwapchainStore, VulkanInitOptions};
 use qvk::memory::{
     AlignmentType, Allocator, AllocatorProfileStack, AllocatorProfileType, GeneralMemoryProfiles,
     ImageAllocatorProfile,
@@ -21,21 +21,21 @@ use qvk::sync::{Fence, Semaphore};
 use qvk::IDisposable;
 use time::Instant;
 #[cfg(debug_assertions)]
-fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
+fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>) {
     println!("Validation Layers Active");
     let validation_features = [
         vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
         vk::ValidationFeatureEnableEXT::GPU_ASSISTED,
         vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
     ];
-    options.push(init::EngineInitOptions::UseValidation(
+    options.push(init::VulkanInitOptions::UseValidation(
         Some(validation_features.to_vec()),
         None,
     ));
-    options.push(EngineInitOptions::UseDebugUtils);
+    options.push(VulkanInitOptions::UseDebugUtils);
 }
 #[cfg(not(debug_assertions))]
-fn get_vulkan_validate(options: &mut Vec<init::EngineInitOptions>) {
+fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>) {
     println!("Validation Layers Inactive");
 }
 
@@ -170,13 +170,13 @@ impl ShapeBuilder {
         indecies
     }
 }
-pub struct ShaderStore<E: IEngine> {
+pub struct ShaderStore<E: IVulkanInit> {
     standard_ray_gen: Shader<E>,
     standard_closest_hit: Shader<E>,
     standard_miss: Shader<E>,
     shadow_miss: Shader<E>,
 }
-impl<E: IEngine> ShaderStore<E> {
+impl<E: IVulkanInit> ShaderStore<E> {
     pub fn new(engine: Arc<E>) -> ShaderStore<E> {
         let mut options = shaderc::CompileOptions::new().unwrap();
         options.set_target_spirv(shaderc::SpirvVersion::V1_6);
@@ -593,13 +593,13 @@ fn main() {
         let def_host = ash::extensions::khr::DeferredHostOperations::name().as_ptr();
 
         let mut options = vec![
-            EngineInitOptions::DeviceFeatures12(features12.build()),
-            EngineInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
-            EngineInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
-            EngineInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
+            VulkanInitOptions::DeviceFeatures12(features12.build()),
+            VulkanInitOptions::DeviceFeaturesAccelerationStructure(acc_features.build()),
+            VulkanInitOptions::DeviceFeaturesRayTracing(ray_tracing_features.build()),
+            VulkanInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
         ];
         get_vulkan_validate(&mut options);
-        (event_loop, engine) = WindowedEngine::init(&mut options);
+        (event_loop, engine) = WindowedInitalizer::init(&mut options);
     }
 
     let mut swapchain = SwapchainStore::new(
