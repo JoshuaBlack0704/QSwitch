@@ -7,6 +7,7 @@ edition = "2021"
 qvk = {path = "../qvk"}
 ash = {version = "0.37.0", features = ["linked", "debug"]}
 flume = "0.10.14"
+crossbeam = "0.8.2"
 winit = "0.26.0"
 log = {version = "0.4.17", features=["release_max_level_off"]}
 ash-window = "0.11.0"

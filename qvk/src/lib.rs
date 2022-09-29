@@ -984,10 +984,10 @@ pub mod memory{
         extent: vk::Extent3D,
         options: Vec<CreateImageOptions>,
     }
-    pub struct Allocator<T: IVulkanInit>{
-        init: Arc<T>,
+    pub struct Allocator<I: IVulkanInit>{
+        init: Arc<I>,
         settings: Vec<AllocatorProfileType>,
-        resources: Vec<AllocatorResourceType<T>>,
+        resources: Vec<AllocatorResourceType<I>>,
         profile_mapping: HashMap<AllocatorProfileStack, (Vec<usize>, Vec<usize>, Vec<usize>)>,
         channel: (flume::Sender<AllocatorProfileStack>, flume::Receiver<AllocatorProfileStack>),
     }
@@ -1004,7 +1004,7 @@ pub mod memory{
     
 
     impl GeneralMemoryProfiles{
-        pub fn new<E:IVulkanInit>(allocator: &mut Allocator<E>, min_buffer_size: u64, min_allocation_size: u64) -> GeneralMemoryProfiles {
+        pub fn new<I:IVulkanInit>(allocator: &mut Allocator<I>, min_buffer_size: u64, min_allocation_size: u64) -> GeneralMemoryProfiles {
             let buffer_options = [CreateBufferOptions::MinimumSize(min_buffer_size)];
             let allocation_options = [CreateAllocationOptions::MinimumSize(min_allocation_size)];
             
@@ -1034,8 +1034,8 @@ pub mod memory{
                 host_uniform }
         }
     }
-    impl<E: IVulkanInit> Allocator<E>{
-        pub fn new(init: Arc<E>) -> Allocator<E> {
+    impl<I: IVulkanInit> Allocator<I>{
+        pub fn new(init: Arc<I>) -> Allocator<I> {
             let device = init.get_device();
             let mut properties = init.get_property_store();
             Allocator{ 
@@ -1046,7 +1046,7 @@ pub mod memory{
                 profile_mapping: HashMap::new(),
             }
         }
-        pub fn get_buffer_region_from_slice<O: Clone>(&mut self, stage_profile: &AllocatorProfileStack, dst_profile: &AllocatorProfileStack, data: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<E> {
+        pub fn get_buffer_region_from_slice<O: Clone>(&mut self, stage_profile: &AllocatorProfileStack, dst_profile: &AllocatorProfileStack, data: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<I> {
             let queue_data = self.init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap();
             let stage = self.get_buffer_region_from_template(stage_profile, data, &AlignmentType::Free, &[]);
             let dst = self.get_buffer_region_from_template(dst_profile, data, alignment, options);
@@ -1110,7 +1110,7 @@ pub mod memory{
                 },
             }
         }
-        pub fn create_allocation<O>(&self, properties: vk::MemoryPropertyFlags, object_count: usize, options: &mut [CreateAllocationOptions]) -> Allocation<E> {
+        pub fn create_allocation<O>(&self, properties: vk::MemoryPropertyFlags, object_count: usize, options: &mut [CreateAllocationOptions]) -> Allocation<I> {
             let type_index = self.init.get_property_store().get_memory_index(properties);
             let size = size_of::<O>() * object_count;
 
@@ -1140,7 +1140,7 @@ pub mod memory{
                 }
         
         }
-        pub fn create_buffer<O>(&self, usage: vk::BufferUsageFlags, object_count: usize, options: &[CreateBufferOptions]) -> Buffer<E> {
+        pub fn create_buffer<O>(&self, usage: vk::BufferUsageFlags, object_count: usize, options: &[CreateBufferOptions]) -> Buffer<I> {
             let buffer_size = size_of::<O>() * object_count;
 
             let mut c_info = vk::BufferCreateInfo::builder()
@@ -1166,7 +1166,7 @@ pub mod memory{
                 allocation_resource_index: 0,
                 }
         }
-        pub fn create_image(&self, usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> Image<E> {
+        pub fn create_image(&self, usage: vk::ImageUsageFlags, format: vk::Format, extent: vk::Extent3D, options: &[CreateImageOptions]) -> Image<I> {
             let mut c_info = vk::ImageCreateInfo::builder()
             .image_type(vk::ImageType::TYPE_2D)
             .format(format)
@@ -1233,7 +1233,7 @@ pub mod memory{
 
                 }
         }
-        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<E>{
+        pub fn get_buffer_region<O>(&mut self, profile: &AllocatorProfileStack, object_count: usize, alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<I>{
             let mut region = None;
             
             match profile{
@@ -1369,10 +1369,10 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
-        pub fn get_buffer_region_from_template<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<E> {
+        pub fn get_buffer_region_from_template<O>(&mut self, profile: &AllocatorProfileStack, slice: &[O], alignment: &AlignmentType, options: &[CreateBufferRegionOptions]) -> BufferRegion<I> {
             self.get_buffer_region::<O>(profile, slice.len(), alignment, options)
         }
-        pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources<E> {
+        pub fn get_image_resources(&mut self, profile: &AllocatorProfileStack, aspect: vk::ImageAspectFlags, base_mip_level: u32, mip_level_depth: u32, base_layer: u32, layer_depth: u32, view_type: vk::ImageViewType, format: vk::Format, options: &[CreateImageResourceOptions]) ->ImageResources<I> {
             let mut img_resources = None;
 
             match profile {
@@ -1484,7 +1484,7 @@ pub mod memory{
                 None => panic!("Allocator failure"),
             }
         }
-        pub fn copy_from_ram<O>(&mut self, src: *const O, object_count: usize, dst: &BufferRegion<E>){
+        pub fn copy_from_ram<O>(&mut self, src: *const O, object_count: usize, dst: &BufferRegion<I>){
             match &mut self.resources[dst.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_from_ram(src, object_count, dst)
@@ -1493,7 +1493,7 @@ pub mod memory{
                 AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
             }
         }
-        pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion<E>){
+        pub fn copy_from_ram_slice<O>(&mut self, objects: &[O], dst: &BufferRegion<I>){
             if dst.home_block.size == 0{
                 debug!("Aborting copy of no data to buffer {:?}", dst.buffer);
                 return;
@@ -1506,7 +1506,7 @@ pub mod memory{
                 AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
             }
         }
-        pub fn copy_to_ram<O>(&self, src: &BufferRegion<E>, dst: *mut O, object_count: usize, ){
+        pub fn copy_to_ram<O>(&self, src: &BufferRegion<I>, dst: *mut O, object_count: usize, ){
             match &self.resources[src.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_to_ram(src, dst, object_count)
@@ -1515,7 +1515,7 @@ pub mod memory{
                 AllocatorResourceType::Image(_) => panic!("Resource index mismatch"),
             }
         }
-        pub fn copy_to_ram_slice<O>(&self, src: &BufferRegion<E>, dst: &mut [O]){
+        pub fn copy_to_ram_slice<O>(&self, src: &BufferRegion<I>, dst: &mut [O]){
             match &self.resources[src.allocation_resource_index] {
                 AllocatorResourceType::Allocation(a) => {
                     a.copy_to_ram_slice(src, dst)
