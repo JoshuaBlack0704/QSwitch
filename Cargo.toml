@@ -4,6 +4,9 @@ members = [
     "qforce",
     "qswitch",
     "windowed_tests",
+    "qserver",
+    "quniverse",
+    "qmanager",
 ]
 [profile.release]
 opt-level = 3
