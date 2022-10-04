@@ -160,5 +160,24 @@
             "cwd": "${workspaceFolder}",
             "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
         },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'qserver",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=qserver",
+                    "--package=qserver"
+                ],
+                "filter": {
+                    "name": "qserver",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {"RUST_LOG":"trace", "RUST_BACKTRACE":"1"},
+        },
     ]
 }
