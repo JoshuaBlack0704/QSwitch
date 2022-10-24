@@ -1,16 +1,9 @@
-use std::{
-    collections::VecDeque,
-    mem::size_of,
-    slice::{from_raw_parts, from_raw_parts_mut},
-};
+use std::{collections::HashMap, mem::size_of, net::SocketAddr, sync::Arc};
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use log::debug;
 use tokio::{
-    io::{self, AsyncReadExt, AsyncWriteExt},
-    net::{TcpListener, TcpStream, ToSocketAddrs},
-    runtime::{self, Runtime},
-    sync::{broadcast, mpsc},
+    net::{ToSocketAddrs, UdpSocket},
+    runtime::Runtime,
 };
 
 //The server architecture must be game agnostic. That is it must only provide
@@ -77,179 +70,184 @@ impl ILifetimeTreeController for LifetimeTreeController {
 //a use can do things like pull a standard descriptive enum from the front of a message
 //Network channels need to keep the protocal they use opaque as both upd and tcp might be used
 //This means a network channel should be in a trait
-pub enum NetworkChannelError {
-    Closed,
-    NoChunk,
+#[derive(Clone)]
+pub struct DoubleChannel<T: Clone> {
+    //Up:    Sender -   Receiver
+    //          |          |
+    //Down:  Receiver - Sender
+    tx: flume::Sender<T>,
+    rx: flume::Receiver<T>,
 }
-#[async_trait::async_trait]
-pub trait INetworkChannel {
-    fn stage<O: Clone>(&mut self, object: &O);
-    fn stage_slice<O: Clone>(&mut self, objects: &[O]);
-    fn send(&mut self) -> Result<usize, NetworkChannelError>;
-    fn try_chunk<O: Clone>(&mut self) -> Result<O, NetworkChannelError>;
-    fn try_drain_chunks<O: Clone>(&mut self, dst: &mut [O]) -> Result<usize, NetworkChannelError>;
-    fn drain(&mut self) -> Vec<Bytes>;
-}
-pub struct NetworkChannel {
-    thread_link: (flume::Sender<Bytes>, flume::Receiver<Bytes>),
-    message_stage: BytesMut,
-    recieved_messages: VecDeque<Bytes>,
-}
-#[async_trait::async_trait]
-impl INetworkChannel for NetworkChannel {
-    fn stage<O: Clone>(&mut self, object: &O) {
-        let data = unsafe { from_raw_parts((object as *const O) as *const u8, size_of::<O>()) };
-        self.message_stage.put_slice(data);
-    }
 
-    fn stage_slice<O: Clone>(&mut self, objects: &[O]) {
-        let data = unsafe {
-            from_raw_parts(
-                objects.as_ptr() as *const u8,
-                size_of::<O>() * objects.len(),
-            )
+impl<T: Clone> DoubleChannel<T> {
+    pub fn new() -> (DoubleChannel<T>, DoubleChannel<T>) {
+        let left = flume::unbounded();
+        let right = flume::unbounded();
+        let end1 = DoubleChannel {
+            tx: left.0,
+            rx: right.1,
         };
-        self.message_stage.put_slice(data);
-    }
-
-    fn send(&mut self) -> Result<usize, NetworkChannelError> {
-        if let Err(_) = self.thread_link.0.send(self.message_stage.clone().into()) {
-            Err(NetworkChannelError::Closed)
-        } else {
-            Ok(self.message_stage.len())
-        }
-    }
-
-    fn try_chunk<O: Clone + Sized>(&mut self) -> Result<O, NetworkChannelError> {
-        if self.thread_link.1.is_disconnected() {
-            return Err(NetworkChannelError::Closed);
-        }
-        for m in self.thread_link.1.try_recv() {
-            self.recieved_messages.push_front(m);
-        }
-        let mut message = match self.recieved_messages.pop_front() {
-            Some(r) => r,
-            None => return Err(NetworkChannelError::NoChunk),
+        let end2 = DoubleChannel {
+            rx: left.1,
+            tx: right.0,
         };
-        let data = message.copy_to_bytes(size_of::<O>());
-        assert_eq!(data.len(), size_of::<O>());
-        let object = unsafe { from_raw_parts(data.as_ptr() as *const O, size_of::<O>()) }
-            .first()
-            .unwrap()
-            .clone();
-        if message.remaining() > 0 {
-            self.recieved_messages.push_front(message);
-        }
-
-        Ok(object.clone())
+        (end1, end2)
     }
-
-    fn try_drain_chunks<O: Clone>(&mut self, dst: &mut [O]) -> Result<usize, NetworkChannelError> {
-        if self.thread_link.1.is_disconnected() {
-            return Err(NetworkChannelError::Closed);
-        }
-        for m in self.thread_link.1.try_recv() {
-            self.recieved_messages.push_front(m);
-        }
-        let mut message = match self.recieved_messages.pop_front() {
-            Some(r) => r,
-            None => return Err(NetworkChannelError::NoChunk),
-        };
-        if message.len() < dst.len() * size_of::<O>() {
-            return Err(NetworkChannelError::NoChunk);
-        }
-        for (index, chunk) in message.chunks_exact(size_of::<O>()).enumerate() {
-            let object = unsafe { from_raw_parts(chunk.as_ptr() as *const O, size_of::<O>()) }
-                .first()
-                .unwrap()
-                .clone();
-            *dst.get_mut(index).expect("Drain slice does not have index") = object;
-        }
-        Ok(1)
+    pub fn tx(&self) -> &flume::Sender<T> {
+        &self.tx
     }
-
-    fn drain(&mut self) -> Vec<Bytes> {
-        let messages = self
-            .recieved_messages
-            .drain(0..self.recieved_messages.len());
-        messages.collect()
+    pub fn rx(&self) -> &flume::Receiver<T> {
+        &self.rx
     }
 }
+#[derive(Clone)]
+pub enum ServiceMessage {
+    NewUdpLink(DoubleChannel<(usize, [u8; 500])>),
+    InitiateUdpLink(SocketAddr),
+}
+pub struct UdpServiceListener {
+    lt: LifetimeTreeController,
+    link: DoubleChannel<ServiceMessage>,
+    socket: Arc<UdpSocket>,
+}
+impl UdpServiceListener {
+    pub fn start<A: ToSocketAddrs + Clone + Copy>(
+        bound_address: A,
+        rt: &Runtime,
+    ) -> UdpServiceListener {
+        let channel = DoubleChannel::new();
+        let ltc = LifetimeTree::new_tree();
+        let lt = ltc.tree.child_from_tree();
 
-enum NetworkChannelServiceMessage {
-    InboundEstablishment(TcpStream),
-    OutboundEstablishment(String, flume::Sender<Bytes>, flume::Receiver<Bytes>),
-    NewChannel(NetworkChannel),
-}
-pub struct NetworkChannelService {
-    lifetime: LifetimeTree,
-    channel: (
-        flume::Sender<NetworkChannelServiceMessage>,
-        flume::Receiver<NetworkChannelServiceMessage>,
-    ),
-}
-impl NetworkChannelService {
-    pub fn new(lifetime: LifetimeTree) -> NetworkChannelService{
-        NetworkChannelService { lifetime, channel: flume::unbounded() }
+        let socket = Arc::new(
+            rt.block_on(UdpSocket::bind(bound_address))
+                .expect("Could not bind udp socket"),
+        );
+        rt.spawn(Self::service(
+            socket.clone(),
+            channel.0.clone(),
+            lt.child_from_tree(),
+        ));
+        UdpServiceListener {
+            lt: ltc,
+            link: channel.1,
+            socket: socket.clone(),
+        }
     }
-    async fn start(self){
-        let tree_control = LifetimeTree::new_tree();
-        loop{
-            tokio::select!{
-                val = self.lifetime.shutdown() => {
+    pub fn stop(self, rt: &Runtime){
+        rt.block_on(self.lt.shutdown());
+    }
+    pub fn initiate_udp_link(&self, addr: SocketAddr) {
+        self.link
+            .tx()
+            .send(ServiceMessage::InitiateUdpLink(addr))
+            .expect("Main udp service not running");
+    }
+    pub fn get_local_addr(&self) -> Result<SocketAddr, std::io::Error> {
+        self.socket.local_addr()
+    }
+    pub fn get_new_link(&self) -> Option<DoubleChannel<(usize, [u8; 500])>> {
+        for msg in self.link.rx().recv() {
+            if let ServiceMessage::NewUdpLink(a) = msg {
+                return Some(a);
+            }
+        }
+        None
+    }
+    async fn service(
+        socket: Arc<UdpSocket>,
+        link: DoubleChannel<ServiceMessage>,
+        lt: LifetimeTree,
+    ) {
+        let mut conn_map = HashMap::new();
+        let mut data: [u8; 500] = [0; 500];
+        println!("Starting upd service on {:?}", socket.local_addr());
+        loop {
+            tokio::select! {
+                _ = lt.shutdown()=>{
+                    println!("Shuting down main Udp Service");
                     break;
                 }
-                message = self.channel.1.recv_async() => {
-                    let message = message.expect("The network channel service should not shutdown after its creator");
-                    match message {
-                        NetworkChannelServiceMessage::InboundEstablishment(s) => {
-                            debug!("Received new network channel request");
-                            let c1 = flume::unbounded();
-                            let c2 = flume::unbounded();
-                            // need to absract the concept of a double channel
-                            let thread_link = (c1.0, c2.1);
-                            let user_link = (c2.0, c1.1);
-                            
-                            let link = NetworkChannelLink::new(tree_control.tree.child_from_tree(), user_link);
-                            
-                            tokio::spawn(link.start());
+                val = socket.recv_from(&mut data)=>{
+                   match val {
+                        Ok((len, addr)) => {
+                            Self::forward_message(socket.clone(), &data, len, addr, &mut conn_map, &link ,&lt);
                         },
-                        NetworkChannelServiceMessage::OutboundEstablishment(a, s, r) => todo!(),
-                        NetworkChannelServiceMessage::NewChannel(_) => panic!("The network channel service should not be getting NewChannel messages"),
+                        Err(_) => {
+                            Self::handle_message_error();
+                        },
+                    }
+                }
+                val = link.rx().recv_async()=>{
+                    if let Ok(msg) = val{
+                        match msg{
+                            ServiceMessage::NewUdpLink(_) => panic!("Should note be receiveing this message here"),
+                            ServiceMessage::InitiateUdpLink(a) => Self::forward_message(socket.clone(), &data, 1, a, &mut conn_map, &link, &lt),
+                        }
                     }
                 }
             }
         }
-        tree_control.shutdown().await;
     }
-}
-pub struct NetworkChannelLink{
-    lifetime: LifetimeTree,
-    thread_link: (flume::Sender<Bytes>, flume::Receiver<Bytes>),
-}
-impl NetworkChannelLink{
-    pub fn new(lifetime: LifetimeTree, user_link: (flume::Sender<Bytes>, flume::Receiver<Bytes>)) -> NetworkChannelLink{
-        
+    fn forward_message(
+        socket: Arc<UdpSocket>,
+        data: &[u8; 500],
+        len: usize,
+        addr: SocketAddr,
+        conn_map: &mut HashMap<SocketAddr, flume::Sender<(usize, [u8; 500])>>,
+        service_link: &DoubleChannel<ServiceMessage>,
+        lt: &LifetimeTree,
+    ) {
+        if let Some(link) = conn_map.get(&addr) {
+            if let Err(_) = link.send((len, data.clone())) {
+                conn_map.remove(&addr);
+            }
+        } else {
+            let (tx, rx) = flume::unbounded();
+            tx.send((len, data.clone())).unwrap();
+            let (l, r) = DoubleChannel::new();
+            tokio::spawn(Self::start_upd_link(
+                socket.clone(),
+                rx,
+                addr.clone(),
+                l,
+                lt.child_from_tree(),
+            ));
+            conn_map.insert(addr, tx);
+            service_link
+                .tx()
+                .send(ServiceMessage::NewUdpLink(r))
+                .expect("Service link is broken");
+        }
     }
-    async fn start(self){}
-}
-
-pub struct QServer {
-    rt: Runtime,
-    tree: LifetimeTreeController,
-}
-
-impl QServer {
-    pub fn new<T: ToSocketAddrs>(bindpoint: T) -> QServer {
-        let rt = runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let tree = LifetimeTree::new_tree();
-
-        QServer { rt, tree }
-    }
-    pub fn shutdown(self) {
-        self.rt.block_on(self.tree.shutdown());
+    fn handle_message_error() {}
+    async fn start_upd_link(
+        socket: Arc<UdpSocket>,
+        link: flume::Receiver<(usize, [u8; 500])>,
+        addr: SocketAddr,
+        dst: DoubleChannel<(usize, [u8; 500])>,
+        lt: LifetimeTree,
+    ) {
+        println!("Starting new upd link with addr {}", addr);
+        loop {
+            tokio::select! {
+                _ = lt.shutdown()=>{
+                    break;
+                }
+                val = link.recv_async()=>{
+                    if let Ok((len,bytes)) = val{
+                        println!("Message from {}: {:?}",addr, &bytes[..len]);
+                        dst.tx().send((len,bytes)).expect("Udp link has no dst");
+                    }
+                }
+                val = dst.rx().recv_async()=>{
+                    if let Ok((len, bytes)) = val{
+                        println!("Sending data to {}: {:?}",addr, &bytes[..len]);
+                        socket.send_to(&bytes[..len], addr).await.expect("Could not send udp packet");
+                    }
+                }
+            }
+        }
+        println!("Shuting down Udp connection to {}", addr);
     }
 }
