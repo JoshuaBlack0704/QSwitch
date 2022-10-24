@@ -31,24 +31,24 @@ dependencies = [
 
 [[package]]
 name = "ash-window"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e199a4119a1695c8d865b3f5d6c1ee164370c0c5bc91c8284cf79b0f0be78ba"
+dependencies = [
+ "ash",
+ "raw-window-handle 0.3.4",
+ "raw-window-metal 0.1.2",
+]
+
+[[package]]
+name = "ash-window"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f0573d0bfb0da1260b38f4bfd33fae0c71466e78d070a0f72a490bc09ab6a57"
 dependencies = [
  "ash",
- "raw-window-handle",
- "raw-window-metal",
-]
-
-[[package]]
-name = "async-trait"
-version = "0.1.57"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76464446b8bc32758d7e88ee1a804d9914cd9b1cb264c029899680b0be29826f"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "raw-window-handle 0.4.3",
+ "raw-window-metal 0.2.0",
 ]
 
 [[package]]
@@ -85,12 +85,6 @@ name = "bumpalo"
 version = "3.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37ccbd214614c6783386c1af30caf03192f17891059cecc394b4fb119e363de3"
-
-[[package]]
-name = "bytes"
-version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec8a7b6a70fde80372154c65702f00a0f56f3e1c36abbc6c440484be248856db"
 
 [[package]]
 name = "calloop"
@@ -712,16 +706,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "num_cpus"
-version = "1.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19e64526ebdee182341572e50e9ad03965aa510cd94427a4549448f285e957a1"
-dependencies = [
- "hermit-abi",
- "libc",
-]
-
-[[package]]
 name = "num_enum"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -774,17 +758,7 @@ checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
 dependencies = [
  "instant",
  "lock_api",
- "parking_lot_core 0.8.5",
-]
-
-[[package]]
-name = "parking_lot"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
-dependencies = [
- "lock_api",
- "parking_lot_core 0.9.3",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -799,19 +773,6 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "winapi",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09a279cbf25cb0757810394fbc1e359949b59e348145c643a939a525692e6929"
-dependencies = [
- "cfg-if 1.0.0",
- "libc",
- "redox_syscall",
- "smallvec",
- "windows-sys",
 ]
 
 [[package]]
@@ -839,12 +800,6 @@ dependencies = [
  "quote",
  "syn",
 ]
-
-[[package]]
-name = "pin-project-lite"
-version = "0.2.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0a7ae3ac2f1173085d398531c705756c94a4c56843785df85a60c1a0afac116"
 
 [[package]]
 name = "pkg-config"
@@ -887,7 +842,7 @@ name = "qforce"
 version = "0.0.0"
 dependencies = [
  "ash",
- "ash-window",
+ "ash-window 0.11.0",
  "cgmath",
  "crossbeam",
  "flume",
@@ -899,23 +854,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "qserver"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "flume",
- "log",
- "tokio",
-]
-
-[[package]]
 name = "qswitch"
 version = "0.0.0"
 dependencies = [
- "qserver",
- "quniverse",
- "tokio",
+ "ash",
+ "ash-window 0.10.0",
+ "flume",
+ "pretty_env_logger",
+ "qvk",
+ "shaderc",
+ "winit",
 ]
 
 [[package]]
@@ -923,18 +871,6 @@ name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
-
-[[package]]
-name = "quniverse"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "flume",
- "log",
- "qserver",
- "tokio",
-]
 
 [[package]]
 name = "quote"
@@ -950,13 +886,23 @@ name = "qvk"
 version = "0.0.0"
 dependencies = [
  "ash",
- "ash-window",
+ "ash-window 0.11.0",
  "cgmath",
  "flume",
  "log",
  "pretty_env_logger",
  "shaderc",
  "winit",
+]
+
+[[package]]
+name = "raw-window-handle"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e28f55143d0548dad60bb4fbdc835a3d7ac6acc3324506450c5fdd6e42903a76"
+dependencies = [
+ "libc",
+ "raw-window-handle 0.4.3",
 ]
 
 [[package]]
@@ -970,6 +916,18 @@ dependencies = [
 
 [[package]]
 name = "raw-window-metal"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cd21ed1cdef7f1b1579b972148ba6058b5b545959a14d91ea83c4f0ea9f289b"
+dependencies = [
+ "cocoa",
+ "core-graphics 0.22.3",
+ "objc",
+ "raw-window-handle 0.3.4",
+]
+
+[[package]]
+name = "raw-window-metal"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7dd1dc19cf6fa2c1b7be107990884912d012c09d0d7b1631f76df7b01c07374b"
@@ -977,7 +935,7 @@ dependencies = [
  "cocoa",
  "core-graphics 0.22.3",
  "objc",
- "raw-window-handle",
+ "raw-window-handle 0.4.3",
 ]
 
 [[package]]
@@ -1055,15 +1013,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-hook-registry"
-version = "1.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e51e73328dc4ac0c7ccbda3a494dfa03df1de2f46018127f60c693f2648455b0"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1086,16 +1035,6 @@ dependencies = [
  "wayland-client",
  "wayland-cursor",
  "wayland-protocols",
-]
-
-[[package]]
-name = "socket2"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02e2d2db9033d13a1567121ddd7a095ee144db4e1ca1b1bda3419bc0da294ebd"
-dependencies = [
- "libc",
- "winapi",
 ]
 
 [[package]]
@@ -1161,37 +1100,6 @@ checksum = "db76ff9fa4b1458b3c7f077f3ff9887394058460d21e634355b273aaf11eea45"
 dependencies = [
  "libc",
  "num_threads",
-]
-
-[[package]]
-name = "tokio"
-version = "1.21.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9e03c497dc955702ba729190dc4aac6f2a0ce97f913e5b1b5912fc5039d9099"
-dependencies = [
- "autocfg",
- "bytes",
- "libc",
- "memchr",
- "mio",
- "num_cpus",
- "parking_lot 0.12.1",
- "pin-project-lite",
- "signal-hook-registry",
- "socket2",
- "tokio-macros",
- "winapi",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "1.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9724f9a975fb987ef7a3cd9be0350edcbe130698af5b8f7a631e23d42d052484"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -1447,9 +1355,9 @@ dependencies = [
  "ndk-glue",
  "ndk-sys",
  "objc",
- "parking_lot 0.11.2",
+ "parking_lot",
  "percent-encoding",
- "raw-window-handle",
+ "raw-window-handle 0.4.3",
  "smithay-client-toolkit",
  "wasm-bindgen",
  "wayland-client",

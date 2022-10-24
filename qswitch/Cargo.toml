@@ -2,13 +2,12 @@
 name = "qswitch"
 version = "0.0.0"
 edition = "2021"
-[lib]
-name = "qswitch"
-path = "src/lib/lib.rs"
-[[bin]]
-name = "qswitch"
-path = "src/main.rs"
+
 [dependencies]
-tokio = {version = "1.21.2", features = ["full"]}
-qserver = {path = "../qserver"}
-quniverse = {path = "../quniverse"}
+qvk = {path = "../qvk"}
+ash = {version = "0.37.0", features = ["linked"]}
+flume = "0.10.14"
+winit = "0.26.1"
+pretty_env_logger = "0.4.0"
+ash-window = "0.10.0"
+shaderc = "0.8.0"
