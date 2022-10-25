@@ -3,10 +3,10 @@ name = "quniverse"
 version = "0.1.0"
 edition = "2021"
 [lib]
-name = "qswitch"
-path = "src/lib/lib.rs"
+name = "quniverse"
+path = "lib/lib.rs"
 [[bin]]
-name = "qswitch"
+name = "quniverse"
 path = "src/main.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -17,3 +17,8 @@ bytes = "1.2.1"
 async-trait = "0.1.57"
 log = {version = "0.4.17", features=["release_max_level_off"]}
 qserver = {path = "../qserver"}
+rayon = "1.5.3"
+qforce = {path = "../qforce"}
+rand = "0.8.5"
+rand_xoshiro = "0.6.0"
+glam = {version = "0.22.0", features = ["scalar-math", "rand"]}

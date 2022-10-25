@@ -134,7 +134,7 @@ impl UdpServiceListener {
             socket: socket.clone(),
         }
     }
-    pub fn stop(self, rt: &Runtime){
+    pub fn stop(self, rt: &Runtime) {
         rt.block_on(self.lt.shutdown());
     }
     pub fn initiate_udp_link(&self, addr: SocketAddr) {
