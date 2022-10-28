@@ -22,3 +22,4 @@ qforce = {path = "../qforce"}
 rand = "0.8.5"
 rand_xoshiro = "0.6.0"
 glam = {version = "0.22.0", features = ["scalar-math", "rand"]}
+plotters = "0.3.4"
