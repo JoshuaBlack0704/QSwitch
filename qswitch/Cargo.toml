@@ -12,3 +12,4 @@ path = "src/main.rs"
 tokio = {version = "1.21.2", features = ["full"]}
 qserver = {path = "../qserver"}
 quniverse = {path = "../quniverse"}
+qforce = {path = "../qforce"}

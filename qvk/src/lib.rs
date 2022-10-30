@@ -82,7 +82,7 @@ pub mod init{
         OldSwapchain(&'a SwapchainStore<E>),
         ImageUsages(vk::ImageUsageFlags),
     }
-    pub struct Initalizer{
+    pub struct Initializer{
         instance: ash::Instance,
         physical_device: vk::PhysicalDevice,
         device: ash::Device,
@@ -94,7 +94,7 @@ pub mod init{
         window: Window,
         surface_loader: ash::extensions::khr::Surface,
         surface: vk::SurfaceKHR,
-        init: Arc<Initalizer>,
+        init: Arc<Initializer>,
     }
     pub struct SwapchainStore<E:IVulkanInit + IWindowedVulkanInit>{
         init: Arc<E>,
@@ -126,8 +126,8 @@ pub mod init{
         callback: vk::DebugUtilsMessengerEXT,
     }
 
-    impl Initalizer{
-        pub fn init(options: &mut [VulkanInitOptions], window: Option<&Window>) -> (Arc<Initalizer>, Option<(ash::extensions::khr::Surface, vk::SurfaceKHR)>) {
+    impl Initializer{
+        pub fn init(options: &mut [VulkanInitOptions], window: Option<&Window>) -> (Arc<Initializer>, Option<(ash::extensions::khr::Surface, vk::SurfaceKHR)>) {
             let entry = ash::Entry::linked();
             let app_name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VulkanTriangle\0")};
 
@@ -301,7 +301,7 @@ pub mod init{
 
             let queue_store = QueueStore::new(&instance, &physical_device, &device, &queue_infos.1);
             let props = PhysicalDevicePropertiesStore::new(&instance, &physical_device);
-            (Arc::new(Initalizer{instance,
+            (Arc::new(Initializer{instance,
                 physical_device,
                 device,
                 queue_store,
@@ -310,7 +310,7 @@ pub mod init{
                 surface_support)
         }
     }
-    impl IVulkanInit for Initalizer{
+    impl IVulkanInit for Initializer{
         fn get_instance(&self) -> &ash::Instance {
         &self.instance
     }
@@ -331,7 +331,7 @@ pub mod init{
         &self.queue_store
     }
     }
-    impl Drop for Initalizer{
+    impl Drop for Initializer{
         fn drop(&mut self) {
             unsafe{
                 match &self.debug_store {
@@ -372,7 +372,7 @@ pub mod init{
 
             let mut surface = vk::SurfaceKHR::null();
 
-            let (init, surface_data) = Initalizer::init(options, Some(&window));
+            let (init, surface_data) = Initializer::init(options, Some(&window));
 
             drop(options);
 
@@ -828,7 +828,7 @@ pub mod memory{
     use std::{sync::Arc, mem::size_of, collections::HashMap};
     use ash::{self, vk};
     use log::debug;
-    use crate::{init::{self,IVulkanInit,PhysicalDevicePropertiesStore, Initalizer, QueueStore}, IDisposable, descriptor::DescriptorWriteType, command::CommandPool, sync::Fence};
+    use crate::{init::{self,IVulkanInit,PhysicalDevicePropertiesStore, Initializer, QueueStore}, IDisposable, descriptor::DescriptorWriteType, command::CommandPool, sync::Fence};
 
     #[derive(Clone)]
     pub enum AlignmentType{
@@ -3879,7 +3879,7 @@ mod tests{
 
     use ash::vk::{self, Packed24_8};
 
-    use crate::{init::{self, Initalizer, IVulkanInit, VulkanInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DescriptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline, ShaderTable, RayTacingPipeline} };
+    use crate::{init::{self, Initializer, IVulkanInit, VulkanInitOptions}, memory::{self, AlignmentType, AllocationAllocatorProfile, BufferAllocatorProfile, AllocatorProfileStack, CreateAllocationOptions, CreateBufferOptions, Allocator}, IDisposable, descriptor::{DescriptorSetOutline, DescriptorStack}, shader::{Shader}, ray_tracing::{TriangleObjectGeometry, RayTracingMemoryProfiles, Blas, Tlas, TlasInstanceOutline, ShaderTable, RayTacingPipeline} };
 
     #[cfg(debug_assertions)]
     fn get_vulkan_validate(options: &mut Vec<init::VulkanInitOptions>){
@@ -3905,7 +3905,7 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (init, _) = Initalizer::init(&mut options, None);
+        let (init, _) = Initializer::init(&mut options, None);
 
         let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
         let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
@@ -3982,7 +3982,7 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (init, _) = Initalizer::init(&mut options, None);
+        let (init, _) = Initializer::init(&mut options, None);
 
         let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
         let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
@@ -4037,7 +4037,7 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (init, _) = Initalizer::init(&mut options, None);
+        let (init, _) = Initializer::init(&mut options, None);
 
         let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER).unwrap().1).build(), None).expect("Could not create command pool")};
         let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
@@ -4095,7 +4095,7 @@ mod tests{
         };
         let mut options = vec![];
         get_vulkan_validate(&mut options);
-        let (init, _) = Initalizer::init(&mut options, None);
+        let (init, _) = Initializer::init(&mut options, None);
 
         let pool = unsafe{init.get_device().create_command_pool(&vk::CommandPoolCreateInfo::builder().queue_family_index(init.get_queue_store().get_queue(vk::QueueFlags::TRANSFER | vk::QueueFlags::COMPUTE).unwrap().1).build(), None).expect("Could not create command pool")};
         let cmd = unsafe{init.get_device().allocate_command_buffers(&vk::CommandBufferAllocateInfo::builder().command_pool(pool).command_buffer_count(1).build()).expect("Could not allocate command buffers")}[0];
@@ -4210,7 +4210,7 @@ mod tests{
             VulkanInitOptions::DeviceExtensions(vec![acc_extension, def_host, ray_tracing]),
         ];
         get_vulkan_validate(&mut options);
-        let (init, _) = Initalizer::init(&mut options, None);
+        let (init, _) = Initializer::init(&mut options, None);
         let mut allocator = Allocator::new(init.clone());
         let ray_tracing_profiles = RayTracingMemoryProfiles::new(init.clone(), &mut allocator);
         let v_data = [

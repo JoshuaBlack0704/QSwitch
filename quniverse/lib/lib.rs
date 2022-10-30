@@ -2,8 +2,13 @@ use plotters::{prelude::*, style::colors};
 use std::net::SocketAddr;
 
 use glam;
-use qforce::{self, Engine, Vector};
+use qforce::{
+    self,
+    data::Vector,
+    engine::{self, Engine},
+};
 use qserver::{self, UdpServiceListener};
+use qvk::{self, init::Initializer};
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
 use rayon::{self, prelude::*, vec, ThreadPool, ThreadPoolBuilder};
@@ -22,7 +27,7 @@ impl Default for ProceduralGenerationSettings {
 
 pub struct Universe {
     rt: Runtime,
-    engine: Engine,
+    engine: Engine<Initializer>,
     threadpool: ThreadPool,
     udp_server: UdpServiceListener,
     rng: Xoshiro256Plus,
@@ -34,7 +39,7 @@ impl Universe {
             .enable_all()
             .build()
             .expect("Could not start tokio runtime");
-        let engine = Engine {};
+        let engine = engine::new();
         let threadpool = ThreadPoolBuilder::new()
             .build()
             .expect("Could not start rayon threadpool");
@@ -53,11 +58,11 @@ impl Universe {
             galaxy,
         }
     }
-    fn generate_universe<R:Rng>(system_count: usize, rng: &mut R) -> Galaxy {
+    fn generate_universe<R: Rng>(system_count: usize, rng: &mut R) -> Galaxy {
         let settings = ProceduralGenerationSettings::default();
         Galaxy::generate(&settings.galaxy_gen, rng)
     }
-    pub fn plot_galaxy(&self){
+    pub fn plot_galaxy(&self) {
         self.galaxy.plot_galaxy();
     }
 }
@@ -114,7 +119,9 @@ impl Galaxy {
         }
     }
     pub fn plot_galaxy(&self) {
-        let area = BitMapBackend::gif("plot.gif", (4000, 4000), 100).unwrap().into_drawing_area();
+        let area = BitMapBackend::gif("plot.gif", (1000, 1000), 10)
+            .unwrap()
+            .into_drawing_area();
         area.fill(&BLACK);
         let x_axis = (0.0..self.bound).step(0.1);
         let y_axis = (0.0..self.bound).step(0.1);
@@ -132,12 +139,12 @@ impl Galaxy {
             .unwrap();
 
         let data = self.plantary_systems.iter().map(|ps| {
-                let coord = (ps.galaxy_pos.x, ps.galaxy_pos.y, ps.galaxy_pos.z);
-                let fraction = ps.galaxy_pos.x / self.bound;
-                let color = HSLColor(fraction as f64, 1.0, 0.5);
-                TriangleMarker::new(coord, 2, &color)
-            });
-        for pitch in 0..157{
+            let coord = (ps.galaxy_pos.x, ps.galaxy_pos.y, ps.galaxy_pos.z);
+            let fraction = ps.galaxy_pos.x / self.bound;
+            let color = HSLColor(fraction as f64, 1.0, 0.5);
+            TriangleMarker::new(coord, 2, &color)
+        });
+        for pitch in 0..1570 {
             area.fill(&BLACK).unwrap();
             let mut chart = ChartBuilder::on(&area)
                 .caption(format!("Galaxy"), ("sans", 29))
@@ -156,7 +163,7 @@ impl Galaxy {
             //     .unwrap();
             chart.draw_series(data.clone()).unwrap();
             area.present().unwrap();
-            println!("Frame {} of {} completed", pitch, 157);
+            println!("Frame {} of {} completed", pitch + 1, 1570);
         }
     }
 }

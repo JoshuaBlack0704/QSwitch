@@ -1335,6 +1335,7 @@ dependencies = [
 name = "qswitch"
 version = "0.0.0"
 dependencies = [
+ "qforce",
  "qserver",
  "quniverse",
  "tokio",
@@ -1358,6 +1359,7 @@ dependencies = [
  "plotters",
  "qforce",
  "qserver",
+ "qvk",
  "rand",
  "rand_xoshiro",
  "rayon",
