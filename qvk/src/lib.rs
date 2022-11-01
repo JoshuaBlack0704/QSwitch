@@ -770,6 +770,9 @@ pub mod init{
         pub fn get_image(&self, index: usize) -> &memory::ImageResources<E> {
             &self.images[index]
         }
+        pub fn get_loader(&self) -> ash::extensions::khr::Swapchain {
+            self.swapchain_loader.clone()
+        }
         pub fn get_next_image(&mut self, timeout: u64, semaphore: Option<vk::Semaphore>, fence: Option<vk::Fence> ) -> (u32, &mut memory::ImageResources<E>) {
 
             let semaphore = match semaphore {

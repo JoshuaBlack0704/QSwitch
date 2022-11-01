@@ -25,6 +25,22 @@ impl Default for ProceduralGenerationSettings {
     }
 }
 
+//Idea for client-cluster cluster-cluster communication
+//All universes will have a cluster terminal, these terminals are the center
+//of inter cluster communication. In the case of client-cluster communication
+//if the client opens a "monitor" order then the terminal will seek that information
+//in the cluster and provide a reference to it. This reference will either be to data
+//given to the terminal by the local universe, or data that has been retreived over the
+//cluster network and is being held locally inside the terminal. Since a "terminal" is 
+//represents the cluster, an order placed on one terminal is an order placed on all.
+//That is, if a client uses creates a terminal or connects to its local universe's terminal
+//and places a "monitor" order, then all terminals in the cluster will see the order. Most
+//terminal, however, will not have the data needed to fill the order so it will be ignored
+//This way if responsibility for a certain peice of data is transfed between clusters
+//the change in data origin is completey opaque to clients or other cluster nodes's orders
+//beyond the cluster data structure index being updated for all clusters. Nothings would have
+//to change about the order.
+
 pub struct Universe {
     rt: Runtime,
     engine: Engine<Initializer>,

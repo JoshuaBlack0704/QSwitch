@@ -3,7 +3,8 @@ pub mod engine {
 
     use ash::{self, vk};
     use qvk::init::{
-        self, IVulkanInit, IWindowedVulkanInit, Initializer, VulkanInitOptions, WindowedInitalizer,
+        self, IVulkanInit, IWindowedVulkanInit, Initializer, SwapchainStore, VulkanInitOptions,
+        WindowedInitalizer,
     };
 
     #[cfg(debug_assertions)]
@@ -37,6 +38,7 @@ pub mod engine {
     pub fn new_windowed() -> (winit::event_loop::EventLoop<()>, Engine<WindowedInitalizer>) {
         let mut options = vec![];
         get_vulkan_validate(&mut options);
+        options.push(VulkanInitOptions::DeviceExtensions(vec![]));
         let init = WindowedInitalizer::init(&mut options);
 
         (init.0, Engine { init: init.1 })
@@ -50,6 +52,19 @@ pub mod engine {
     impl<I: IWindowedVulkanInit + IVulkanInit> Engine<I> {
         pub fn hello_window(&self) {
             println!("Hello window");
+        }
+        pub fn get_swapchain(&self, old_swapchain: Option<&SwapchainStore<I>>) -> SwapchainStore<I> {
+            let mut options = vec![
+                init::CreateSwapchainOptions::ImageUsages(
+                    vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT)];
+            if let Some(s) = old_swapchain{
+                options.push(init::CreateSwapchainOptions::OldSwapchain(s));
+            }
+
+            SwapchainStore::new(
+                self.init.clone(),
+                &options
+            )
         }
     }
 }
