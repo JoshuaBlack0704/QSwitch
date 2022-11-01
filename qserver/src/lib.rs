@@ -251,3 +251,72 @@ impl UdpServiceListener {
         println!("Shuting down Udp connection to {}", addr);
     }
 }
+
+//This structure represents a logical cluster for its users. So a request submitted on one terminal
+//Should behave life a request submitted on all terminals. This means that internally a terminal needs 
+//to keep track of all other terminals that are connected to the cluster. Should a request be submitted to one
+//terminal, that terminal will say "I" (represented as the sender ip address on the other terminals) am
+//placing "this order" (an enum type that specifies order lifetime information) to the "cluster" (all
+// terminals connected to each other). The users of all of the other terminals will see this request
+//and can handle it as they see fit.
+//For example, if a client with an activly connected to a cluster it will first make an order enum.
+//This "order enum" is a qserver defined enum that specifies the arbitrary lifetime of that order (i.e. one fill
+//constant update, timed fill, etc) with user defined data that is transferd with the request. This 
+//will likley be an enum or some data type that specifies what data the order is requesting. Of 
+//course this interior data is opaque to the Cluster Terminal (This interior data needs to be
+//the same struct used in EVERY node of the cluster). The client's terminal will then
+//broadcast this enum and user data to all other nodes/terminals connected to each other,
+//the "Logical Cluster". Each user of the other terminals will then see that order (the order
+//inherently contains info about the sender, the network addr, but will also have local metadata
+//the represents the logical node that sent the order in case the user needs it) and can choose
+//how to handle it, if at all. If the user, refered to as "cluster from here", would like to fill
+//that order it will read the orders internal cluster defined data ID struct or enum and offer to
+//the order a reference of a ClusterTransferable object. The order on the clusters machine will then
+//check if the other end of the order is local, if it is it will simple pass that refernce to the other
+//end of the order. If not it will call the ClusterTransferable objects's to_transfer function to
+//convert it to bytes and then send it over the network. If data is sent over the network, the other
+//end of the order will then call the from_transfer implementation of the data to rebuild it and present
+//a reference to the rebuilt data to the client. This means that both ends need to use the same 
+//struct or enum that implements the ClusterTransferable trait.
+
+pub trait ClusterTransferable<ReconstructionType> {
+    //Should transfer the object into a vector of bytes, not there is no restriction
+    //on what the bytes mean. If the terminal needs to add metadata it add data to the
+    //front of the bytes
+    fn to_transfer(&self, deconstruction_data: &ReconstructionType) -> Vec<u8>;
+    //If the to_transfer creates a vector of bytes n long then the from_transfer to take 
+    // an n bytes long byte vector. Any data appended onto the data will be removed by
+    //the terminal
+    fn from_transfer(&self, reconstruction_data: &ReconstructionType, data: Vec<u8>) -> Self;
+}
+pub enum OrderType<T: Clone>{
+    //Represents a one time fill of data
+    OneFill(T),
+    //Represents an order that should be updated when the requested
+    //data is changed. Will stay alive after each fill until manually
+    //closed or connection with requester is lost
+    UpdateFill(T)
+}
+enum ClusterCommunication<T:Clone>{
+    //Represents a new node connecting to the cluster
+    //Will ALWAYS be the first message sent to all other
+    //nodes of a cluster and will kick off an exchange of
+    //cluster structure data that will tell the new node
+    //all of the other addresses of the cluster
+    NewNode,
+    //Is sent to keep alive a udp connection route through NAT.
+    //Is also what a new node sends to the other nodes it was 
+    //informed about from the initial contact with the cluster.
+    KeepAlive,
+    //Another cluster node that is send to a NewNode to inform
+    //of cluster structure. A NewNode would then send the other
+    //terminal (the inlcuded socket addr) a KeepAlive message,
+    //thus opening a connection
+    OtherNode(SocketAddr),
+    //The bread and butter
+    Order(OrderType<T>),
+}
+pub struct ClusterTerminal<ReconstructInfoType> {
+    reconstruct_info: ReconstructInfoType,
+    
+}
