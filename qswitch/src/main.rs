@@ -2,10 +2,12 @@ use qforce::engine;
 use quniverse::Universe;
 use std::net::{SocketAddr, ToSocketAddrs};
 use winit;
+use qserver::ClusterTerminal;
 fn main() {
     let (evtloop, engine) = engine::new_windowed();
     engine.hello_window();
     let mut swapchain = engine.get_swapchain(None);
+    let terminal = ClusterTerminal::new("127.0.0.1:8080".to_socket_addrs().unwrap().last().unwrap());
 
     evtloop.run(move |event, _, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
@@ -20,8 +22,6 @@ fn main() {
                 _ => {}
             },
             winit::event::Event::MainEventsCleared => {
-                let index = swapchain.get_next_image(u64::MAX, )
-                swapchain.present(engine.)
             },
             _ => {}
         }

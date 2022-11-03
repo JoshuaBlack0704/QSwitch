@@ -13,3 +13,4 @@ flume = "0.10.14"
 bytes = "1.2.1"
 async-trait = "0.1.57"
 log = {version = "0.4.17", features=["release_max_level_off"]}
+zerocopy = "0.6.*"
