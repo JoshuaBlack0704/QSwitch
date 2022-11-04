@@ -268,7 +268,6 @@ impl SocketHandler {
         }
     }
     async fn send(&self, tgt: SocketAddr, data: &[u8]) {
-        println!("Sending message to tgt {}", tgt);
         self.socket.send_to(data, tgt).await.unwrap();
     }
     fn local_address(&self) -> SocketAddr {
