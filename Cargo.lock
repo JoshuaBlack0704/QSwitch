@@ -1427,7 +1427,6 @@ dependencies = [
  "local-ip-address",
  "qserver",
  "tokio",
- "winit",
 ]
 
 [[package]]

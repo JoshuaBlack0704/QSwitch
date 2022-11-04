@@ -84,9 +84,8 @@ pub struct TerminateSignal {
 }
 #[derive(Clone)]
 pub struct TerminalAddressMap {
-    active_connections: Arc<RwLock<HashMap<SocketAddr, TerminalConnection>>>,
+    active_connections: Arc<RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>>,
 }
-#[derive(Clone)]
 pub struct TerminalConnection {
     addr: SocketAddr,
     socket: SocketHandler,
@@ -97,7 +96,7 @@ pub struct TerminalConnection {
 pub struct SocketHandler {
     socket: Arc<UdpSocket>,
 }
-type SocketMessage = (usize, [u8; 500], SocketAddr);
+type SocketMessage = (usize, [u8; 576], SocketAddr);
 
 impl ClusterTerminal {
     //Starts the network system and returns the ClusterTerminal object.
@@ -164,14 +163,14 @@ impl TerminalAddressMap {
         map: TerminalAddressMap,
         addr: SocketAddr,
         socket: SocketHandler,
-    ) -> TerminalConnection {
+    ) -> Arc<TerminalConnection> {
         let read = map.active_connections.read().await;
         if let Some(tdata) = read.get(&addr) {
             tdata.clone()
         } else {
             drop(read);
             let mut write = map.active_connections.write().await;
-            let tdata = TerminalConnection::new(map.clone(), addr, socket.clone());
+            let tdata = Arc::new(TerminalConnection::new(map.clone(), addr, socket.clone()));
             if let Some(_) = write.insert(addr.clone(), tdata.clone()) {
                 panic!(
                     "Inserting new terminal connection where there already is one of the same addr"
@@ -260,7 +259,7 @@ impl SocketHandler {
         }
     }
     async fn receive(&self) -> SocketMessage {
-        let mut data = [0; 500];
+        let mut data = [0; 576];
         loop {
             if let Ok((len, addr)) = self.socket.recv_from(&mut data).await {
                 return (len, data, addr);
