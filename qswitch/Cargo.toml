@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 tokio = {version = "1.21.2", features = ["full"]}
 qserver = {path = "../qserver"}
-quniverse = {path = "../quniverse"}
-qforce = {path = "../qforce"}
+# quniverse = {path = "../quniverse"}
+# qforce = {path = "../qforce"}
 winit = "0.26.*"
+clap = {version = "4.0.18", features = ["derive"]}
+local-ip-address="0.4.9"

@@ -1,258 +1,11 @@
-use std::{collections::HashMap, mem::size_of, net::SocketAddr, sync::Arc, slice::from_raw_parts};
-use zerocopy::{self, FromBytes, AsBytes};
+use std::{collections::HashMap, mem::size_of, net::SocketAddr, sync::Arc, slice::from_raw_parts, time::Duration};
 
-use log::debug;
 use tokio::{
-    net::{ToSocketAddrs, UdpSocket},
+    net::UdpSocket,
     runtime::Runtime,
-    sync::RwLock,
+    sync::RwLock, time::sleep,
 };
 
-//The server architecture must be game agnostic. That is it must only provide
-//network communication functionalty and systems. The Quniverse and QSwitch will use these
-//systems and functionality to "make a game"
-#[async_trait::async_trait]
-pub trait ILifetimeTree<T: ILifetimeTree<T, C>, C: ILifetimeTreeController> {
-    fn child_from_tree(&self) -> T;
-    fn new_tree() -> C;
-    async fn shutdown(&self);
-}
-#[async_trait::async_trait]
-pub trait ILifetimeTreeController {
-    async fn shutdown(self);
-}
-
-pub struct LifetimeTreeController {
-    pub tree: LifetimeTree,
-    tree_control: (flume::Sender<bool>, flume::Receiver<bool>),
-}
-pub struct LifetimeTree {
-    tree: (flume::Sender<bool>, flume::Receiver<bool>),
-}
-#[async_trait::async_trait]
-impl ILifetimeTree<LifetimeTree, LifetimeTreeController> for LifetimeTree {
-    fn child_from_tree(&self) -> LifetimeTree {
-        LifetimeTree {
-            tree: self.tree.clone(),
-        }
-    }
-
-    fn new_tree() -> LifetimeTreeController {
-        let uptree = flume::bounded(1);
-        let downtree = flume::bounded(1);
-        let tree = LifetimeTree {
-            tree: (downtree.0, uptree.1),
-        };
-        let controller = LifetimeTreeController {
-            tree,
-            tree_control: (uptree.0, downtree.1),
-        };
-        controller
-    }
-
-    async fn shutdown(&self) {
-        let _ = self.tree.1.recv_async().await;
-    }
-}
-#[async_trait::async_trait]
-impl ILifetimeTreeController for LifetimeTreeController {
-    async fn shutdown(self) {
-        drop(self.tree);
-        drop(self.tree_control.0);
-        let _ = self.tree_control.1.recv_async().await;
-    }
-}
-//Will use a load and fire system where you first prime a network channel with data and then send it all at once
-//internally the network channel will store all of the data as a BytesMut so no types will need to be given as they will
-//all be transformed into bytes
-//this also means that a network channel can provide a message size based on its staged cache
-//Since all data will be sent as sized messages the network channel should
-//keep track of all the different messages it has so that a use can iterate each message
-//Lastly the Network channel should contain a method to "chunk" data from a message so
-//a use can do things like pull a standard descriptive enum from the front of a message
-//Network channels need to keep the protocal they use opaque as both upd and tcp might be used
-//This means a network channel should be in a trait
-#[derive(Clone)]
-pub struct DoubleChannel<T: Clone> {
-    //Up:    Sender -   Receiver
-    //          |          |
-    //Down:  Receiver - Sender
-    tx: flume::Sender<T>,
-    rx: flume::Receiver<T>,
-}
-
-impl<T: Clone> DoubleChannel<T> {
-    pub fn new() -> (DoubleChannel<T>, DoubleChannel<T>) {
-        let left = flume::unbounded();
-        let right = flume::unbounded();
-        let end1 = DoubleChannel {
-            tx: left.0,
-            rx: right.1,
-        };
-        let end2 = DoubleChannel {
-            rx: left.1,
-            tx: right.0,
-        };
-        (end1, end2)
-    }
-    pub fn tx(&self) -> &flume::Sender<T> {
-        &self.tx
-    }
-    pub fn rx(&self) -> &flume::Receiver<T> {
-        &self.rx
-    }
-}
-#[derive(Clone)]
-pub enum ServiceMessage {
-    NewUdpLink(DoubleChannel<(usize, [u8; 500])>),
-    InitiateUdpLink(SocketAddr),
-}
-pub struct UdpServiceListener {
-    lt: LifetimeTreeController,
-    link: DoubleChannel<ServiceMessage>,
-    socket: Arc<UdpSocket>,
-}
-impl UdpServiceListener {
-    pub fn start<A: ToSocketAddrs + Clone + Copy>(
-        bound_address: A,
-        rt: &Runtime,
-    ) -> UdpServiceListener {
-        let channel = DoubleChannel::new();
-        let ltc = LifetimeTree::new_tree();
-        let lt = ltc.tree.child_from_tree();
-
-        let socket = Arc::new(
-            rt.block_on(UdpSocket::bind(bound_address))
-                .expect("Could not bind udp socket"),
-        );
-        rt.spawn(Self::service(
-            socket.clone(),
-            channel.0.clone(),
-            lt.child_from_tree(),
-        ));
-        UdpServiceListener {
-            lt: ltc,
-            link: channel.1,
-            socket: socket.clone(),
-        }
-    }
-    pub fn stop(self, rt: &Runtime) {
-        rt.block_on(self.lt.shutdown());
-    }
-    pub fn initiate_udp_link(&self, addr: SocketAddr) {
-        self.link
-            .tx()
-            .send(ServiceMessage::InitiateUdpLink(addr))
-            .expect("Main udp service not running");
-    }
-    pub fn get_local_addr(&self) -> Result<SocketAddr, std::io::Error> {
-        self.socket.local_addr()
-    }
-    pub fn get_new_link(&self) -> Option<DoubleChannel<(usize, [u8; 500])>> {
-        for msg in self.link.rx().recv() {
-            if let ServiceMessage::NewUdpLink(a) = msg {
-                return Some(a);
-            }
-        }
-        None
-    }
-    async fn service(
-        socket: Arc<UdpSocket>,
-        link: DoubleChannel<ServiceMessage>,
-        lt: LifetimeTree,
-    ) {
-        let mut conn_map = HashMap::new();
-        let mut data: [u8; 500] = [0; 500];
-        println!("Starting upd service on {:?}", socket.local_addr());
-        loop {
-            tokio::select! {
-                _ = lt.shutdown()=>{
-                    println!("Shuting down main Udp Service");
-                    break;
-                }
-                val = socket.recv_from(&mut data)=>{
-                   match val {
-                        Ok((len, addr)) => {
-                            Self::forward_message(socket.clone(), &data, len, addr, &mut conn_map, &link ,&lt);
-                        },
-                        Err(_) => {
-                            Self::handle_message_error();
-                        },
-                    }
-                }
-                val = link.rx().recv_async()=>{
-                    if let Ok(msg) = val{
-                        match msg{
-                            ServiceMessage::NewUdpLink(_) => panic!("Should note be receiveing this message here"),
-                            ServiceMessage::InitiateUdpLink(a) => Self::forward_message(socket.clone(), &data, 1, a, &mut conn_map, &link, &lt),
-                        }
-                    }
-                }
-            }
-        }
-    }
-    fn forward_message(
-        socket: Arc<UdpSocket>,
-        data: &[u8; 500],
-        len: usize,
-        addr: SocketAddr,
-        conn_map: &mut HashMap<SocketAddr, flume::Sender<(usize, [u8; 500])>>,
-        service_link: &DoubleChannel<ServiceMessage>,
-        lt: &LifetimeTree,
-    ) {
-        if let Some(link) = conn_map.get(&addr) {
-            if let Err(_) = link.send((len, data.clone())) {
-                conn_map.remove(&addr);
-            }
-        } else {
-            let (tx, rx) = flume::unbounded();
-            tx.send((len, data.clone())).unwrap();
-            let (l, r) = DoubleChannel::new();
-            tokio::spawn(Self::start_upd_link(
-                socket.clone(),
-                rx,
-                addr.clone(),
-                l,
-                lt.child_from_tree(),
-            ));
-            conn_map.insert(addr, tx);
-            service_link
-                .tx()
-                .send(ServiceMessage::NewUdpLink(r))
-                .expect("Service link is broken");
-        }
-    }
-    fn handle_message_error() {}
-    async fn start_upd_link(
-        socket: Arc<UdpSocket>,
-        link: flume::Receiver<(usize, [u8; 500])>,
-        addr: SocketAddr,
-        dst: DoubleChannel<(usize, [u8; 500])>,
-        lt: LifetimeTree,
-    ) {
-        println!("Starting new upd link with addr {}", addr);
-        loop {
-            tokio::select! {
-                _ = lt.shutdown()=>{
-                    break;
-                }
-                val = link.recv_async()=>{
-                    if let Ok((len,bytes)) = val{
-                        println!("Message from {}: {:?}",addr, &bytes[..len]);
-                        dst.tx().send((len,bytes)).expect("Udp link has no dst");
-                    }
-                }
-                val = dst.rx().recv_async()=>{
-                    if let Ok((len, bytes)) = val{
-                        println!("Sending data to {}: {:?}",addr, &bytes[..len]);
-                        socket.send_to(&bytes[..len], addr).await.expect("Could not send udp packet");
-                    }
-                }
-            }
-        }
-        println!("Shuting down Udp connection to {}", addr);
-    }
-}
 
 //Revision 2
 //The cluster terminal is the main interface to a connected terminal.
@@ -320,28 +73,31 @@ pub struct ClusterTerminal {
 //This is also used for internal Terminal messages such as the shutdown command
 pub enum TerminalMessage {
     NewNode,
+    NewNodeInfo(SocketAddr),
     KeepAlive,
     Terminate,
-    Data([u8;499])
+    Data([u8;499]),
 }
 pub struct CommGroup {}
 pub struct CommPort {}
+#[derive(Clone)]
 pub struct TerminateSignal{
     channel: (flume::Sender<bool>, flume::Receiver<bool>),
 }
 #[derive(Clone)]
 pub struct TerminalAddressMap{
-    active_connections: Arc<RwLock<HashMap<SocketAddr,Arc<TerminalConnection>>>>
+    active_connections: Arc<RwLock<HashMap<SocketAddr,TerminalConnection>>>
 }
 #[derive(Clone)]
 pub struct TerminalConnection{
     addr: SocketAddr,
     socket: SocketHandler,
+    terminal_map: TerminalAddressMap,
+    life: Arc<TerminateSignal>
 }
 #[derive(Clone)]
 pub struct SocketHandler{
     socket: Arc<UdpSocket>,
-    home_addr: SocketAddr,
 }
 type SocketMessage = (usize,[u8;500],SocketAddr);
             
@@ -355,40 +111,49 @@ impl ClusterTerminal{
         let socket = SocketHandler::new(socket_addr, rt.clone());
         let root_terminate = TerminateSignal::new();
         rt.spawn(Self::udp_listener(socket.clone(), root_terminate.subscribe()));
-        rt.block_on(socket.send(socket_addr, TerminalMessage::NewNode.to_transfer()));
-        rt.block_on(socket.send(socket_addr, TerminalMessage::KeepAlive.to_transfer()));
-        rt.block_on(socket.send(socket_addr, TerminalMessage::Data([66;499]).to_transfer()));
+        println!("Starting new cluster terminal on address {}", socket.local_address());
         ClusterTerminal { rt, socket, network_terminate: root_terminate}
         
     }
+    pub fn address(&self) -> SocketAddr {
+        self.socket.local_address()
+    }
     async fn udp_listener(socket: SocketHandler, terminate: TerminateSignal){
         //Upon receiving a message 
-        let mut data = [0; 500];
         let conns = TerminalAddressMap::new();
         loop {
             tokio::select!{
                 _ = terminate.terminated()=>{println!("Terminating udp listener");break;}
                 mesg = socket.receive()=>{
-                    let src_terminal = conns.get_connection(mesg.2.clone(), &socket).await;
-                    src_terminal.receive(mesg);
+                    tokio::spawn(TerminalAddressMap::handle_message(conns.clone(), mesg, socket.clone()));
                 }
             }
         }
+    }
+    pub fn join_cluster(&self, addr: SocketAddr){
+        self.rt.block_on(self.socket.send(addr, TerminalMessage::NewNode.to_transfer()));
+    }
+    pub fn stop(self){
+        drop(self.network_terminate);
     }
 }
 impl TerminalAddressMap{
     fn new() -> TerminalAddressMap {
         TerminalAddressMap{ active_connections: Arc::new(RwLock::new(HashMap::new())) }
     }
-    async fn get_connection(&self, addr: SocketAddr, socket:&SocketHandler) -> Arc<TerminalConnection> {
-        let read = self.active_connections.read().await;
+    async fn handle_message(map: TerminalAddressMap, message: SocketMessage, socket: SocketHandler){
+        let src_terminal = Self::get_connection(map.clone(),message.2.clone(), socket.clone()).await;
+        src_terminal.receive(message);
+    }
+    async fn get_connection(map: TerminalAddressMap, addr: SocketAddr, socket:SocketHandler) -> TerminalConnection {
+        let read = map.active_connections.read().await;
         if let Some(tdata) = read.get(&addr){
             tdata.clone()
         }
         else{
             drop(read);
-            let mut write = self.active_connections.write().await;
-            let tdata = Arc::new(TerminalConnection::new(addr, socket.clone()));
+            let mut write = map.active_connections.write().await;
+            let tdata = TerminalConnection::new(map.clone(), addr, socket.clone());
             if let Some(_) = write.insert(addr.clone(), tdata.clone()){
                 panic!("Inserting new terminal connection where there already is one of the same addr");
             };
@@ -397,23 +162,63 @@ impl TerminalAddressMap{
     }
 }
 impl TerminalConnection{
-    fn new(addr: SocketAddr, socket: SocketHandler) -> Self{
+    fn new(map: TerminalAddressMap, addr: SocketAddr, socket: SocketHandler) -> Self{
         println!("Managing new terminal connection from: {}", addr);
-        TerminalConnection{addr,socket}
+        let lt = TerminateSignal::new();
+        let terminal = TerminalConnection{addr,socket, life: Arc::new(lt), terminal_map: map };
+        tokio::spawn(Self::keep_alive(terminal.clone()));
+        terminal
     }
     fn receive(&self, message: SocketMessage){
-        println!("Processing message of length {} from terminal {}",message.0,message.2);
-        let len = message.0;
         let ptr = &message.1 as *const u8;
         let data = unsafe{from_raw_parts(ptr as *const TerminalMessage,1)[0].clone()};
-        println!("Message is {:?}",data);
+        match data{
+            TerminalMessage::NewNode => {
+                println!("Received new node from {}", self.addr);
+                tokio::spawn(Self::new_node_dialog(self.clone()));
+            },
+            TerminalMessage::KeepAlive => {
+                println!("Received keep alive from {}", self.addr);
+            },
+            TerminalMessage::Terminate => todo!(),
+            TerminalMessage::Data(_) => todo!(),
+            TerminalMessage::NewNodeInfo(addr) => {
+                if addr != self.socket.local_address(){
+                    println!("Recieved new node dialog message from {} informing of other node {}",self.addr,addr);
+                    tokio::spawn(TerminalAddressMap::get_connection(self.terminal_map.clone(), addr, self.socket.clone()));
+                }
+            },
+        }
         
+    }
+    async fn new_node_dialog(tgt: TerminalConnection){
+        let other_terminals = tgt.terminal_map.active_connections.read().await;
+        let other_terminals:Vec<TerminalConnection> = other_terminals.values().map(|t| t.clone()).collect();
+        for other in other_terminals.iter(){
+            tgt.socket.send(tgt.addr, TerminalMessage::NewNodeInfo(other.addr).to_transfer()).await;
+        }
+    }
+    //This task will provide keep alive functionality as well as send the terminate connection signal
+    //Turn all access to a Terminal Connection into an Arc access. If the keep_alive system timesout
+    //we pull the terminal connection from the hashmap. Doing so will also end the root lifetime for
+    //all of its child tasks.
+    async fn keep_alive(tgt: TerminalConnection){
+        let life = tgt.life.subscribe();
+        //We just need to send a keep alive enum every so often
+        loop{
+            tokio::select!{
+                _ = life.terminated()=>{}
+                _ = sleep(Duration::from_millis(1000))=>{
+                    tgt.socket.send(tgt.addr,TerminalMessage::KeepAlive.to_transfer()).await;
+                }
+            }
+        }
     }
 }
 impl SocketHandler{
     fn new(socket_addr: SocketAddr, rt: Arc<Runtime>) -> SocketHandler {
         let socket = rt.block_on(UdpSocket::bind(socket_addr)).unwrap();
-        SocketHandler{ socket: Arc::new(socket), home_addr: socket_addr }
+        SocketHandler{ socket: Arc::new(socket) }
     }
     async fn receive(&self) -> SocketMessage{
         let mut data = [0;500];
@@ -426,6 +231,9 @@ impl SocketHandler{
     }
     async fn send(&self, tgt: SocketAddr, data:&[u8]){
         self.socket.send_to(data,tgt).await.unwrap();
+    }
+    fn local_address(&self) -> SocketAddr {
+        self.socket.local_addr().unwrap()
     }
 }
 impl Transferable for TerminalMessage{
@@ -445,6 +253,6 @@ impl TerminateSignal{
         TerminateSignal{ channel: (tx,rx) }
     }
     async fn terminated(&self){
-        self.channel.1.recv_async().await;
+        let _ = self.channel.1.recv_async().await;
     }
 }

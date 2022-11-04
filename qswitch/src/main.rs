@@ -1,29 +1,22 @@
-use qforce::engine;
-use quniverse::Universe;
-use std::net::{SocketAddr, ToSocketAddrs};
-use winit;
+use clap::Parser;
 use qserver::ClusterTerminal;
-fn main() {
-    let (evtloop, engine) = engine::new_windowed();
-    engine.hello_window();
-    let mut swapchain = engine.get_swapchain(None);
-    let terminal = ClusterTerminal::new("127.0.0.1:8080".to_socket_addrs().unwrap().last().unwrap());
+use std::net::{SocketAddr, ToSocketAddrs, IpAddr, Ipv4Addr};
+use local_ip_address::local_ip;
 
-    evtloop.run(move |event, _, control_flow| {
-        *control_flow = winit::event_loop::ControlFlow::Poll;
-        match event {
-            winit::event::Event::WindowEvent { window_id, event } => match event {
-                winit::event::WindowEvent::Resized(_) => {
-                    swapchain = engine.get_swapchain(Some(&swapchain));
-                }
-                winit::event::WindowEvent::CloseRequested => {
-                    *control_flow = winit::event_loop::ControlFlow::Exit;
-                },
-                _ => {}
-            },
-            winit::event::Event::MainEventsCleared => {
-            },
-            _ => {}
-        }
-    });
+#[derive(Parser, Debug)]
+struct Arg {
+    //Target cluster address
+    #[arg(short)]
+    target: String,
+}
+fn main() {
+    let args = Arg::try_parse();
+    let ip = local_ip().unwrap();
+    let port = 0;
+    let addr = SocketAddr::new(ip, port);
+    let t1 = ClusterTerminal::new(addr);
+    if let Ok(arg) = args{
+        t1.join_cluster(arg.target.to_socket_addrs().unwrap().last().unwrap());
+    }
+    loop {}
 }

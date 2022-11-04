@@ -7,7 +7,7 @@ use qforce::{
     data::Vector,
     engine::{self, Engine},
 };
-use qserver::{self, UdpServiceListener};
+use qserver::{self, ClusterTerminal};
 use qvk::{self, init::Initializer};
 use rand::{Rng, SeedableRng};
 use rand_xoshiro::Xoshiro256Plus;
@@ -45,7 +45,7 @@ pub struct Universe {
     rt: Runtime,
     engine: Engine<Initializer>,
     threadpool: ThreadPool,
-    udp_server: UdpServiceListener,
+    udp_server: ClusterTerminal,
     rng: Xoshiro256Plus,
     galaxy: Galaxy,
 }
@@ -59,7 +59,7 @@ impl Universe {
         let threadpool = ThreadPoolBuilder::new()
             .build()
             .expect("Could not start rayon threadpool");
-        let udp_server = UdpServiceListener::start(host_addr, &rt);
+        let udp_server = ClusterTerminal::new(host_addr);
         let mut rng = Xoshiro256Plus::seed_from_u64(1);
         let galaxy = match save_file {
             Some(n) => todo!(),
