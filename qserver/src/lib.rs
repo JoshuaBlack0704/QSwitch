@@ -1,11 +1,9 @@
-use std::{collections::HashMap, mem::size_of, net::SocketAddr, sync::Arc, slice::from_raw_parts, time::Duration};
-
-use tokio::{
-    net::UdpSocket,
-    runtime::Runtime,
-    sync::RwLock, time::sleep,
+use std::{
+    collections::HashMap, mem::size_of, net::SocketAddr, slice::from_raw_parts, sync::Arc,
+    time::Duration,
 };
 
+use tokio::{net::UdpSocket, runtime::Runtime, sync::RwLock, time::sleep};
 
 //Revision 2
 //The cluster terminal is the main interface to a connected terminal.
@@ -51,7 +49,7 @@ use tokio::{
 //The main network system of the Cluster. By connecting multiple
 //of these together over a network we can build out a distributed
 //network cluster that, when combined with CommGroups is opaque to a user.
-pub trait Transferable{
+pub trait Transferable {
     fn to_transfer(&self) -> &[u8];
 }
 pub struct ClusterTerminal {
@@ -68,7 +66,7 @@ pub struct ClusterTerminal {
     //if there is. Then it will start an new commgroup dialog with the
     //other terminals so they also add them to their sets.
 }
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 //This is the base message that all terminals send to each other.
 //This is also used for internal Terminal messages such as the shutdown command
 pub enum TerminalMessage {
@@ -76,53 +74,60 @@ pub enum TerminalMessage {
     NewNodeInfo(SocketAddr),
     KeepAlive,
     Terminate,
-    Data([u8;499]),
+    Data([u8; 499]),
 }
 pub struct CommGroup {}
 pub struct CommPort {}
 #[derive(Clone)]
-pub struct TerminateSignal{
+pub struct TerminateSignal {
     channel: (flume::Sender<bool>, flume::Receiver<bool>),
 }
 #[derive(Clone)]
-pub struct TerminalAddressMap{
-    active_connections: Arc<RwLock<HashMap<SocketAddr,TerminalConnection>>>
+pub struct TerminalAddressMap {
+    active_connections: Arc<RwLock<HashMap<SocketAddr, TerminalConnection>>>,
 }
 #[derive(Clone)]
-pub struct TerminalConnection{
+pub struct TerminalConnection {
     addr: SocketAddr,
     socket: SocketHandler,
     terminal_map: TerminalAddressMap,
-    life: Arc<TerminateSignal>
+    life: Arc<TerminateSignal>,
 }
 #[derive(Clone)]
-pub struct SocketHandler{
+pub struct SocketHandler {
     socket: Arc<UdpSocket>,
 }
-type SocketMessage = (usize,[u8;500],SocketAddr);
-            
+type SocketMessage = (usize, [u8; 500], SocketAddr);
 
-
-impl ClusterTerminal{
+impl ClusterTerminal {
     //Starts the network system and returns the ClusterTerminal object.
     //Which is essentially an interface to the running network async tasks.
-    pub fn new(socket_addr: SocketAddr) -> Self{
+    pub fn new(socket_addr: SocketAddr) -> Self {
         let rt = Arc::new(Runtime::new().unwrap());
         let socket = SocketHandler::new(socket_addr, rt.clone());
         let root_terminate = TerminateSignal::new();
-        rt.spawn(Self::udp_listener(socket.clone(), root_terminate.subscribe()));
-        println!("Starting new cluster terminal on address {}", socket.local_address());
-        ClusterTerminal { rt, socket, network_terminate: root_terminate}
-        
+        rt.spawn(Self::udp_listener(
+            socket.clone(),
+            root_terminate.subscribe(),
+        ));
+        println!(
+            "Starting new cluster terminal on address {}",
+            socket.local_address()
+        );
+        ClusterTerminal {
+            rt,
+            socket,
+            network_terminate: root_terminate,
+        }
     }
     pub fn address(&self) -> SocketAddr {
         self.socket.local_address()
     }
-    async fn udp_listener(socket: SocketHandler, terminate: TerminateSignal){
-        //Upon receiving a message 
+    async fn udp_listener(socket: SocketHandler, terminate: TerminateSignal) {
+        //Upon receiving a message
         let conns = TerminalAddressMap::new();
         loop {
-            tokio::select!{
+            tokio::select! {
                 _ = terminate.terminated()=>{println!("Terminating udp listener");break;}
                 mesg = socket.receive()=>{
                     tokio::spawn(TerminalAddressMap::handle_message(conns.clone(), mesg, socket.clone()));
@@ -130,83 +135,115 @@ impl ClusterTerminal{
             }
         }
     }
-    pub fn join_cluster(&self, addr: SocketAddr){
-        self.rt.block_on(self.socket.send(addr, TerminalMessage::NewNode.to_transfer()));
+    pub fn join_cluster(&self, addr: SocketAddr) {
+        self.rt.block_on(
+            self.socket
+                .send(addr, TerminalMessage::NewNode.to_transfer()),
+        );
     }
-    pub fn stop(self){
+    pub fn stop(self) {
         drop(self.network_terminate);
     }
 }
-impl TerminalAddressMap{
+impl TerminalAddressMap {
     fn new() -> TerminalAddressMap {
-        TerminalAddressMap{ active_connections: Arc::new(RwLock::new(HashMap::new())) }
+        TerminalAddressMap {
+            active_connections: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
-    async fn handle_message(map: TerminalAddressMap, message: SocketMessage, socket: SocketHandler){
-        let src_terminal = Self::get_connection(map.clone(),message.2.clone(), socket.clone()).await;
+    async fn handle_message(
+        map: TerminalAddressMap,
+        message: SocketMessage,
+        socket: SocketHandler,
+    ) {
+        let src_terminal =
+            Self::get_connection(map.clone(), message.2.clone(), socket.clone()).await;
         src_terminal.receive(message);
     }
-    async fn get_connection(map: TerminalAddressMap, addr: SocketAddr, socket:SocketHandler) -> TerminalConnection {
+    async fn get_connection(
+        map: TerminalAddressMap,
+        addr: SocketAddr,
+        socket: SocketHandler,
+    ) -> TerminalConnection {
         let read = map.active_connections.read().await;
-        if let Some(tdata) = read.get(&addr){
+        if let Some(tdata) = read.get(&addr) {
             tdata.clone()
-        }
-        else{
+        } else {
             drop(read);
             let mut write = map.active_connections.write().await;
             let tdata = TerminalConnection::new(map.clone(), addr, socket.clone());
-            if let Some(_) = write.insert(addr.clone(), tdata.clone()){
-                panic!("Inserting new terminal connection where there already is one of the same addr");
+            if let Some(_) = write.insert(addr.clone(), tdata.clone()) {
+                panic!(
+                    "Inserting new terminal connection where there already is one of the same addr"
+                );
             };
             tdata
         }
     }
 }
-impl TerminalConnection{
-    fn new(map: TerminalAddressMap, addr: SocketAddr, socket: SocketHandler) -> Self{
+impl TerminalConnection {
+    fn new(map: TerminalAddressMap, addr: SocketAddr, socket: SocketHandler) -> Self {
         println!("Managing new terminal connection from: {}", addr);
         let lt = TerminateSignal::new();
-        let terminal = TerminalConnection{addr,socket, life: Arc::new(lt), terminal_map: map };
+        let terminal = TerminalConnection {
+            addr,
+            socket,
+            life: Arc::new(lt),
+            terminal_map: map,
+        };
         tokio::spawn(Self::keep_alive(terminal.clone()));
         terminal
     }
-    fn receive(&self, message: SocketMessage){
+    fn receive(&self, message: SocketMessage) {
         let ptr = &message.1 as *const u8;
-        let data = unsafe{from_raw_parts(ptr as *const TerminalMessage,1)[0].clone()};
-        match data{
+        let data = unsafe { from_raw_parts(ptr as *const TerminalMessage, 1)[0].clone() };
+        match data {
             TerminalMessage::NewNode => {
                 println!("Received new node from {}", self.addr);
                 tokio::spawn(Self::new_node_dialog(self.clone()));
-            },
+            }
             TerminalMessage::KeepAlive => {
                 println!("Received keep alive from {}", self.addr);
-            },
+            }
             TerminalMessage::Terminate => todo!(),
             TerminalMessage::Data(_) => todo!(),
             TerminalMessage::NewNodeInfo(addr) => {
-                if addr != self.socket.local_address(){
-                    println!("Recieved new node dialog message from {} informing of other node {}",self.addr,addr);
-                    tokio::spawn(TerminalAddressMap::get_connection(self.terminal_map.clone(), addr, self.socket.clone()));
+                if addr != self.socket.local_address() {
+                    println!(
+                        "Recieved new node dialog message from {} informing of other node {}",
+                        self.addr, addr
+                    );
+                    tokio::spawn(TerminalAddressMap::get_connection(
+                        self.terminal_map.clone(),
+                        addr,
+                        self.socket.clone(),
+                    ));
                 }
-            },
+            }
         }
-        
     }
-    async fn new_node_dialog(tgt: TerminalConnection){
+    async fn new_node_dialog(tgt: TerminalConnection) {
         let other_terminals = tgt.terminal_map.active_connections.read().await;
-        let other_terminals:Vec<TerminalConnection> = other_terminals.values().map(|t| t.clone()).collect();
-        for other in other_terminals.iter(){
-            tgt.socket.send(tgt.addr, TerminalMessage::NewNodeInfo(other.addr).to_transfer()).await;
+        let other_terminals: Vec<TerminalConnection> =
+            other_terminals.values().map(|t| t.clone()).collect();
+        for other in other_terminals.iter() {
+            tgt.socket
+                .send(
+                    tgt.addr,
+                    TerminalMessage::NewNodeInfo(other.addr).to_transfer(),
+                )
+                .await;
         }
     }
     //This task will provide keep alive functionality as well as send the terminate connection signal
     //Turn all access to a Terminal Connection into an Arc access. If the keep_alive system timesout
     //we pull the terminal connection from the hashmap. Doing so will also end the root lifetime for
     //all of its child tasks.
-    async fn keep_alive(tgt: TerminalConnection){
+    async fn keep_alive(tgt: TerminalConnection) {
         let life = tgt.life.subscribe();
         //We just need to send a keep alive enum every so often
-        loop{
-            tokio::select!{
+        loop {
+            tokio::select! {
                 _ = life.terminated()=>{}
                 _ = sleep(Duration::from_millis(1000))=>{
                     tgt.socket.send(tgt.addr,TerminalMessage::KeepAlive.to_transfer()).await;
@@ -215,44 +252,48 @@ impl TerminalConnection{
         }
     }
 }
-impl SocketHandler{
+impl SocketHandler {
     fn new(socket_addr: SocketAddr, rt: Arc<Runtime>) -> SocketHandler {
         let socket = rt.block_on(UdpSocket::bind(socket_addr)).unwrap();
-        SocketHandler{ socket: Arc::new(socket) }
+        SocketHandler {
+            socket: Arc::new(socket),
+        }
     }
-    async fn receive(&self) -> SocketMessage{
-        let mut data = [0;500];
-        loop{
-            if let Ok((len,addr)) = self.socket.recv_from(&mut data).await{
-                return (len,data,addr);
+    async fn receive(&self) -> SocketMessage {
+        let mut data = [0; 500];
+        loop {
+            if let Ok((len, addr)) = self.socket.recv_from(&mut data).await {
+                return (len, data, addr);
             }
         }
-        
     }
-    async fn send(&self, tgt: SocketAddr, data:&[u8]){
-        self.socket.send_to(data,tgt).await.unwrap();
+    async fn send(&self, tgt: SocketAddr, data: &[u8]) {
+        println!("Sending message to tgt {}", tgt);
+        self.socket.send_to(data, tgt).await.unwrap();
     }
     fn local_address(&self) -> SocketAddr {
         self.socket.local_addr().unwrap()
     }
 }
-impl Transferable for TerminalMessage{
+impl Transferable for TerminalMessage {
     fn to_transfer(&self) -> &[u8] {
         let ptr = self as *const Self;
-        let data = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>())};
+        let data = unsafe { std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>()) };
         data
     }
 }
-impl TerminateSignal{
+impl TerminateSignal {
     fn new() -> TerminateSignal {
-        TerminateSignal{ channel: flume::bounded(1) }
+        TerminateSignal {
+            channel: flume::bounded(1),
+        }
     }
     fn subscribe(&self) -> TerminateSignal {
         let rx = self.channel.1.clone();
         let tx = flume::bounded(1).0;
-        TerminateSignal{ channel: (tx,rx) }
+        TerminateSignal { channel: (tx, rx) }
     }
-    async fn terminated(&self){
+    async fn terminated(&self) {
         let _ = self.channel.1.recv_async().await;
     }
 }
