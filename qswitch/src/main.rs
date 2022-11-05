@@ -17,6 +17,7 @@ fn main() {
     let t1 = ClusterTerminal::new(addr);
     if let Ok(arg) = args{
         t1.join_cluster(arg.target.to_socket_addrs().unwrap().last().unwrap());
+        t1.comm_group_test(arg.target.to_socket_addrs().unwrap().last().unwrap());
     }
     loop {}
 }
