@@ -74,6 +74,7 @@ pub struct ClusterTerminal {
     //other terminals so they also add them to their sets.
 }
 #[derive(Clone, Debug)]
+#[repr(C)]
 //This is the base message that all terminals send to each other.
 //This is also used for internal Terminal messages such as the shutdown command
 pub enum TerminalMessage {
