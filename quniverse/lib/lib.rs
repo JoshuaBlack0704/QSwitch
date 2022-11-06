@@ -59,7 +59,7 @@ impl Universe {
         let threadpool = ThreadPoolBuilder::new()
             .build()
             .expect("Could not start rayon threadpool");
-        let udp_server = ClusterTerminal::new(host_addr);
+        let udp_server = ClusterTerminal::new(host_addr, true);
         let mut rng = Xoshiro256Plus::seed_from_u64(1);
         let galaxy = match save_file {
             Some(n) => todo!(),

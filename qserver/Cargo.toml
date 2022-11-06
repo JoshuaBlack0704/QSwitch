@@ -9,6 +9,7 @@ path = "src/lib.rs"
 
 [dependencies]
 tokio = {version = "1.21.2", features = ["full"]}
+tokio-stream = "0.1.11"
 flume = "0.10.14"
 bytes = "1.2.1"
 async-trait = "0.1.57"

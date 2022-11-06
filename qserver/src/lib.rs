@@ -3,7 +3,12 @@ use std::{
     time::Duration,
 };
 
-use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard}, time::{sleep, Instant}};
+use tokio::{
+    net::UdpSocket,
+    runtime::Runtime,
+    sync::RwLock,
+    time::{sleep, Instant},
+};
 
 //Revision 2
 //The cluster terminal is the main interface to a connected terminal.
@@ -55,9 +60,11 @@ pub trait Transferable {
 pub struct ClusterTerminal {
     //The main runtime used by all network systems
     rt: Arc<Runtime>,
+    public: bool,
     //The line of communication with the active network main task
     socket: SocketHandler,
     network_terminate: TerminateSignal,
+    terminal_map: TerminalAddressMap,
     //the set of open comm groups
     //NOTE: If a terminal creates a new comgroup it will randomly generate a new ID
     //instead of selecting the next index in case another terminal
@@ -70,11 +77,10 @@ pub struct ClusterTerminal {
 //This is the base message that all terminals send to each other.
 //This is also used for internal Terminal messages such as the shutdown command
 pub enum TerminalMessage {
-    NewNode,
-    NewNodeInfo(SocketAddr),
-    KeepAlive,
-    Terminate,
-    Data(usize,usize,[u8;483]),
+    //Bool tells if this is a public terminal
+    KeepAlive(bool),
+    //
+    ClusterNodeAddr(SocketAddr)
 }
 pub struct CommGroup {}
 pub struct CommPort {}
@@ -86,7 +92,11 @@ pub struct TerminateSignal {
 pub struct TerminalAddressMap {
     active_connections: Arc<RwLock<HashMap<SocketAddr, Arc<RwLock<TerminalConnection>>>>>,
 }
+//Represents a connection to another machine
+//A target of messages
+//Implicitly carries lifetime information, so can't be cloned
 pub struct TerminalConnection {
+    is_public: bool,
     addr: SocketAddr,
     socket: SocketHandler,
     terminal_map: TerminalAddressMap,
@@ -102,52 +112,54 @@ type SocketMessage = (usize, [u8; 576], SocketAddr);
 impl ClusterTerminal {
     //Starts the network system and returns the ClusterTerminal object.
     //Which is essentially an interface to the running network async tasks.
-    pub fn new(socket_addr: SocketAddr) -> Self {
+    pub fn new(socket_addr: SocketAddr, public: bool) -> Self {
         let rt = Arc::new(Runtime::new().unwrap());
         let socket = SocketHandler::new(socket_addr, rt.clone());
         let root_terminate = TerminateSignal::new();
+        let terminal_map = TerminalAddressMap::new();
         rt.spawn(Self::udp_listener(
+            terminal_map.clone(),
             socket.clone(),
             root_terminate.subscribe(),
+            public,
         ));
         println!(
-            "Starting new cluster terminal on address {}",
+            "Starting new public:{} cluster terminal on address {}",
+            public,
             socket.local_address()
         );
         ClusterTerminal {
             rt,
             socket,
             network_terminate: root_terminate,
+            terminal_map,
+            public,
         }
     }
     pub fn address(&self) -> SocketAddr {
         self.socket.local_address()
     }
-    async fn udp_listener(socket: SocketHandler, terminate: TerminateSignal) {
+    async fn udp_listener(terminal_map: TerminalAddressMap, socket: SocketHandler, terminate: TerminateSignal, public: bool) {
         //Upon receiving a message
-        let conns = TerminalAddressMap::new();
         loop {
             tokio::select! {
                 _ = terminate.terminated()=>{println!("Terminating udp listener");break;}
                 mesg = socket.receive()=>{
-                    tokio::spawn(TerminalConnection::receive(conns.clone(), mesg, socket.clone()));
+                    tokio::spawn(TerminalConnection::receive(terminal_map.clone(), mesg.clone(), socket.clone(), public));
                 }
             }
         }
     }
-    pub fn join_cluster(&self, addr: SocketAddr) {
-        self.rt.block_on(
-            self.socket
-                .send(addr, TerminalMessage::NewNode.to_transfer()),
-        );
+    //Will attempt to join a cluster. Whether we want to be discoverable to other machines is given by public
+    pub fn join_cluster(&self, tgt: SocketAddr){
+        self.rt.spawn(TerminalConnection::connect_to(self.terminal_map.clone(), tgt, self.socket.clone(), self.public));
     }
-    pub fn comm_group_test(&self, addr: SocketAddr){
-        self.rt.block_on(
-            self.socket
-                .send(addr, TerminalMessage::Data(1, 2, [60;483]).to_transfer()),
-        );
-        
-    }
+    // pub fn comm_group_test(&self, addr: SocketAddr) {
+    //     self.rt.block_on(
+    //         self.socket
+    //             .send(addr, TerminalMessage::Data(1, 2, [60; 483]).to_transfer()),
+    //     );
+    // }
     pub fn stop(self) {
         drop(self.network_terminate);
     }
@@ -158,114 +170,135 @@ impl TerminalAddressMap {
             active_connections: Arc::new(RwLock::new(HashMap::new())),
         }
     }
-    async fn remove_connection(map: TerminalAddressMap, addr: SocketAddr){
+    async fn remove_connection(map: TerminalAddressMap, addr: SocketAddr) {
         let mut writer = map.active_connections.write().await;
         writer.remove(&addr);
     }
-    async fn get_connection(
-        map: TerminalAddressMap,
-        addr: SocketAddr,
-        socket: SocketHandler,
-    ) -> Arc<RwLock<TerminalConnection>> {
-        let read = map.active_connections.read().await;
-        if let Some(tdata) = read.get(&addr) {
-            tdata.clone()
-        } else {
-            drop(read);
-            let mut write = map.active_connections.write().await;
-            if let Some(tdata) = write.get(&addr){
-                tdata.clone()
+    //Will either get a connection or add and return a new connections if one does not yet exists for the addr provided
+    async fn add(terminal_map: TerminalAddressMap, terminal_addr: SocketAddr, new_terminal: Arc<RwLock<TerminalConnection>>){
+        //We must first notify the new terminal of all known public terminals, then notify all known private terminals of this new one    
+        //if its public
+        let mut terminal_map = terminal_map.active_connections.write().await;
+        if let None = terminal_map.get(&terminal_addr){
+            {
+                let new_terminal = new_terminal.read().await;
+                for known_terminal in terminal_map.values(){
+                    let known_terminal = known_terminal.read().await;
+                    //Notifiing the new terminal of all known public terminals
+                    if known_terminal.is_public{
+                        new_terminal.socket.send(new_terminal.addr, TerminalMessage::ClusterNodeAddr(known_terminal.addr).to_transfer()).await;
+                    }
+                    else if new_terminal.is_public{
+                        //Notifiying all known private terminals of the new public one
+                        known_terminal.socket.send(known_terminal.addr, TerminalMessage::ClusterNodeAddr(new_terminal.addr).to_transfer()).await;
+                    }
+                }
             }
-            else{
-            let tdata = TerminalConnection::new(map.clone(), addr, socket.clone());
-            if let Some(_) = write.insert(addr.clone(), tdata.clone()) {
-                panic!(
-                    "Inserting new terminal connection where there already is one of the same addr"
-                );
-            };
-            tdata
-                
-            }
-        }
-    }
-    async fn try_get_connection(map: TerminalAddressMap, addr: SocketAddr) -> Option<Arc<RwLock<TerminalConnection>>> {
-        let read = map.active_connections.read().await;
-        if let Some(tdata) = read.get(&addr){
-            Some(tdata.clone())
+            terminal_map.insert(terminal_addr, new_terminal.clone());
         }
         else{
+            println!("Attempting to add already existing terminal connection");
+        }
+    }
+    
+    //Try's to get an exisiting connection
+    async fn try_get(
+        map: TerminalAddressMap,
+        addr: SocketAddr,
+    ) -> Option<Arc<RwLock<TerminalConnection>>> {
+        let read = map.active_connections.read().await;
+        if let Some(tdata) = read.get(&addr) {
+            Some(tdata.clone())
+        } else {
             None
         }
-            
+    }
+    //Will wait for the terminal from addr to be added to the map up until timout_millis has passed
+    async fn wait_get(map: TerminalAddressMap, addr: SocketAddr, timeout_millis: u32) -> Option<Arc<RwLock<TerminalConnection>>>  {
+        let mut time_spent = 0;
+        loop{
+            {
+            let read = map.active_connections.read().await;
+            if let Some(terminal) = read.get(&addr){
+                return Some(terminal.clone());
+            }
+            }
+            sleep(Duration::from_millis(1000)).await;
+            time_spent += 1000;
+            if time_spent > timeout_millis{
+                return None;
+            }
+        }
     }
 }
 impl TerminalConnection {
-    fn new(map: TerminalAddressMap, addr: SocketAddr, socket: SocketHandler) -> Arc<RwLock<TerminalConnection>> {
-        println!("Managing new terminal connection from: {}", addr);
-        let lt = TerminateSignal::new();
-        let terminal = Arc::new(RwLock::new(TerminalConnection {
-            addr,
-            socket,
-            terminal_map: map,
-            keep_alive_time: Instant::now(),
-            life: Arc::new(lt),
-        }));
-        tokio::spawn(Self::keep_alive(terminal.clone()));
-        terminal
-    }
-    async fn receive(map: TerminalAddressMap, message: SocketMessage, socket: SocketHandler) {
-        let tgt = TerminalAddressMap::get_connection(map,message.2,socket).await;
-        let mut writer = tgt.write().await;
-        let ptr = &message.1 as *const u8;
-        let data = unsafe { from_raw_parts(ptr as *const TerminalMessage, 1)[0].clone() };
-        match data {
-            TerminalMessage::NewNode => {
-                println!("Received new node from {}", writer.addr);
-                tokio::spawn(Self::new_node_dialog(tgt.clone()));
-            }
-            TerminalMessage::KeepAlive => {
-                println!("Received keep alive from {}", writer.addr);
-                writer.keep_alive_time = Instant::now();
-            }
-            TerminalMessage::Terminate => todo!(),
-            TerminalMessage::Data(comm_group,port,_) => {
-                println!("Comm Group Message for {} x {}", comm_group, port);
-                
-            },
-            TerminalMessage::NewNodeInfo(addr) => {
-                if addr != writer.socket.local_address() {
-                    println!(
-                        "Recieved new node dialog message from {} informing of other node {}",
-                        writer.addr, addr
-                    );
-                    tokio::spawn(TerminalAddressMap::get_connection(
-                        writer.terminal_map.clone(),
-                        addr,
-                        writer.socket.clone(),
-                    ));
-                }
-            }
+    async fn connect_to(terminal_map: TerminalAddressMap, tgt_addr: SocketAddr, socket: SocketHandler, public: bool) -> Arc<RwLock<TerminalConnection>> {
+        if let Some(tgt) = TerminalAddressMap::try_get(terminal_map.clone(), tgt_addr).await{
+            tgt
+        }
+        else{
+            println!("Connecting to public:{} terminal {}", true, tgt_addr);
+            let lt = Arc::new(TerminateSignal::new());
+            //If we are connecting to something then it must be public.
+            //Private terminals can ONLY start connections not receive them
+            let tgt = TerminalConnection{ 
+                is_public: true,
+                addr: tgt_addr,
+                socket,
+                terminal_map: terminal_map.clone(),
+                keep_alive_time: Instant::now(),
+                life: lt };
+            let tgt = Arc::new(RwLock::new(tgt));
+            TerminalAddressMap::add(terminal_map, tgt_addr, tgt.clone()).await;
+            tokio::spawn(Self::keep_alive(tgt.clone(), public));
+            tgt
         }
     }
-    async fn new_node_dialog(tgt: Arc<RwLock<TerminalConnection>>) {
-        let tgt = tgt.read().await;
-        let other_terminals = tgt.terminal_map.active_connections.read().await;
-        let other_terminals: Vec<Arc<RwLock<TerminalConnection>>> =
-            other_terminals.values().map(|t| t.clone()).collect();
-        for other in other_terminals.iter() {
-            tgt.socket
-                .send(
-                    tgt.addr,
-                    TerminalMessage::NewNodeInfo(other.read().await.addr).to_transfer(),
-                )
-                .await;
+    async fn connect_from(terminal_map: TerminalAddressMap, tgt_addr: SocketAddr, socket: SocketHandler, public: bool) -> Arc<RwLock<TerminalConnection>> {
+        if let Some(tgt) = TerminalAddressMap::try_get(terminal_map.clone(), tgt_addr).await{
+            tgt
+        }
+        else{
+            println!("Connecting from public:{} terminal {}", public, tgt_addr);
+            let lt = Arc::new(TerminateSignal::new());
+            let tgt = TerminalConnection{ 
+                is_public: public,
+                addr: tgt_addr,
+                socket,
+                terminal_map: terminal_map.clone(),
+                keep_alive_time: Instant::now(),
+                life: lt };
+            let tgt = Arc::new(RwLock::new(tgt));
+            TerminalAddressMap::add(terminal_map, tgt_addr, tgt.clone()).await;
+            //Since we have RECIEVED a connection, we must be a public terminal
+            tokio::spawn(Self::keep_alive(tgt.clone(), true));
+            tgt
+        }
+    }
+    async fn receive(terminal_map: TerminalAddressMap, message: SocketMessage, socket: SocketHandler, public: bool) {
+        let data;
+        {
+            let ptr = &message.1 as *const u8;
+            data = unsafe { from_raw_parts(ptr as *const TerminalMessage, 1)[0].clone() };
+        }
+        match data {
+            TerminalMessage::KeepAlive(public) => {
+                println!("Recieved keep alive from public:{} terminal {}", public, message.2);
+                let terminal = TerminalConnection::connect_from(terminal_map.clone(), message.2, socket.clone(), public).await;
+                let mut terminal = terminal.write().await;
+                terminal.keep_alive_time = Instant::now();
+            }
+            TerminalMessage::ClusterNodeAddr(tgt_addr) => {
+                println!("Recieved terminal address {} from terminal {}", tgt_addr, message.2);
+                Self::connect_to(terminal_map.clone(), tgt_addr, socket.clone(), public).await;
+            },
         }
     }
     //This task will provide keep alive functionality as well as send the terminate connection signal
     //Turn all access to a Terminal Connection into an Arc access. If the keep_alive system timesout
     //we pull the terminal connection from the hashmap. Doing so will also end the root lifetime for
     //all of its child tasks.
-    async fn keep_alive(tgt: Arc<RwLock<TerminalConnection>>) {
+    async fn keep_alive(tgt: Arc<RwLock<TerminalConnection>>, public: bool) {
         let reader = tgt.read().await;
         let life = reader.life.subscribe();
         drop(reader);
@@ -275,7 +308,7 @@ impl TerminalConnection {
                 _ = life.terminated()=>{}
                 _ = sleep(Duration::from_millis(1000))=>{
                     let reader = tgt.read().await;
-                    reader.socket.send(reader.addr,TerminalMessage::KeepAlive.to_transfer()).await;
+                    reader.socket.send(reader.addr,TerminalMessage::KeepAlive(public).to_transfer()).await;
                     if Instant::now()-reader.keep_alive_time > Duration::from_millis(10000){
                         TerminalAddressMap::remove_connection(reader.terminal_map.clone(),reader.addr).await;
                         break;
@@ -285,7 +318,7 @@ impl TerminalConnection {
         }
     }
 }
-impl Drop for TerminalConnection{
+impl Drop for TerminalConnection {
     fn drop(&mut self) {
         println!("Terminating connection to {}", self.addr);
     }
