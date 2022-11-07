@@ -10,6 +10,9 @@ use tokio::{
     time::{sleep, Instant},
 };
 
+use rand::{thread_rng, Rng};
+use once_cell::sync::Lazy;
+
 //Revision 2
 //The cluster terminal is the main interface to a connected terminal.
 //The cluster terminal will be responisible for managing connections to other cluster
@@ -108,8 +111,51 @@ pub struct TerminalConnection {
 pub struct SocketHandler {
     socket: Arc<UdpSocket>,
 }
-type SocketMessage = (usize, [u8; 576], SocketAddr);
+type SocketMessage = (usize, [u8; 1024], SocketAddr);
+const MESSAGE_FRAGMENT_DATA_SIZE: usize = 1024-8-8-8-4-4-4;
 
+#[derive(Clone)]
+#[repr(C)]
+//The Message Fragment is the base unit of communication for the network layer
+struct MessageFragment{
+    //The total length of this message fragment
+    data_length: u64,
+    //The combined length of all fragments
+    total_message_length: u64,
+    //A randomly generated values for message stream identification
+    message_id: u64,
+    //Total fragments that make up this ONE message
+    fragment_total: u32,
+    //This fragments id
+    fragment_id: u32,
+    //Does this message need to be reliable 
+    nak: bool,
+    //The data
+    data: [u8; MESSAGE_FRAGMENT_DATA_SIZE],
+}
+struct MessageIdMap{
+    live_ids: Arc<RwLock<HashMap<u64, Arc<(flume::Sender<SocketMessage>, flume::Receiver<SocketMessage>)>>>>
+}
+
+impl MessageIdMap{
+    fn new() -> MessageIdMap {
+        MessageIdMap{ live_ids: Arc::new(RwLock::new(HashMap::new())) }
+    }
+    async fn send_to(&self, fragment: MessageFragment){
+        let id_map = self.live_ids.
+    }
+}
+impl MessageFragment{
+    fn from_data(data: &[u8]) -> MessageFragment {
+        let ptr = data.as_ptr();
+        assert!(size_of::<Self>() <= data.len());
+        unsafe {from_raw_parts(ptr as *const MessageFragment, 1)[0].clone()}
+    }
+    fn to_data(&self) -> Vec<u8> {
+        let data = self as *const Self;
+        unsafe{from_raw_parts(data as *const u8, size_of::<Self>())}.to_vec()        
+    }
+}
 impl ClusterTerminal {
     //Starts the network system and returns the ClusterTerminal object.
     //Which is essentially an interface to the running network async tasks.
@@ -276,6 +322,40 @@ impl TerminalConnection {
             tgt
         }
     }
+    async fn send_message_fragments(nak: bool, message: Vec<u8>){    
+        let message_id = thread_rng().gen::<u64>();
+        //First thing we need to do is split the message into fragments
+        let mut fragments = vec![];
+        let chunks = message.chunks(MESSAGE_FRAGMENT_DATA_SIZE);
+        let fragment_total = chunks.len() as u32;
+        println!("Splitting message of size {} into {} fragments", message.len(), fragment_total);
+        let fragment_id = 0;
+        for chunk in chunks{
+            let mut data:[u8; MESSAGE_FRAGMENT_DATA_SIZE] = [0;MESSAGE_FRAGMENT_DATA_SIZE];
+            //Chunk len will be 1024-8-8-8-4-4-4 or smaller
+            for index in 0..chunk.len(){
+                data[index] = chunk[index];
+            }
+            
+            let fragment = MessageFragment{
+                data_length: chunk.len() as u64,
+                total_message_length: message.len() as u64,
+                message_id,
+                fragment_total,
+                fragment_id,
+                nak,
+                data,
+            };
+            
+            println!("Broke message into fragement {} with data size {}", fragment.fragment_id, fragment.data_length);
+            fragments.push(fragment);
+        }
+        
+        //Now we must begin the transfer operation
+        
+    }
+    async fn receive_message_fragments(){}
+    async fn read_message(){}
     async fn receive(terminal_map: TerminalAddressMap, message: SocketMessage, socket: SocketHandler, public: bool) {
         let data;
         {
@@ -332,7 +412,7 @@ impl SocketHandler {
         }
     }
     async fn receive(&self) -> SocketMessage {
-        let mut data = [0; 576];
+        let mut data = [0; 1024];
         loop {
             if let Ok((len, addr)) = self.socket.recv_from(&mut data).await {
                 return (len, data, addr);
