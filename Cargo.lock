@@ -1414,6 +1414,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "flume",
+ "local-ip-address",
  "log",
  "once_cell",
  "rand",

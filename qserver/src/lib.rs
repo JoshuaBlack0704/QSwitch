@@ -6,6 +6,7 @@ use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock, time::Instant};
 mod cluster_terminal;
 mod comm_group;
 mod comm_port;
+mod terminal_map;
 
 
 
@@ -14,19 +15,21 @@ mod comm_port;
 
 /// The main struct of the QServer library
 /// This struct will initialize the async system and either connect to, or start, a cluster
+/// TODO: Merge ClusterTerminal and terminal address map
 
 pub struct ClusterTerminal {
     /// The tokio runtime used to run the network system
     /// Can either be given or built internally
     rt: Arc<Runtime>,
     ///Is this terminal a public terminal. Can conneting terminals discover it
-    public: bool,
+    discoverable: bool,
     ///The line of communication with the active network main task
     socket: SocketHandler,
     ///The signal to terminate the async system
     network_terminate: TerminateSignal,
     /// The map used to store all connected terminals
-    terminal_map: TerminalAddressMap,
+    terminal_map: Arc<TerminalMap>,
+
 }
 
 /// The CommGroup struct is how a user of a ClusterTerminal would send data over the cluster
@@ -36,25 +39,25 @@ pub struct CommGroup {}
 pub struct CommPort {}
 
 #[derive(Clone)]
-pub struct SocketHandler {
+struct SocketHandler {
     socket: Arc<UdpSocket>,
 }
 //Represents a connection to another machine
 //A target of messages
 //Implicitly carries lifetime information, so can't be cloned
-pub struct TerminalConnection {
+struct TerminalConnection {
     is_public: bool,
     addr: SocketAddr,
     socket: SocketHandler,
-    terminal_map: TerminalAddressMap,
+    terminal_map: TerminalMap,
     keep_alive_time: Instant,
     life: Arc<TerminateSignal>,
 }
 #[derive(Clone)]
-pub struct TerminateSignal {
+struct TerminateSignal {
     channel: (flume::Sender<bool>, flume::Receiver<bool>),
 }
-#[derive(Clone)]
-pub struct TerminalAddressMap {
-    active_connections: Arc<RwLock<HashMap<SocketAddr, Arc<RwLock<TerminalConnection>>>>>,
+struct TerminalMap {
+    active_connections: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
+    discoverable: bool,
 }
