@@ -2,7 +2,6 @@ use std::{sync::Arc, net::SocketAddr, collections::HashMap};
 
 use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock, time::Instant};
 
-//QServer public definitions
 mod cluster_terminal;
 mod comm_group;
 mod comm_port;
@@ -59,5 +58,9 @@ struct TerminateSignal {
 }
 struct TerminalMap {
     active_connections: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
+    message_map: RwLock<HashMap<u64, flume::Sender<bool>>>,
     discoverable: bool,
 }
+
+const MAX_MESSAGE_LENGTH: usize = 1024;
+type SocketPacket = (usize, SocketAddr, [u8; MAX_MESSAGE_LENGTH]);

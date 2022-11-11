@@ -1,51 +1,59 @@
-use std::{sync::Arc, net::SocketAddr};
 use local_ip_address::local_ip;
+use std::{net::SocketAddr, sync::Arc};
 
 use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
+
+
+use crate::MAX_MESSAGE_LENGTH;
 
 /// # The general purpose implementations of Cluster Terminal
 ///
 /// 'ClusterTerminal' is the main entry point to starting or connecting to a cluster.
 /// It provides the starting api and the neccesary functions to create communication layers
+use super::{ClusterTerminal, SocketPacket, SocketHandler, TerminalMap, TerminateSignal};
 
-use super::{
-    ClusterTerminal,
-    SocketHandler,
-    TerminateSignal,
-    TerminalMap
-};
-
-impl ClusterTerminal{
-    
+impl ClusterTerminal {
     /// * `target_socket` - To provide user defined address. Will otherwise use the system network address and random port
     /// * `discoverable` - Will the address of this terminal be shared wihtout its consent
     /// * `target_runtime` - Allows passing external runtimes to start the network systems on. Will create one internally if None.
     ///
     /// Creates a new `ClusterTerminal`
-    pub fn new(target_socket: Option<SocketAddr>, discoverable: bool, target_runtime: Option<Arc<Runtime>>) -> ClusterTerminal {
-        let target_socket = match target_socket{
+    pub fn new(
+        target_socket: Option<SocketAddr>,
+        discoverable: bool,
+        target_runtime: Option<Arc<Runtime>>,
+    ) -> ClusterTerminal {
+        let target_socket = match target_socket {
             Some(a) => a,
-            None => {
-                SocketAddr::new(local_ip().unwrap(), 0)
-            },
+            None => SocketAddr::new(local_ip().unwrap(), 0),
         };
-        
-        let target_runtime = match target_runtime{
+
+        let target_runtime = match target_runtime {
             Some(r) => r,
-            None => {
-                Arc::new(tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap())
-            },
+            None => Arc::new(
+                tokio::runtime::Builder::new_multi_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ),
         };
         let socket = SocketHandler::new(target_socket, target_runtime.clone());
         let network_terminate = TerminateSignal::new();
         let terminal_map = TerminalMap::new(discoverable);
-        
-        target_runtime.spawn(Self::udp_listener(terminal_map.clone(), network_terminate.subscribe(), socket.clone()));
-        
-        println!("Started Cluster Terminal on {}", socket.socket.local_addr().unwrap());
-        
-        ClusterTerminal{
+
+        target_runtime.spawn(Self::udp_listener(
+            terminal_map.clone(),
+            network_terminate.subscribe(),
+            socket.clone(),
+        ));
+
+        println!(
+            "Started Cluster Terminal on {}",
+            socket.socket.local_addr().unwrap()
+        );
+
+        ClusterTerminal {
             rt: target_runtime,
             discoverable,
             socket,
@@ -53,22 +61,28 @@ impl ClusterTerminal{
             terminal_map,
         }
     }
-    async fn udp_listener(terminal_map: Arc<TerminalMap>, terminate_signal: TerminateSignal, socket: SocketHandler){
-        loop{
-            tokio::select!{
+
+    ///The main udp async task
+    /// * `terminal_map` - The map of live terminal connections being maintained
+    /// * `terminate_signal` - The signal used to stop the async task when the Cluster Terminal is dropped
+    /// * `socket` - The bound SocketHandler that will provide the async socket tasks
+    async fn udp_listener(
+        terminal_map: Arc<TerminalMap>,
+        terminate_signal: TerminateSignal,
+        socket: SocketHandler,
+    ) {
+        loop {
+            tokio::select! {
                 _ = terminate_signal.terminated()=>{println!("Shutting down main udp listener for {}", socket.socket.local_addr().unwrap());break;}
+                message = socket.recieve()=>{
+                    
+                }
             }
         }
-        
-    }
-    pub fn test(&mut self){
-        let sig = TerminateSignal::new();
-        self.network_terminate = sig;
     }
 }
 
-impl SocketHandler{
-    
+impl SocketHandler {
     /// Creates a new SocketHandler
     /// # Arguments
     /// * `socket_addr` - The address socket will be bound to
@@ -78,7 +92,25 @@ impl SocketHandler{
         SocketHandler {
             socket: Arc::new(socket),
         }
-        
+    }
+    /// Async waits to receive a viable message
+    /// Erroed messages are just dropped
+    async fn recieve(&self) -> SocketPacket{    
+        let mut data = [0; 1024];
+        loop {
+            if let Ok((len, addr)) = self.socket.recv_from(&mut data).await {
+                return (len, addr, data);
+            }
+        }
+    }
+    /// * `tgt` - The target address
+    /// * `data` - A vector of bytes. Needs to be a vector to help with lifetime issues
+    /// Async sends a message to the `tgt`
+    pub async fn send(&self, tgt: SocketAddr, data: Vec<u8>) {
+        self.socket.send_to(&data, tgt).await.unwrap();
+    }
+    pub fn local_address(&self) -> SocketAddr {
+        self.socket.local_addr().unwrap()
     }
 }
 
