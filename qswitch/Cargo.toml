@@ -10,10 +10,16 @@ name = "qswitch"
 path = "src/main.rs"
 [dependencies]
 tokio = {version = "1.21.2", features = ["full"]}
-qserver = {workspace = true}
 # quniverse = {path = "../quniverse"}
 # qforce = {path = "../qforce"}
 # winit = "0.26.*"
 clap = {version = "4.0.18", features = ["derive"]}
 local-ip-address="0.4.9"
 rand = "0.8.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+incremental = false
