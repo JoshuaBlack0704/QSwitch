@@ -10,7 +10,7 @@ name = "qswitch"
 path = "src/main.rs"
 [dependencies]
 tokio = {version = "1.21.2", features = ["full"]}
-qserver = {path = "../qserver"}
+qserver = {workspace = true}
 # quniverse = {path = "../quniverse"}
 # qforce = {path = "../qforce"}
 # winit = "0.26.*"

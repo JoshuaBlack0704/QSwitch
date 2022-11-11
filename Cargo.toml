@@ -1,12 +1,13 @@
 [workspace]
 members = [
-    "qvk",
-    "qforce",
     "qswitch",
-    "windowed_tests",
-    "qserver",
-    "quniverse",
+    "qsim",
 ]
+[workspace.package]
+version = "0.0.1"
+authors = ["Joshua Black"]
+[workspace.dependencies]
+
 [profile.release]
 opt-level = 3
 lto = true

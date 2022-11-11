@@ -16,11 +16,11 @@ flume = "0.10.14"
 bytes = "1.2.1"
 async-trait = "0.1.57"
 log = {version = "0.4.17", features=["release_max_level_off"]}
-qserver = {path = "../qserver"}
+qserver = {workspace = true}
 rayon = "1.5.3"
-qforce = {path = "../qforce"}
+qforce = {workspace = true}
 rand = "0.8.5"
 rand_xoshiro = "0.6.0"
 glam = {version = "0.22.0", features = ["scalar-math", "rand"]}
 plotters = "0.3.4"
-qvk = {path = "../qvk"}
+qvk = {workspace = true}
