@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc, mem::size_of};
 
 use tokio::sync::RwLock;
 
-use crate::MAX_MESSAGE_LENGTH;
 
 use super::{TerminalMap, SocketPacket, TerminalConnection};
 
@@ -32,19 +31,22 @@ impl TerminalMap{
             message_map: RwLock::new(HashMap::new()),
             discoverable })
     }
+    async fn add_get(terminal_map: Arc<Self>){
+        
+    }
 }
 
 impl TerminalConnection{
     /// Will process a live single or multi-fragment message from an external source
     pub async fn process_message(terminal_map: Arc<TerminalMap>, packet: SocketPacket){
-        // The first step is to pull out the Message Exchange Header
+        // The first step is to pull out the Message Exchange Header and get the target TerminalConnection
         let header = Self::pull_header::<MessageExchangeHeader>(&packet);
         
-        // Next we need to check we already have an open message exchange
-        let reader = terminal_map.message_map.read().await;
-        if let Some(sender) = reader.get(&header.message_id){
+        //Now we will check if this is a one fragment message
+        if header.total_fragments == 1{
             
         }
+        
     }
     pub async fn send_message(){}
     pub fn pull_header<T: Clone>(packet: &SocketPacket) -> T {

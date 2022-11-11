@@ -5,13 +5,12 @@ use tokio::net::UdpSocket;
 use tokio::runtime::Runtime;
 
 
-use crate::MAX_MESSAGE_LENGTH;
 
 /// # The general purpose implementations of Cluster Terminal
 ///
 /// 'ClusterTerminal' is the main entry point to starting or connecting to a cluster.
 /// It provides the starting api and the neccesary functions to create communication layers
-use super::{ClusterTerminal, SocketPacket, SocketHandler, TerminalMap, TerminateSignal};
+use super::{ClusterTerminal, SocketPacket, SocketHandler, TerminalMap, TerminateSignal, MAX_MESSAGE_LENGTH};
 
 impl ClusterTerminal {
     /// * `target_socket` - To provide user defined address. Will otherwise use the system network address and random port
