@@ -6,11 +6,16 @@ mod cluster_terminal;
 mod comm_group;
 mod comm_port;
 mod terminal_map;
+mod terminal_connection;
+mod bytable;
 
 
 
 
-
+pub trait Bytable{
+    fn to_bytes(&self, dst: &[u8]);       
+    fn from_bytes(src: &[u8]) -> Self;
+}
 
 /// The main struct of the QServer library
 /// This struct will initialize the async system and either connect to, or start, a cluster
@@ -45,12 +50,12 @@ struct SocketHandler {
 //A target of messages
 //Implicitly carries lifetime information, so can't be cloned
 struct TerminalConnection {
-    is_public: bool,
-    addr: SocketAddr,
+    discoverable: bool,
+    tgt_addr: SocketAddr,
     socket: SocketHandler,
-    terminal_map: TerminalMap,
-    keep_alive_time: Instant,
-    life: Arc<TerminateSignal>,
+    terminal_map: Arc<TerminalMap>,
+    keep_alive_channel: flume::Sender<Instant>,
+    life: TerminateSignal,
 }
 #[derive(Clone)]
 struct TerminateSignal {
@@ -59,6 +64,7 @@ struct TerminateSignal {
 struct TerminalMap {
     active_connections: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
     message_map: RwLock<HashMap<u64, flume::Sender<bool>>>,
+    socket: SocketHandler,
     discoverable: bool,
 }
 

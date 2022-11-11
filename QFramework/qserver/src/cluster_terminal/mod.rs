@@ -115,19 +115,19 @@ impl SocketHandler {
 
 impl TerminateSignal {
     /// Creates a new Terminate Signal
-    fn new() -> TerminateSignal {
+    pub fn new() -> TerminateSignal {
         TerminateSignal {
             channel: flume::bounded(1),
         }
     }
     /// Creates a new child of the terminate signal that will be notified
-    fn subscribe(&self) -> TerminateSignal {
+    pub fn subscribe(&self) -> TerminateSignal {
         let rx = self.channel.1.clone();
         let tx = flume::bounded(1).0;
         TerminateSignal { channel: (tx, rx) }
     }
     /// What a child can wait on to be notified of parent drop
-    async fn terminated(&self) {
+    pub async fn terminated(&self) {
         let _ = self.channel.1.recv_async().await;
     }
 }
