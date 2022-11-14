@@ -94,7 +94,7 @@ impl LiveState{
     }
     /// This function will return an bool specifing if the returned channel was already created
     /// Returns (is_unique, channel)
-    async fn unique_get_message(live_state: Arc<LiveState>, message_id: u64) -> (bool, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>) {
+    async fn first_get_message(live_state: Arc<LiveState>, message_id: u64) -> (bool, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>) {
         {
             // First we try to read a pre-exising terminal map
             let reader = live_state.message_map.read().await;
@@ -202,8 +202,8 @@ impl TerminalConnection{
             MessageOp::Receive(packet) => {
                 let header = MessageExchangeHeader::from_bytes(&packet.2);
                 
-                let (already_created, message_channel) = LiveState::unique_get_message(live_state.clone(), header.message_id).await;
-                if !already_created{
+                let (is_first, message_channel) = LiveState::first_get_message(live_state.clone(), header.message_id).await;
+                if !is_first{
                     // This channel might have been created by the send case or receive case
                     let _ = message_channel.0.send(packet);
                     // Once we have sent the packet we can exit this task
