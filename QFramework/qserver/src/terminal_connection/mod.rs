@@ -1,10 +1,10 @@
 
 use std::{net::SocketAddr, sync::Arc};
 
-use super::{TerminalConnection, SocketHandler, TerminalMap, TerminateSignal};
+use super::{TerminalConnection, SocketHandler, LiveState, TerminateSignal};
 
 impl TerminalConnection{
-    pub fn new(tgt_addr: SocketAddr, socket: SocketHandler, terminal_map: Arc<TerminalMap>, discoverable: bool) -> Arc<TerminalConnection >{
+    pub fn new(tgt_addr: SocketAddr, socket: SocketHandler, terminal_map: Arc<LiveState>, discoverable: bool) -> Arc<TerminalConnection >{
         let keep_alive_channel = flume::unbounded();
         let life = TerminateSignal::new();
         println!("Creating new terminal connection for target {}", tgt_addr);

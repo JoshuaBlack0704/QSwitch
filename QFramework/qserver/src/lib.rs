@@ -13,7 +13,7 @@ mod bytable;
 
 
 pub trait Bytable{
-    fn to_bytes(&self, dst: &[u8]);       
+    fn to_bytes(&self, dst: &mut [u8]);       
     fn from_bytes(src: &[u8]) -> Self;
 }
 
@@ -32,7 +32,7 @@ pub struct ClusterTerminal {
     ///The signal to terminate the async system
     network_terminate: TerminateSignal,
     /// The map used to store all connected terminals
-    terminal_map: Arc<TerminalMap>,
+    terminal_map: Arc<LiveState>,
 
 }
 
@@ -53,7 +53,7 @@ struct TerminalConnection {
     discoverable: bool,
     tgt_addr: SocketAddr,
     socket: SocketHandler,
-    terminal_map: Arc<TerminalMap>,
+    terminal_map: Arc<LiveState>,
     keep_alive_channel: flume::Sender<Instant>,
     life: TerminateSignal,
 }
@@ -61,9 +61,9 @@ struct TerminalConnection {
 struct TerminateSignal {
     channel: (flume::Sender<bool>, flume::Receiver<bool>),
 }
-struct TerminalMap {
-    active_connections: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
-    message_map: RwLock<HashMap<u64, flume::Sender<bool>>>,
+struct LiveState {
+    terminals: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
+    message_map: RwLock<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>>,
     socket: SocketHandler,
     discoverable: bool,
 }

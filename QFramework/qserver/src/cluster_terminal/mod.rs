@@ -10,7 +10,7 @@ use tokio::runtime::Runtime;
 ///
 /// 'ClusterTerminal' is the main entry point to starting or connecting to a cluster.
 /// It provides the starting api and the neccesary functions to create communication layers
-use super::{ClusterTerminal, SocketPacket, SocketHandler, TerminalMap, TerminateSignal, MAX_MESSAGE_LENGTH};
+use super::{ClusterTerminal, SocketPacket, SocketHandler, LiveState, TerminateSignal, MAX_MESSAGE_LENGTH};
 
 impl ClusterTerminal {
     /// * `target_socket` - To provide user defined address. Will otherwise use the system network address and random port
@@ -39,7 +39,7 @@ impl ClusterTerminal {
         };
         let socket = SocketHandler::new(target_socket, target_runtime.clone());
         let network_terminate = TerminateSignal::new();
-        let terminal_map = TerminalMap::new(discoverable);
+        let terminal_map = LiveState::new(socket.clone(), discoverable);
 
         target_runtime.spawn(Self::udp_listener(
             terminal_map.clone(),
@@ -66,7 +66,7 @@ impl ClusterTerminal {
     /// * `terminate_signal` - The signal used to stop the async task when the Cluster Terminal is dropped
     /// * `socket` - The bound SocketHandler that will provide the async socket tasks
     async fn udp_listener(
-        terminal_map: Arc<TerminalMap>,
+        terminal_map: Arc<LiveState>,
         terminate_signal: TerminateSignal,
         socket: SocketHandler,
     ) {
@@ -105,7 +105,7 @@ impl SocketHandler {
     /// * `tgt` - The target address
     /// * `data` - A vector of bytes. Needs to be a vector to help with lifetime issues
     /// Async sends a message to the `tgt`
-    pub async fn send(&self, tgt: SocketAddr, data: Vec<u8>) {
+    pub async fn send(&self, tgt: SocketAddr, data: &[u8]) {
         self.socket.send_to(&data, tgt).await.unwrap();
     }
     pub fn local_address(&self) -> SocketAddr {
