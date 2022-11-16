@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use super::{Bytable, terminal_map::MessageExchangeHeader};
+use super::{Bytable, live_state::MessageExchangeHeader};
 
 impl Bytable for MessageExchangeHeader{
     fn to_bytes(&self, dst: &mut [u8]) {

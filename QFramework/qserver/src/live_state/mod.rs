@@ -134,7 +134,10 @@ impl LiveState{
     }
 }
 
-
+const SEND_TIMEOUT_TIME:u64= 100;
+const SEND_TIMEOUT_CYCLES:usize = 10;
+const RECEIVE_TIMEOUT_TIME:u64= 16;
+const RECEIVE_TIMEOUT_CYCLES:usize = 10;
 impl TerminalConnection{
     /// This the two-way async process for sending and reciving messages
     async fn message_exchange(live_state: Arc<LiveState>, operation: MessageOp){
@@ -147,6 +150,36 @@ impl TerminalConnection{
         // In the case that a message_exchange for a particular message_id is already open it will
         // just send a message to that message_exchange's channel and exit
         
+        // The ack protocol is as follows:
+        // A message needs to be sent, so a new Send message_exchange is spun up
+        // The send message exhange then blasts the whole message at once to the target
+        // The send side then listens for a message complete or retransmit message from the receiver
+        // If no message is received after some timeout the send side will request an update
+        // If the send side does not hear back from the receiver after so many cycles of it's update branch
+        // it will stop
+        // TODO: Propigate result of send op up the call stack
+        // When a upd_listener gets a packet on its socket it will immidiately launch this task at the receive branch
+        // If a channel for the received packet's message_id already exists we just send it along the channel.
+        // NOTE This channel might have been created by the send side which means the receive side take care of it for the send branch
+        // If the channel does not exist the there MUST not be a send task or receive task so the the running task becomes the new 
+        // receive task and creates a channel
+        // The receive task will then start listening on the channel for another fragment
+        // If the total number of required fragments have not been received and we have reached
+        // some timeout value then the task will create re-transmit headers for all of the missing fragments
+        // and send back to the send side.
+        // If too many timout branches are reached then the message is dropped
+        // Once all of the fragments have been received the receive side will start a message processing
+        // task, passing ownership to the new task.
+        // Then it will send a message complete header to the send side and wait for awhile to make sure the send side 
+        // does not request for an update, which if it does the task will resend the message complete
+        
+        // If reliability is not required then the send side will blast all of the fragments and then exit
+        // the recieve side will listen for new packets, but if a timeout is reached and
+        // it does not have all of the fragments then the message is dropped.
+        // When the receive side gets the last requiered fragment it will immediately start
+        // the messsage processing task and then exit since it does not need to notify the 
+        // send side
+        
         match operation{
             MessageOp::Send(terminal, nak, message) => {
                 let message_id = thread_rng().gen::<u64>();
@@ -158,109 +191,125 @@ impl TerminalConnection{
                 for fragment in fragments.iter(){
                     terminal.socket.send(terminal.tgt_addr.clone(), &fragment.1[0..fragment.0]).await;
                 }
+                // If we arent nak then we can just close this send side since a receiver will never send message back
+                if !nak{
+                    return;
+                }
+                let mut cycle_budget = SEND_TIMEOUT_CYCLES;
                 
-                // If we did not request an nak then we are done
-                if nak {
-                    // To support nak we will need to start listening for receptions on the channel
-                    // We also need to keep time, as with nak the target could not send a response because they got the message
-                    // So we need to wait for a decent time for a response
-                    // We will wait for one whole second
-                    let time_out = 1000;
-                    
-                    loop {
-                        tokio::select!{
-                            // A message channel created by the send case will always lead here when sent from the main udp listener
-                            // thus specializing this function
-                            val = message_channel.1.recv_async()=>{
-                                if let Ok(packet) = val{
-                                    // If we get a packet delivered to a send case it will be to request a re-transmit
-                                    let header = MessageExchangeHeader::from_bytes(packet.2.as_slice());
-                                    if header.message_complete {
-                                        break;
-                                    }
-                                    else{
-                                        let needed_fragment = &fragments[header.fragment_index as usize];
-                                        terminal.socket.send(terminal.tgt_addr, &needed_fragment.1[0..needed_fragment.0]).await;
-                                    }
+                loop{
+                    // Remeber, whichever branch of the select that loses get canceled
+                    // so the timeout will start over if some message arrives in the channel
+                    tokio::select!{
+                        val = message_channel.1.recv_async()=>{
+                            if let Ok(packet) = val{
+                            // A message sent back from the receive branch is a retransmit request unless the message_complete
+                            // bool is true
+                                let (complete, retransmit_index) = Self::send_side_process(packet);
+                                if !complete{
+                                    // Resending the requested fragment 
+                                    let retransmit_fragment = &fragments[retransmit_index];
+                                    terminal.socket.send(terminal.tgt_addr.clone(), &retransmit_fragment.1[0..retransmit_fragment.0]).await;
+                                    
                                 }
                                 else{
-                                    println!("Unexpected channel close");
+                                    // If the receiver side has told us it has everything then we are done
                                     break;
                                 }
-                            
                             }
-                            _ = sleep(Duration::from_millis(time_out)) => {
-                                // This branch will cancel and restart if we get a nak retrasmit request
+                        }
+                        _ = sleep(Duration::from_millis(SEND_TIMEOUT_TIME))=>{
+                            // If this completes we need to ask the receive time for an update
+                            // aka. If the message complete bool is true in the receive side's RECPTION
+                            // the the receive side will interpret it as an update request
+                            
+                            let header = MessageExchangeHeader{ 
+                                message_id,
+                                fragment_count: 0,
+                                fragment_index: 0,
+                                fragment_data: 0,
+                                nak,
+                                message_complete: true };
+                            let mut data = vec![0; size_of::<MessageExchangeHeader>()];
+                            header.to_bytes(data.as_mut_slice());
+                            terminal.socket.send(terminal.tgt_addr.clone(), data.as_slice()).await;
+                            cycle_budget -= 1;
+                            if cycle_budget <= 0{
+                                // If we run out of cycles we assume the tgt has become unreachable
                                 break;
                             }
                         }
                     }
                 }
                 
-                // The send process is now completed
-                // Now we must destroy the active message_exchange Hashmap entry
-                LiveState::remove_message(live_state.clone(), message_id).await;
                 
             },
             MessageOp::Receive(packet) => {
+                // Imediately we need to see if there is already another channel open for it
                 let header = MessageExchangeHeader::from_bytes(&packet.2);
-                
                 let (is_first, message_channel) = LiveState::first_get_message(live_state.clone(), header.message_id).await;
-                let _ = message_channel.0.send(packet);
+                // This will be handeled later
+                message_channel.0.send(packet).unwrap();
                 if !is_first{
-                    // This channel might have been created by the send case or receive case
-                    // Once we have sent the packet we can exit this task
+                    //If a different task is already handling this message_id then we can exit
                     return;
                 }
-                // If we are here we will begin the receive routine
-                let mut fragment_check = vec![false; header.fragment_count as usize]; 
-                let mut fragments:Vec<Fragment> = Vec::with_capacity(header.fragment_count as usize);
-                // The amount of time we will wait for a packet from the send side before doing a nak retransmit pass
-                let nak_timeout = 16;
-                // The amount of times we will try to contact an unrespondive send side
-                let mut nak_attemts = 5;
+                
+                //We need to build the message structure
+                let terminal = LiveState::add_get_terminal(live_state.clone(), packet.1).await;
+                let fragments:Vec<Option<Fragment>> = vec![None; header.fragment_count as usize];
+                let remaining_timeouts = RECEIVE_TIMEOUT_CYCLES;
                 
                 loop{
                     tokio::select!{
                         val = message_channel.1.recv_async()=>{
+                            // If a receive channel gets a packet it can either be a new fragment or an
+                            // update request from a send side timeout
                             if let Ok(packet) = val{
-                                if header.nak{
-                                    if Self::nak_packet_process(live_state.clone(), packet, &mut fragment_check, &mut fragments).await{
-                                        // If we are here we have recieved the last fragment in the message
+                                let header = MessageExchangeHeader::from_bytes(&packet.2);
+                                if header.message_complete{
+                                    // Remeber, message complete send from the send side means it is requestin an update
+                                    // which would be either a retransmit request or message complete
+                                    for request in Self::prepare_retransmits(header.message_id, &fragments).iter(){
+                                        terminal.socket.send(terminal.tgt_addr, request.as_slice()).await;
                                     }
                                 }
                                 else{
-                                    if Self::packet_process(live_state.clone(), packet, &mut fragment_check, &mut fragments).await{
-                                        // If we are here we have recieved the last fragment in the message
-                                        
-                                    }
+                                    fragments[header.fragment_index] = 
                                 }
-                            }
-                            else{
-                                println!("Unexpected channel close");
-                                break;
-                            }
-                        }
-                        _ = sleep(Duration::from_millis(nak_timeout))=>{
-                            if header.nak{
-                                let terminal = LiveState::add_get_terminal(live_state.clone(), packet.1).await;
-                                Self::nak_pass(terminal, packet.clone(), &mut fragment_check, &mut fragments).await;
-                                nak_attemts -= 1;
-                                if nak_attemts <= 0{
-                                    break;
-                                }
-                            }
-                            else{
-                                // If we run out of time here without a completed message then we just drop it
-                                break;
                             }
                         }
                     }
                 }
                 
+                
             },
         };
         
+    }
+    fn send_side_process(packet: SocketPacket) -> (bool, usize) {
+        let header = MessageExchangeHeader::from_bytes(&packet.2);
+        let complete = header.message_complete;
+        let fragment_index = header.fragment_index as usize;
+        (complete, fragment_index)
+    }
+    fn prepare_retransmits(message_id: u64, fragments: &[Option<Fragment>]) -> Vec<[u8; size_of::<MessageExchangeHeader>()]> {
+        let mut headers = Vec::with_capacity(fragments.len());
+        for (index, fragment) in fragments.iter().enumerate(){
+            if let None = fragment{
+                let header = MessageExchangeHeader{ 
+                    message_id,
+                    fragment_count: 0,
+                    fragment_index: index as u32,
+                    fragment_data: 0,
+                    nak: true,
+                    message_complete: false };
+                let mut header_data = [0u8; size_of::<MessageExchangeHeader>()];
+                header.to_bytes(&mut header_data);
+                headers.push(header_data);
+            }
+        }
+        headers
     }
     async fn nak_packet_process(live_state: Arc<LiveState>,packet: SocketPacket, packet_check: &mut [bool], fragments: &mut Vec<Fragment>) -> bool{
         

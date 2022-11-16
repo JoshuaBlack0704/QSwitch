@@ -5,7 +5,7 @@ use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock, time::Instant};
 mod cluster_terminal;
 mod comm_group;
 mod comm_port;
-mod terminal_map;
+mod live_state;
 mod terminal_connection;
 mod bytable;
 
