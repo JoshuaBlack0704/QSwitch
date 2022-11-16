@@ -138,6 +138,7 @@ const SEND_TIMEOUT_TIME:u64= 100;
 const SEND_TIMEOUT_CYCLES:usize = 10;
 const RECEIVE_TIMEOUT_TIME:u64= 16;
 const RECEIVE_TIMEOUT_CYCLES:usize = 10;
+const MESSAGE_COMPLETE_TIMEOUT:usize = 1000;
 impl TerminalConnection{
     /// This the two-way async process for sending and reciving messages
     async fn message_exchange(live_state: Arc<LiveState>, operation: MessageOp){
@@ -257,8 +258,8 @@ impl TerminalConnection{
                 
                 //We need to build the message structure
                 let terminal = LiveState::add_get_terminal(live_state.clone(), packet.1).await;
-                let fragments:Vec<Option<Fragment>> = vec![None; header.fragment_count as usize];
-                let remaining_timeouts = RECEIVE_TIMEOUT_CYCLES;
+                let mut fragments:Vec<Option<Fragment>> = vec![None; header.fragment_count as usize];
+                let mut remaining_timeouts = RECEIVE_TIMEOUT_CYCLES;
                 
                 loop{
                     tokio::select!{
@@ -267,16 +268,56 @@ impl TerminalConnection{
                             // update request from a send side timeout
                             if let Ok(packet) = val{
                                 let header = MessageExchangeHeader::from_bytes(&packet.2);
-                                if header.message_complete{
-                                    // Remeber, message complete send from the send side means it is requestin an update
-                                    // which would be either a retransmit request or message complete
-                                    for request in Self::prepare_retransmits(header.message_id, &fragments).iter(){
-                                        terminal.socket.send(terminal.tgt_addr, request.as_slice()).await;
+                                if header.nak{
+                                    if header.message_complete{
+                                        // Remeber, message complete send from the send side means it is requestin an update
+                                        // which would be either a retransmit request or message complete which would be handled by a
+                                        // seperate task
+                                        for request in Self::prepare_retransmits(header.message_id, &fragments).iter(){
+                                            terminal.socket.send(terminal.tgt_addr, request.as_slice()).await;
+                                        }
+                                    }
+                                    else{
+                                        // If we got a new fragment we add it to the fragment vector
+                                        // if this fragmest is a duplicate we just override the exising fragment
+                                        fragments[header.fragment_index as usize] = Some((packet.0, packet.2));
                                     }
                                 }
+                                // If we dont have nak then the send function will never send a message complete
+                                // this means any message we get will be a new fragment
                                 else{
-                                    fragments[header.fragment_index] = 
+                                    // If we got a new fragment we add it to the fragment vector
+                                    // if this fragmest is a duplicate we just override the exising fragment
+                                    fragments[header.fragment_index as usize] = Some((packet.0, packet.2));
                                 }
+                                
+                                // Now that we may have received a new packet we must check to see if we have all the packets
+                                // if we don't no problem. If we do we need to start the message procceser.
+                                // If we have nak we need to send message complete by starting the receive complete task
+                                let still_needed = Self::prepare_retransmits(header.message_id, &fragments);
+                                if still_needed.len() == 0{
+                                    // We have completed the message
+                                    // Now we need to pass on the final message
+                                    tokio::spawn(Self::process_message(live_state.clone(), terminal.clone(), fragments));
+                                    if header.nak{
+                                        Self::message_complete(header.message_id, live_state.clone(), terminal.clone(), message_channel).await;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        _ = sleep(Duration::from_millis(RECEIVE_TIMEOUT_TIME))=>{
+                            // If we have nak, we need to request retransmits
+                            if header.nak{
+                                for request in Self::prepare_retransmits(header.message_id, &fragments).iter(){
+                                    terminal.socket.send(terminal.tgt_addr, request.as_slice()).await;
+                                }
+                            }
+                            
+                            // If we timeout too many times then we drop the message
+                            remaining_timeouts -= 1;
+                            if remaining_timeouts <= 0{
+                                break;
                             }
                         }
                     }
@@ -285,6 +326,26 @@ impl TerminalConnection{
                 
             },
         };
+        
+    }
+    async fn message_complete(message_id: u64, live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, channel: Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>){
+        // To complete the message we must send the message_complete header and 
+        // then wait to make sure the sender got it
+        let header = MessageExchangeHeader{ 
+            message_id,
+            fragment_count: 0,
+            fragment_index: 0,
+            fragment_data: 0,
+            nak: true,
+            message_complete: true };
+        let mut data = vec![0u8; size_of::<MessageExchangeHeader>()];
+        header.to_bytes(data.as_mut_slice());
+        terminal.socket.send(terminal.tgt_addr, &data).await;
+        loop{
+            
+        }
+        
+        
         
     }
     fn send_side_process(packet: SocketPacket) -> (bool, usize) {
@@ -379,5 +440,5 @@ impl TerminalConnection{
     // fn fragments_to_message(fragments: Vec<Fragment>) -> Message{
         
     // }
-    async fn process_message(live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Fragment>){}
+    async fn process_message(live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Option<Fragment>>){}
 }
