@@ -62,12 +62,12 @@ impl TerminalConnection{
         }
     }
     
-    pub(crate) async fn process_message(live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Option<Fragment>>){
+    pub(crate) async fn process_message(_live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Option<Fragment>>){
         let data = Self::fragments_to_message(fragments);
         let header = TerminalMessageType::from_bytes(&data);
         match header{
             TerminalMessageType::KeepAlive => {
-                println!("Terminal for {} received keep alive", terminal.socket.local_address());
+                println!("Terminal for {} received keep alive", terminal.tgt_addr);
                 terminal.keep_alive_channel.send(Instant::now()).expect("Keep alive should not terminate before terminal connection is dropped");
             },
         }

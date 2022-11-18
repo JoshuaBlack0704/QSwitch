@@ -4,7 +4,7 @@ use tokio::{sync::RwLock, time::{sleep, Duration}};
 use rand::{self, thread_rng, Rng};
 
 
-use super::{LiveState, Bytable, SocketPacket, TerminalConnection, SocketHandler, MAX_MESSAGE_LENGTH, TerminateSignal};
+use super::{LiveState, Bytable, SocketPacket, TerminalConnection, SocketHandler, MAX_MESSAGE_LENGTH};
 pub(crate) type Fragment = (usize, [u8; MAX_MESSAGE_LENGTH]);
 pub(crate) type Message = Vec<u8>;
 
@@ -132,15 +132,6 @@ impl LiveState{
     async fn remove_message(live_state: Arc<LiveState>, message_id: u64){
         let mut writer = live_state.message_map.write().await;
         writer.remove(&message_id);
-    }
-    async fn try_get_message(live_state: Arc<LiveState>, messaged_id: u64) -> Option<Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>> {
-        let reader = live_state.message_map.read().await;
-        if let Some(channel) = reader.get(&messaged_id){
-            Some(channel.clone())
-        }
-        else{
-            None
-        }
     }
 }
 
@@ -315,7 +306,7 @@ impl TerminalConnection{
                                     // Now we need to pass on the final message
                                     tokio::spawn(Self::process_message(live_state.clone(), terminal.clone(), fragments));
                                     if header.nak{
-                                        Self::message_complete(header.message_id, live_state.clone(), terminal.clone(), message_channel).await;
+                                        Self::message_complete(header.message_id, terminal.clone(), message_channel).await;
                                     }
                                     break;
                                 }
@@ -345,7 +336,7 @@ impl TerminalConnection{
         };
         
     }
-    async fn message_complete(message_id: u64, live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, channel: Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>){
+    async fn message_complete(message_id: u64, terminal: Arc<TerminalConnection>, channel: Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>){
         // To complete the message we must send the message_complete header and 
         // then wait to make sure the sender got it
         let header = MessageExchangeHeader{ 
@@ -361,7 +352,7 @@ impl TerminalConnection{
         loop{
             // We just need to listen for any communication from the send side and resend our message_complete if we get any
             tokio::select!{
-                val = channel.1.recv_async()=>{
+                _ = channel.1.recv_async()=>{
                     terminal.socket.send(terminal.tgt_addr, &data).await;
                 }
                 _ = sleep(Duration::from_millis(MESSAGE_COMPLETE_TIMEOUT))=>{
@@ -398,42 +389,6 @@ impl TerminalConnection{
         }
         headers
     }
-    async fn nak_packet_process(live_state: Arc<LiveState>,packet: SocketPacket, packet_check: &mut [bool], fragments: &mut Vec<Fragment>) -> bool{
-        
-        let header = MessageExchangeHeader::from_bytes(&packet.2);
-        if header.message_complete{
-            // If the receive branch gets a header that has the message_complete flag on then it means the send side is requesting the nak
-            // status of the message because it has not received a message_complete or nak message in awhile
-            let terminal = LiveState::add_get_terminal(live_state.clone(), packet.1).await;
-            Self::nak_pass(terminal, packet, packet_check, fragments).await;
-            false
-        }
-        else{
-            // Else, it is the send side giving us a new packet
-            
-            if !packet_check[header.fragment_index as usize]{
-                // If this packet is not a duplicate
-                packet_check[header.fragment_index as usize] = true;
-                let fragment = (packet.0, packet.2);
-                fragments.push(fragment);
-            }
-            
-            // With the new packet added we check if we have all packets
-            if fragments.len() == header.fragment_count as usize{
-                // If we have all of the fragments then we will launch the message proccess
-                let terminal = LiveState::add_get_terminal(live_state.clone(), packet.1).await;
-                // We do a nak pass here to send the send side a message_complete signal
-                Self::nak_pass(terminal, packet, packet_check, fragments).await;
-                return true;
-            }
-            false
-        }
-        
-    }
-    async fn packet_process(live_state: Arc<LiveState>, packet: SocketPacket, packet_check: &mut [bool], fragments: &mut Vec<Fragment>) -> bool{
-        true
-    }
-    async fn nak_pass(live_state: Arc<TerminalConnection>, packet: SocketPacket, packet_check: &mut [bool], fragments: &mut Vec<Fragment>){}
     fn message_to_fragments(message_id: u64, nak:bool, message: &Message) -> Vec<Fragment> {
         let data_size = MAX_MESSAGE_LENGTH - size_of::<MessageExchangeHeader>();
         let mut fragments:Vec<Fragment> = Vec::with_capacity(message.len()/data_size + 1);

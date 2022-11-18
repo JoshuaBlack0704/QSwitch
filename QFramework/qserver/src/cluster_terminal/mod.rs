@@ -13,7 +13,7 @@ use crate::{TerminalConnection, live_state::MessageOp};
 ///
 /// 'ClusterTerminal' is the main entry point to starting or connecting to a cluster.
 /// It provides the starting api and the neccesary functions to create communication layers
-use super::{ClusterTerminal, SocketPacket, SocketHandler, LiveState, TerminateSignal, MAX_MESSAGE_LENGTH};
+use super::{ClusterTerminal, SocketPacket, SocketHandler, LiveState, TerminateSignal};
 
 impl ClusterTerminal {
     /// * `target_socket` - To provide user defined address. Will otherwise use the system network address and random port
@@ -84,7 +84,7 @@ impl ClusterTerminal {
         }
     }
     pub fn connect_to(&self, tgt: SocketAddr){
-        let terminal = self.rt.block_on(LiveState::add_get_terminal(self.live_state.clone(), tgt));
+        let _ = self.rt.block_on(LiveState::add_get_terminal(self.live_state.clone(), tgt));
     }
     pub fn get_addr(&self) -> SocketAddr {
         self.socket.local_address()
