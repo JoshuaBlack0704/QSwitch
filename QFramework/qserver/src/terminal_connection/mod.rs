@@ -3,7 +3,7 @@ use std::{net::SocketAddr, sync::Arc, mem::size_of};
 
 use tokio::time::{Instant, sleep, Duration};
 
-use crate::{TerminalConnection, SocketHandler, LiveState, TerminateSignal, Bytable, MAX_MESSAGE_LENGTH};
+use crate::{TerminalConnection, SocketHandler, LiveState, TerminateSignal, Bytable, MAX_MESSAGE_LENGTH, CommGroup};
 
 use self::message_exchange::{MessageOp, Fragment, Message};
 
@@ -12,7 +12,7 @@ use self::message_exchange::{MessageOp, Fragment, Message};
 #[derive(Clone)]
 pub(crate) enum TerminalMessageType{
     KeepAlive,
-    CommGroup()
+    CommGroup(u32)
 }
 
 const TERMINAL_KEEPALIVE_WAIT:u64 = 10;
@@ -27,21 +27,23 @@ impl TerminalConnection{
             discoverable,
             tgt_addr,
             socket,
-            live_state,
+            live_state: live_state.clone(),
             keep_alive_channel: keep_alive_channel.0,
             life });
-        tokio::spawn(Self::keep_alive(terminal.clone(), keep_alive_channel.1));
+        tokio::spawn(Self::keep_alive(live_state.clone(), tgt_addr, keep_alive_channel.1));
         terminal
         
     }
-    async fn keep_alive(terminal: Arc<TerminalConnection>, message_channel: flume::Receiver<Instant>){
+    async fn keep_alive(live_state: Arc<LiveState>, tgt_addr: SocketAddr, message_channel: flume::Receiver<Instant>){
         let mut no_response_budget = 10;
         let keep_alive = TerminalMessageType::KeepAlive;
         let mut keep_alive_data = vec![0u8;size_of::<TerminalMessageType>()];
         keep_alive.to_bytes(&mut keep_alive_data);
-        let op = MessageOp::Send(terminal.clone(), false, keep_alive_data);
         
-        tokio::spawn(Self::message_exchange(terminal.live_state.clone(), op.clone()));
+        let test = TerminalMessageType::CommGroup(1);
+        let mut test_data = vec![0u8;size_of::<TerminalMessageType>()];
+        test.to_bytes(&mut test_data);
+        
         loop{
             tokio::select!{
                 val = message_channel.recv_async()=>{
@@ -51,25 +53,34 @@ impl TerminalConnection{
                     }
                 }
                 _ = sleep(Duration::from_secs(TERMINAL_KEEPALIVE_WAIT))=>{
-                    tokio::spawn(Self::message_exchange(terminal.live_state.clone(), op.clone()));
+                    let terminal = LiveState::add_get_terminal(live_state.clone(), tgt_addr).await;
+                    let op = MessageOp::Send(terminal.clone(), false, keep_alive_data.clone());
+                    let test_op = MessageOp::Send(terminal.clone(), true, test_data.clone());
+                    tokio::spawn(Self::message_exchange(terminal.live_state.clone(), op));
+                    tokio::spawn(Self::message_exchange(terminal.live_state.clone(), test_op));
                     no_response_budget -= 1;
                     if no_response_budget <= 0{
-                        println!("Disconnected from terminal {}", terminal.tgt_addr);
                         LiveState::remove_terminal(terminal.live_state.clone(), terminal.tgt_addr).await;
-                        break;
                     }
                 }
             }
         }
+        println!("Disconnected from terminal {}", tgt_addr);
     }
     
-    pub(crate) async fn process_message(_live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Option<Fragment>>){
+    pub(crate) async fn process_message(live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Option<Fragment>>){
         let data = Self::fragments_to_message(fragments);
         let header = TerminalMessageType::from_bytes(&data);
         match header{
             TerminalMessageType::KeepAlive => {
                 println!("Terminal for {} received keep alive", terminal.tgt_addr);
                 terminal.keep_alive_channel.send(Instant::now()).expect("Keep alive should not terminate before terminal connection is dropped");
+            },
+            TerminalMessageType::CommGroup(id) => {
+                println!("Received message for comm group {}", id);
+                let comm = LiveState::add_get_commgroup(live_state.clone(), id).await;
+                let from_addr = terminal.tgt_addr; 
+                tokio::spawn(CommGroup::process_message(comm, from_addr));
             },
         }
         

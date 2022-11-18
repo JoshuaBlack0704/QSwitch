@@ -38,9 +38,9 @@ pub struct ClusterTerminal {
 
 /// The CommGroup struct is how a user of a ClusterTerminal would send data over the cluster
 /// All of the logic required to converte user data types to bytes and resolve targets is included
-pub struct CommGroup<Key> {
+pub struct CommGroup {
+    id: u32,
     live_state: Arc<LiveState>,
-    key: Key
     
 }
 /// The CommPort struct represents a channel for users to push data to a live CommGroup for transfer.
@@ -68,6 +68,7 @@ struct TerminateSignal {
 struct LiveState {
     terminals: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
     message_map: RwLock<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>>,
+    commgroups: RwLock<HashMap<u32, Arc<CommGroup>>>,
     socket: SocketHandler,
     discoverable: bool,
 }

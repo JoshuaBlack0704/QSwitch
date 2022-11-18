@@ -2,7 +2,7 @@ use std::{sync::Arc, collections::HashMap, net::SocketAddr};
 
 use tokio::sync::RwLock;
 
-use crate::{LiveState, SocketHandler, TerminalConnection, SocketPacket};
+use crate::{LiveState, SocketHandler, TerminalConnection, SocketPacket, CommGroup};
 
 
 
@@ -13,8 +13,43 @@ impl LiveState{
         Arc::new(LiveState{ 
             terminals: RwLock::new(HashMap::new()), 
             message_map: RwLock::new(HashMap::new()),
+            commgroups: RwLock::new(HashMap::new()),
             socket,
             discoverable, })
+    }
+    /// If present, get a pre-existing comm group. Adding one if no pre-existing are found
+    pub(crate) async fn add_get_commgroup(live_state: Arc<Self>, id: u32) -> Arc<CommGroup> {
+        {
+            // First we try to read a pre-exising terminal map
+            let reader = live_state.commgroups.read().await;
+            if let Some(comm) = reader.get(&id){
+                return comm.clone();
+            }
+        }
+        
+        // If no pre-exising termnials are found we grab a writer and add a new one
+        let mut writer = live_state.commgroups.write().await;
+        // A terminal may have been added since we dropped the reader
+        if let Some(comm) = writer.get(&id){
+            return comm.clone();
+        }
+        
+        let comm = CommGroup::new(id, live_state.clone());
+        
+        if let Some(_) = writer.insert(id, comm.clone()){
+            println!("Adding pre-exisiting CommGroup");
+        }
+        
+        comm       
+    }
+    pub(crate) async fn remove_comm(live_state: Arc<Self>, id: u32){
+        println!("Removing CommGroup {}", id);
+        let mut writer = live_state.commgroups.write().await;
+        if let None = writer.remove(&id){
+            println!("Trying to remove non existing CommGroup from live state");
+            
+        }
+        
     }
     /// If present, get a pre-existing terminal connection. Adding one if no pre-existing are found
     pub(crate) async fn add_get_terminal(live_state: Arc<Self>, terminal_addr: SocketAddr) -> Arc<TerminalConnection> {
