@@ -53,8 +53,8 @@ impl TerminalConnection{
                     tokio::spawn(Self::message_exchange(terminal.live_state.clone(), op.clone()));
                     no_response_budget -= 1;
                     if no_response_budget <= 0{
-                        println!("Disconneted from terminal {}", terminal.socket.local_address());
-                        LiveState::remove_terminal(terminal.live_state.clone(), terminal.socket.local_address()).await;
+                        println!("Disconnected from terminal {}", terminal.tgt_addr);
+                        LiveState::remove_terminal(terminal.live_state.clone(), terminal.tgt_addr).await;
                         break;
                     }
                 }
