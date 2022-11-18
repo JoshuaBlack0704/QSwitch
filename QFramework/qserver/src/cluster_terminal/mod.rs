@@ -1,10 +1,13 @@
 use local_ip_address::local_ip;
 use std::{net::SocketAddr, sync::Arc};
 
-use tokio::net::UdpSocket;
+use tokio::{net::UdpSocket, time::sleep};
 use tokio::runtime::Runtime;
+use tokio::time::Duration;
 
 
+
+use crate::{TerminalConnection, live_state::MessageOp};
 
 /// # The general purpose implementations of Cluster Terminal
 ///
@@ -31,7 +34,7 @@ impl ClusterTerminal {
         let target_runtime = match target_runtime {
             Some(r) => r,
             None => Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
+                tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .unwrap(),
@@ -57,7 +60,7 @@ impl ClusterTerminal {
             discoverable,
             socket,
             network_terminate,
-            terminal_map,
+            live_state: terminal_map,
         }
     }
 
@@ -66,7 +69,7 @@ impl ClusterTerminal {
     /// * `terminate_signal` - The signal used to stop the async task when the Cluster Terminal is dropped
     /// * `socket` - The bound SocketHandler that will provide the async socket tasks
     async fn udp_listener(
-        terminal_map: Arc<LiveState>,
+        live_state: Arc<LiveState>,
         terminate_signal: TerminateSignal,
         socket: SocketHandler,
     ) {
@@ -74,9 +77,27 @@ impl ClusterTerminal {
             tokio::select! {
                 _ = terminate_signal.terminated()=>{println!("Shutting down main udp listener for {}", socket.socket.local_addr().unwrap());break;}
                 message = socket.recieve()=>{
-                    
+                    let op = MessageOp::Receive(message);
+                    tokio::spawn(TerminalConnection::message_exchange(live_state.clone(), op));
                 }
             }
+        }
+    }
+    pub fn connect_to(&self, tgt: SocketAddr){
+        let terminal = self.rt.block_on(LiveState::add_get_terminal(self.live_state.clone(), tgt));
+    }
+    pub fn get_addr(&self) -> SocketAddr {
+        self.socket.local_address()
+    }
+    pub fn get_runtime(&self) -> Arc<Runtime> {
+        self.rt.clone()
+    }
+    pub fn idle_async(&self){
+        self.rt.block_on(Self::idle());
+    }
+    async fn idle(){
+        loop{
+            sleep(Duration::from_millis(1000*5)).await;
         }
     }
 }
@@ -106,6 +127,7 @@ impl SocketHandler {
     /// * `data` - A vector of bytes. Needs to be a vector to help with lifetime issues
     /// Async sends a message to the `tgt`
     pub async fn send(&self, tgt: SocketAddr, data: &[u8]) {
+        println!("Socket {} send {} bytes to {}", self.local_address(), data.len(), tgt);
         self.socket.send_to(&data, tgt).await.unwrap();
     }
     pub fn local_address(&self) -> SocketAddr {

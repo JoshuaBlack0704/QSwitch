@@ -41,3 +41,20 @@ impl<T: Clone> Bytable for Vec<T>{
     }
 }
 
+impl Bytable for crate::terminal_connection::TerminalMessageType{
+    fn to_bytes(&self, dst: &mut [u8]) {
+        let ptr = self as *const Self;
+        let bytes = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>())};
+        assert!(bytes.len() <= dst.len());
+        
+        for (index, byte) in bytes.iter().enumerate(){
+            dst[index] = *byte;
+        }
+    }
+
+    fn from_bytes(src: &[u8]) -> Self {
+        let data = src.as_ptr();
+        unsafe{std::slice::from_raw_parts(data as *const Self, 1)[0].clone()}
+    }
+}
+

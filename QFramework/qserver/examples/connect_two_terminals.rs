@@ -1,9 +1,12 @@
+use std::{thread, time::Duration};
+
 use qserver::ClusterTerminal;
 
 fn main(){
     
     let mut terminal = ClusterTerminal::new(None, true, None);
-    
-    for x in 0..1000{
-    }
+    let mut tgt = ClusterTerminal::new(None, true, Some(terminal.get_runtime()));
+    terminal.connect_to(tgt.get_addr());
+    terminal.idle_async();
+
 }

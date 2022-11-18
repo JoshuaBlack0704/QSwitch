@@ -32,7 +32,7 @@ pub struct ClusterTerminal {
     ///The signal to terminate the async system
     network_terminate: TerminateSignal,
     /// The map used to store all connected terminals
-    terminal_map: Arc<LiveState>,
+    live_state: Arc<LiveState>,
 
 }
 
@@ -49,11 +49,11 @@ struct SocketHandler {
 //Represents a connection to another machine
 //A target of messages
 //Implicitly carries lifetime information, so can't be cloned
-struct TerminalConnection {
+pub(crate) struct TerminalConnection {
     discoverable: bool,
     tgt_addr: SocketAddr,
     socket: SocketHandler,
-    terminal_map: Arc<LiveState>,
+    live_state: Arc<LiveState>,
     keep_alive_channel: flume::Sender<Instant>,
     life: TerminateSignal,
 }

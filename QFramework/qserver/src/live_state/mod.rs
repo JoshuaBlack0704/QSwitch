@@ -4,11 +4,12 @@ use tokio::{sync::RwLock, time::{sleep, Duration}};
 use rand::{self, thread_rng, Rng};
 
 
-use super::{LiveState, Bytable, SocketPacket, TerminalConnection, SocketHandler, MAX_MESSAGE_LENGTH};
-type Fragment = (usize, [u8; MAX_MESSAGE_LENGTH]);
-type Message = Vec<u8>;
+use super::{LiveState, Bytable, SocketPacket, TerminalConnection, SocketHandler, MAX_MESSAGE_LENGTH, TerminateSignal};
+pub(crate) type Fragment = (usize, [u8; MAX_MESSAGE_LENGTH]);
+pub(crate) type Message = Vec<u8>;
 
-enum MessageOp{
+#[derive(Clone)]
+pub(crate) enum MessageOp{
     Send(Arc<TerminalConnection>, bool, Message),
     Receive(SocketPacket),
 }
@@ -43,29 +44,38 @@ impl LiveState{
             discoverable, })
     }
     /// If present, get a pre-existing terminal connection. Adding one if no pre-existing are found
-    async fn add_get_terminal(terminal_map: Arc<Self>, terminal_addr: SocketAddr) -> Arc<TerminalConnection> {
+    pub(crate) async fn add_get_terminal(live_state: Arc<Self>, terminal_addr: SocketAddr) -> Arc<TerminalConnection> {
         {
             // First we try to read a pre-exising terminal map
-            let reader = terminal_map.terminals.read().await;
+            let reader = live_state.terminals.read().await;
             if let Some(terminal) = reader.get(&terminal_addr){
                 return terminal.clone();
             }
         }
         
         // If no pre-exising termnials are found we grab a writer and add a new one
-        let mut writer = terminal_map.terminals.write().await;
+        let mut writer = live_state.terminals.write().await;
         // A terminal may have been added since we dropped the reader
         if let Some(terminal) = writer.get(&terminal_addr){
             return terminal.clone();
         }
         
-        let terminal = TerminalConnection::new(terminal_addr, terminal_map.socket.clone(), terminal_map.clone(), terminal_map.discoverable);
+        let terminal = TerminalConnection::new(terminal_addr, live_state.socket.clone(), live_state.clone(), live_state.discoverable);
         
-        if let None = writer.insert(terminal_addr, terminal.clone()){
+        if let Some(_) = writer.insert(terminal_addr, terminal.clone()){
             println!("Adding pre-exisiting terminal");
         }
         
         terminal
+    }
+    pub(crate) async fn remove_terminal(live_state: Arc<Self>, terminal_addr: SocketAddr){
+        println!("Removing terminal {}", terminal_addr);
+        let mut writer = live_state.terminals.write().await;
+        if let None = writer.remove(&terminal_addr){
+            println!("Trying to remove non existing terminal from live state");
+            
+        }
+        
     }
     async fn add_get_message(live_state: Arc<Self>, message_id: u64) -> Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)> {
         {
@@ -85,8 +95,8 @@ impl LiveState{
         
         let message_channel = Arc::new(flume::unbounded());
         
-        if let None = writer.insert(message_id, message_channel.clone()){
-            println!("Adding pre-exisiting terminal");
+        if let Some(_) = writer.insert(message_id, message_channel.clone()){
+            println!("Adding pre-exisiting message_id");
         }
         
         message_channel
@@ -112,8 +122,8 @@ impl LiveState{
         
         let message_channel = Arc::new(flume::unbounded());
         
-        if let None = writer.insert(message_id, message_channel.clone()){
-            println!("Adding pre-exisiting terminal");
+        if let Some(_) = writer.insert(message_id, message_channel.clone()){
+            println!("Adding pre-exisiting message_id");
         }
         
         (true, message_channel)
@@ -138,10 +148,10 @@ const SEND_TIMEOUT_TIME:u64= 100;
 const SEND_TIMEOUT_CYCLES:usize = 10;
 const RECEIVE_TIMEOUT_TIME:u64= 16;
 const RECEIVE_TIMEOUT_CYCLES:usize = 10;
-const MESSAGE_COMPLETE_TIMEOUT:usize = 1000;
+const MESSAGE_COMPLETE_TIMEOUT:u64= 1000;
 impl TerminalConnection{
     /// This the two-way async process for sending and reciving messages
-    async fn message_exchange(live_state: Arc<LiveState>, operation: MessageOp){
+    pub async fn message_exchange(live_state: Arc<LiveState>, operation: MessageOp){
         
         
         // This function will operate as both the send and receive.
@@ -184,8 +194,8 @@ impl TerminalConnection{
         match operation{
             MessageOp::Send(terminal, nak, message) => {
                 let message_id = thread_rng().gen::<u64>();
+                println!("Received send request with message_id: {}", message_id);
                 let fragments = Self::message_to_fragments(message_id, nak, &message);
-                
                 // In the send case we will always need to generate a new message_map entry
                 let message_channel = LiveState::add_get_message(live_state.clone(), message_id).await;
                 // Here we send the initial blast of message fragments
@@ -209,12 +219,14 @@ impl TerminalConnection{
                                 let (complete, retransmit_index) = Self::send_side_process(packet);
                                 if !complete{
                                     // Resending the requested fragment 
+                                    println!("Received retransmit request from {} for fragment {} of message {}", packet.1, retransmit_index, message_id);
                                     let retransmit_fragment = &fragments[retransmit_index];
                                     terminal.socket.send(terminal.tgt_addr.clone(), &retransmit_fragment.1[0..retransmit_fragment.0]).await;
                                     
                                 }
                                 else{
                                     // If the receiver side has told us it has everything then we are done
+                                    println!("Message complete received for message {}", message_id);
                                     break;
                                 }
                             }
@@ -224,6 +236,7 @@ impl TerminalConnection{
                             // aka. If the message complete bool is true in the receive side's RECPTION
                             // the the receive side will interpret it as an update request
                             
+                            println!("Asking receive side for update on message {}", message_id);
                             let header = MessageExchangeHeader{ 
                                 message_id,
                                 fragment_count: 0,
@@ -242,12 +255,14 @@ impl TerminalConnection{
                         }
                     }
                 }
+                LiveState::remove_message(live_state.clone(), message_id).await;
                 
                 
             },
             MessageOp::Receive(packet) => {
                 // Imediately we need to see if there is already another channel open for it
                 let header = MessageExchangeHeader::from_bytes(&packet.2);
+                println!("Received packet from {} for message {}", packet.1, header.message_id);
                 let (is_first, message_channel) = LiveState::first_get_message(live_state.clone(), header.message_id).await;
                 // This will be handeled later
                 message_channel.0.send(packet).unwrap();
@@ -321,8 +336,10 @@ impl TerminalConnection{
                             }
                         }
                     }
+                    
                 }
                 
+                LiveState::remove_message(live_state.clone(), header.message_id).await;
                 
             },
         };
@@ -342,7 +359,16 @@ impl TerminalConnection{
         header.to_bytes(data.as_mut_slice());
         terminal.socket.send(terminal.tgt_addr, &data).await;
         loop{
-            
+            // We just need to listen for any communication from the send side and resend our message_complete if we get any
+            tokio::select!{
+                val = channel.1.recv_async()=>{
+                    terminal.socket.send(terminal.tgt_addr, &data).await;
+                }
+                _ = sleep(Duration::from_millis(MESSAGE_COMPLETE_TIMEOUT))=>{
+                    // If we dont get any messages from the send side for this long we assume we are done
+                    break;
+                }
+            }
         }
         
         
@@ -408,8 +434,7 @@ impl TerminalConnection{
         true
     }
     async fn nak_pass(live_state: Arc<TerminalConnection>, packet: SocketPacket, packet_check: &mut [bool], fragments: &mut Vec<Fragment>){}
-    fn message_to_fragments(
-        message_id: u64, nak:bool, message: &Message) -> Vec<Fragment> {
+    fn message_to_fragments(message_id: u64, nak:bool, message: &Message) -> Vec<Fragment> {
         let data_size = MAX_MESSAGE_LENGTH - size_of::<MessageExchangeHeader>();
         let mut fragments:Vec<Fragment> = Vec::with_capacity(message.len()/data_size + 1);
         let chunks = message.chunks(data_size);
@@ -437,8 +462,5 @@ impl TerminalConnection{
         fragments
         
     }
-    // fn fragments_to_message(fragments: Vec<Fragment>) -> Message{
-        
-    // }
-    async fn process_message(live_state: Arc<LiveState>, terminal: Arc<TerminalConnection>, fragments: Vec<Option<Fragment>>){}
+    
 }
