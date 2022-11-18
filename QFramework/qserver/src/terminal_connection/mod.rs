@@ -1,17 +1,18 @@
-
+pub mod message_exchange;
 use std::{net::SocketAddr, sync::Arc, mem::size_of};
 
 use tokio::time::{Instant, sleep, Duration};
 
+use crate::{TerminalConnection, SocketHandler, LiveState, TerminateSignal, Bytable, MAX_MESSAGE_LENGTH};
 
-use crate::{live_state::{Fragment, Message}, MAX_MESSAGE_LENGTH, Bytable};
+use self::message_exchange::{MessageOp, Fragment, Message};
 
-use super::{TerminalConnection,live_state::MessageOp, SocketHandler, LiveState, TerminateSignal};
 
 #[repr(C)]
 #[derive(Clone)]
 pub(crate) enum TerminalMessageType{
     KeepAlive,
+    CommGroup()
 }
 
 const TERMINAL_KEEPALIVE_WAIT:u64 = 10;

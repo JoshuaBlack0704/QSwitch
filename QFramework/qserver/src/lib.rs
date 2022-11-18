@@ -38,7 +38,11 @@ pub struct ClusterTerminal {
 
 /// The CommGroup struct is how a user of a ClusterTerminal would send data over the cluster
 /// All of the logic required to converte user data types to bytes and resolve targets is included
-pub struct CommGroup {}
+pub struct CommGroup<Key> {
+    live_state: Arc<LiveState>,
+    key: Key
+    
+}
 /// The CommPort struct represents a channel for users to push data to a live CommGroup for transfer.
 pub struct CommPort {}
 

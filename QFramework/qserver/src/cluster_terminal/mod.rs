@@ -7,7 +7,7 @@ use tokio::time::Duration;
 
 
 
-use crate::{TerminalConnection, live_state::MessageOp};
+use crate::{TerminalConnection, terminal_connection::message_exchange::MessageOp};
 
 /// # The general purpose implementations of Cluster Terminal
 ///
