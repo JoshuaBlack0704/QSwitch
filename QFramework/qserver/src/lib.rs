@@ -3,7 +3,6 @@ use std::{sync::Arc, net::SocketAddr, collections::HashMap};
 use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock, time::Instant};
 
 mod cluster_terminal;
-mod comm_group;
 mod comm_port;
 mod live_state;
 mod terminal_connection;
@@ -36,15 +35,12 @@ pub struct ClusterTerminal {
 
 }
 
-/// The CommGroup struct is how a user of a ClusterTerminal would send data over the cluster
-/// All of the logic required to converte user data types to bytes and resolve targets is included
-pub struct CommGroup {
-    id: u32,
-    live_state: Arc<LiveState>,
-    
-}
 /// The CommPort struct represents a channel for users to push data to a live CommGroup for transfer.
-pub struct CommPort {}
+pub struct CommPort {
+    id: u64,
+    channel: u32,
+    live_state: Arc<LiveState>,
+}
 
 #[derive(Clone)]
 struct SocketHandler {
@@ -68,7 +64,7 @@ struct TerminateSignal {
 struct LiveState {
     terminals: RwLock<HashMap<SocketAddr, Arc<TerminalConnection>>>,
     message_map: RwLock<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>>,
-    commgroups: RwLock<HashMap<u32, Arc<CommGroup>>>,
+    comm_port_map: RwLock<HashMap<(u64, u32), Arc<CommPort>>>,
     socket: SocketHandler,
     discoverable: bool,
 }
