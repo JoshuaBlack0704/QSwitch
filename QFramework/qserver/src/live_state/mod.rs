@@ -30,6 +30,7 @@ impl LiveState{
         // If no pre-exising termnials are found we grab a writer and add a new one
         let mut writer = live_state.commgroups.write().await;
         // A terminal may have been added since we dropped the reader
+              
         if let Some(comm) = writer.get(&id){
             return comm.clone();
         }

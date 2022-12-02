@@ -1,6 +1,7 @@
 use std::mem::size_of;
 
-use super::{Bytable, terminal_connection::message_exchange::MessageExchangeHeader};
+use crate::{Bytable, message_exchange::MessageExchangeHeader, station::StationHeader, foreign_server::ServerMessageType};
+
 
 impl Bytable for MessageExchangeHeader{
     fn to_bytes(&self, dst: &mut [u8]) {
@@ -18,6 +19,14 @@ impl Bytable for MessageExchangeHeader{
     fn from_bytes(src: &[u8]) -> Self {
         let data = src.as_ptr();
         unsafe{std::slice::from_raw_parts(data as *const Self, 1)[0].clone()}
+    }
+}
+
+impl Into<Vec<u8>> for MessageExchangeHeader{
+    fn into(self) -> Vec<u8> {
+        let mut data = vec![0; size_of::<Self>()];
+        self.to_bytes(&mut data);
+        data
     }
 }
 
@@ -41,7 +50,15 @@ impl<T: Clone> Bytable for Vec<T>{
     }
 }
 
-impl Bytable for crate::terminal_connection::TerminalMessageType{
+// impl<T:Clone> Into<Vec<u8>> for Vec<T>{
+//     fn into(self) -> Vec<u8> {
+//         let mut data = vec![0; size_of::<Self>()];
+//         self.to_bytes(&mut data);
+//         data
+//     }
+// }
+
+impl Bytable for ServerMessageType{
     fn to_bytes(&self, dst: &mut [u8]) {
         let ptr = self as *const Self;
         let bytes = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>())};
@@ -58,3 +75,21 @@ impl Bytable for crate::terminal_connection::TerminalMessageType{
     }
 }
 
+impl Bytable for StationHeader{
+    fn to_bytes(&self, dst: &mut [u8]) {
+        let ptr = self as *const Self;
+        let bytes = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>())};
+        assert!(bytes.len() <= dst.len());
+        
+        for (index, byte) in bytes.iter().enumerate(){
+            dst[index] = *byte;
+        }
+        
+         
+    }
+
+    fn from_bytes(src: &[u8]) -> Self {
+        let data = src.as_ptr();
+        unsafe{std::slice::from_raw_parts(data as *const Self, 1)[0].clone()}
+    }
+}
