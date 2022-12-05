@@ -1,10 +1,11 @@
 use std::{sync::Arc, net::SocketAddr, collections::HashMap, time::Duration};
+use std::mem::size_of;
 
 
 use local_ip_address::local_ip;
 use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, time::sleep};
 
-use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::{MessageOp, self}, MAX_MESSAGE_LENGTH};
+use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::{MessageOp, self}, MAX_MESSAGE_LENGTH, station::{StationHeader, NO_MESSAGE_CHANNEL}};
 
 impl LocalServer{
     ///
@@ -58,6 +59,7 @@ impl LocalServer{
                 _ = lifetime.terminated()=>{println!("Shutting down main udp listener for {}", server.local_address());break;}
                 message = server.recieve()=>{
                     let op = MessageOp::Receive(message);
+                    LocalServer::update_foreign_server(server.clone(), message.1).await;
                     tokio::spawn(Self::exchange(server.clone(), op));
                 }
             }
@@ -75,29 +77,63 @@ impl LocalServer{
             sleep(Duration::from_millis(1000*5)).await;
         }
     }
-    async fn keep_alive(server: Arc<LocalServer>, addr:SocketAddr, recv: flume::Receiver<bool>){
-        let mut keep_alive_budget = 10;
-        loop{
-            tokio::select!{
-                _ = recv.recv_async()=>{
-                    keep_alive_budget = 10;
-                
-                }
-                _ = crate::async_timer(1000)=>{
-                    keep_alive_budget-=1;
-                    if keep_alive_budget == 0{
-                        // We will consider this foreign server to be disconnected
-                        let mut writer = server.write_server().await;
-                        writer.remove(&addr);
-                        return;
-                    }
-                    
-                    // If we still have a keep alive budget and we haven't received a message for a bit we will prepare a 
-                    // keep alive ping
-                    // TODO: build keep alive ping
-                }
+    async fn keep_alive(server: Arc<LocalServer>, addr:SocketAddr){
+        println!("Keep alive started for tgt {}", addr);
+        // The first thing we need is an entry into the foreign servers list so we can be found
+        let (tx, rx) = flume::bounded(1);
+        {
+            let mut writer = server.write_server().await;
+            // Has one been added since we get the writer?
+            if let Some(sender) = writer.get(&addr){
+                let _ = sender.send(true);
+                // If this is the case then there is some other keep alive task going so we 
+                // can go ahead and cancel this one
+                return;
+            }
+            else{
+                // If not we add one and continue
+                writer.insert(addr, tx);
             }
         }
+        
+        let keep_alive_timeout = 5000;
+        let mut keep_alive_budget = 3;
+        
+        while keep_alive_budget > 0{
+            // Each loop we must count down the keep alive budget
+            // If we receive an update it will be reset in the loop
+            keep_alive_budget -= 1;
+            
+            // We need to check for an update
+            match rx.try_recv(){
+                Ok(_) => {
+                    keep_alive_budget = 10;
+                    println!("Keep alive maintained for tgt {}", addr);
+                },
+                Err(e) => {
+                    match e{
+                        flume::TryRecvError::Empty => {},
+                        flume::TryRecvError::Disconnected => {
+                            println!("Keep alive for tgt {} lost its sender!", addr);
+                            break;
+                        },
+                    }
+                },
+            }
+            
+            // Now we send this cycle's keep alive message
+            let header = StationHeader::no_message().into();
+            let op = MessageOp::Send(addr,false,header);
+            let _ = Self::exchange(server.clone(), op).await;
+            
+            // Now we wait for a bit and repeat
+            crate::async_timer(keep_alive_timeout).await;
+            
+        }
+        // If we run out of keep alives we will need to remove the entry from the foreign servers list
+        let mut writer = server.write_server().await;
+        writer.remove(&addr);
+        println!("Keep alive stopped for tgt {}", addr);
     }
 }
 
@@ -122,24 +158,18 @@ impl LocalServer{
         self.stations.write().await
     }
     pub(crate) async fn update_foreign_server(server:Arc<LocalServer>, addr: SocketAddr){
-        // First we see if on exisits
+        // First we see if one exisits
         let reader = server.read_servers().await;
         if let Some(sender) = reader.get(&addr){
             let _ = sender.send(true);
         }
         else{
-            let mut writer = server.write_server().await;
-            // Has one been added since we get the writer?
-            if let Some(sender) = writer.get(&addr){
-                let _ = sender.send(true);
-                return;
-            }
-            // If not we add one
-            let channel:(flume::Sender<bool>, flume::Receiver<bool>) = flume::bounded(1);
-            writer.insert(addr, channel.0);
-            tokio::spawn(Self::keep_alive(server.clone(), addr, channel.1));
-            
+            // If not we start a new keep alive task which will create and manage one
+            tokio::spawn(Self::keep_alive(server.clone(), addr));
         }
+    }
+    pub fn connect_to_server(server: Arc<LocalServer>, addr: SocketAddr){
+        server.runtime.block_on(Self::update_foreign_server(server.clone(), addr));
     }
 }
 
@@ -167,10 +197,10 @@ impl LocalServer{
     /// * `data` - A vector of bytes. Needs to be a vector to help with lifetime issues
     /// Async sends a message to the `tgt`
     pub(crate) async fn send(&self, tgt: SocketAddr, data: &[u8]) {
-        println!("Socket {} send {} bytes to {}", self.local_address(), data.len(), tgt);
+        // println!("Socket {} sent {} bytes to {}", self.local_address(), data.len(), tgt);
         self.socket.send_to(&data, tgt).await.unwrap();
     }
-    pub(crate) fn local_address(&self) -> SocketAddr {
+    pub fn local_address(&self) -> SocketAddr {
         self.socket.local_addr().unwrap()
     }
     

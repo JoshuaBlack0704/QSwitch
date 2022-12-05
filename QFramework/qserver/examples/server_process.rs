@@ -1,7 +1,7 @@
 use std::net::{SocketAddr, ToSocketAddrs};
+use qserver::LocalServer;
 
 use clap::Parser;
-use qserver::ClusterTerminal;
 
 #[derive(Parser)]
 struct Args {
@@ -19,12 +19,12 @@ fn main(){
     let ip = local_ip_address::local_ip().unwrap();
     let port = 0;
     let addr = SocketAddr::new(ip, port);
-    let terminal = ClusterTerminal::new(Some(addr), arg.discoverable, None);
+    let server = LocalServer::new(Some(addr), arg.discoverable, None);
     if let Ok(addr) = arg.tgt.to_socket_addrs(){
         if let Some(addr) = addr.last(){
-            terminal.connect_to(addr);
+            LocalServer::connect_to_server(server.clone(), addr);
         }
     }
-    terminal.idle_async();
+    server.idle_async();
     
 }

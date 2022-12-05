@@ -4,7 +4,6 @@ use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock, time::{Duration,slee
 
 mod bytable;
 mod local_server;
-mod foreign_server;
 mod station;
 mod message_exchange;
 
@@ -18,7 +17,6 @@ pub trait Bytable{
     fn from_bytes(src: &[u8]) -> Self;
 }
 
-pub(crate) const SERVER_PING_CHANNEL:u32 = u32::MAX;
 
 /// The main struct of the QServer library
 /// This struct will initialize the async system and either connect to, or start, a cluster
