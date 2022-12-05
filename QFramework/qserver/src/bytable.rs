@@ -29,6 +29,13 @@ impl Into<Vec<u8>> for MessageExchangeHeader{
         data
     }
 }
+impl Into<[u8; size_of::<Self>()]> for MessageExchangeHeader{
+    fn into(self) -> [u8; size_of::<Self>()] {
+        let mut data = [0u8; size_of::<Self>()];
+        self.to_bytes(&mut data);
+        data
+    }
+}
 
 impl<T: Clone> Bytable for Vec<T>{
     fn to_bytes(&self, dst: &mut [u8]) {

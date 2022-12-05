@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use crate::{Station, LocalServer};
+
 pub(crate) type StationId = u64;
 pub(crate) type StationChannel = u32;
 #[derive(Clone)]
@@ -8,3 +12,10 @@ pub(crate) struct StationHeader{
     channel: StationChannel,
     ping: bool,
 }
+
+impl Station{
+    pub(crate) async fn route_message(server: Arc<LocalServer>, message: Vec<u8>){}
+}
+                
+                
+                

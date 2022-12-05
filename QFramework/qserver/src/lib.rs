@@ -1,6 +1,6 @@
 use std::{sync::Arc, net::SocketAddr, collections::HashMap};
 
-use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock};
+use tokio::{runtime::Runtime, net::UdpSocket, sync::RwLock, time::{Duration,sleep}};
 
 mod bytable;
 mod local_server;
@@ -18,6 +18,8 @@ pub trait Bytable{
     fn from_bytes(src: &[u8]) -> Self;
 }
 
+pub(crate) const SERVER_PING_CHANNEL:u32 = u32::MAX;
+
 /// The main struct of the QServer library
 /// This struct will initialize the async system and either connect to, or start, a cluster
 pub struct LocalServer{
@@ -32,20 +34,11 @@ pub struct LocalServer{
     /// This is used to shutdown any tasks that the Server spawns
     life: TerminateSignal,
     /// The state of all known servers
-    foreign_servers: RwLock<HashMap<SocketAddr, Arc<ForeignServer>>>,
+    foreign_servers: RwLock<HashMap<SocketAddr, flume::Sender<bool>>>,
     /// The state of all live message exchanges
     message_exchanges: RwLock<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>>,
     /// The state of all known comm ports
-    stations: RwLock<HashMap<(station::StationId, station::StationChannel), Arc<Station>>>,    
-}
-pub(crate) struct ForeignServer{
-    /// What the address of the foreign server is
-    address: SocketAddr,
-    /// The local server
-    local_server: Arc<LocalServer>,
-    /// Did this foreign server tell us it want to 
-    /// be discoverable
-    discoverable: bool,
+    stations: RwLock<HashMap<station::StationChannel, HashMap<station::StationId, flume::Sender<Vec<u8>>>>>,    
 }
 
 /// The CommPort struct represents a channel for users to push data to a live CommGroup for transfer.
@@ -58,4 +51,8 @@ pub struct Station {
 #[derive(Clone)]
 struct TerminateSignal {
     channel: (flume::Sender<bool>, flume::Receiver<bool>),
+}
+
+pub(crate) async fn async_timer(timeout: u64){
+    sleep(Duration::from_millis(timeout)).await;
 }

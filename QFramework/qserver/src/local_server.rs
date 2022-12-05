@@ -1,9 +1,10 @@
 use std::{sync::Arc, net::SocketAddr, collections::HashMap, time::Duration};
 
+
 use local_ip_address::local_ip;
 use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, time::sleep};
 
-use crate::{LocalServer, SocketPacket, TerminateSignal, ForeignServer};
+use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::{MessageOp, self}, MAX_MESSAGE_LENGTH};
 
 impl LocalServer{
     ///
@@ -50,7 +51,18 @@ impl LocalServer{
         server
     }
     
-    async fn udp_intake(server: Arc<LocalServer>){}
+    async fn udp_intake(server: Arc<LocalServer>){
+        let lifetime = server.life.subscribe();
+        loop {
+            tokio::select! {
+                _ = lifetime.terminated()=>{println!("Shutting down main udp listener for {}", server.local_address());break;}
+                message = server.recieve()=>{
+                    let op = MessageOp::Receive(message);
+                    tokio::spawn(Self::exchange(server.clone(), op));
+                }
+            }
+        }
+    }
     
     pub fn get_runtime(&self) -> Arc<Runtime> {
         self.runtime.clone()
@@ -63,34 +75,74 @@ impl LocalServer{
             sleep(Duration::from_millis(1000*5)).await;
         }
     }
-    
+    async fn keep_alive(server: Arc<LocalServer>, addr:SocketAddr, recv: flume::Receiver<bool>){
+        let mut keep_alive_budget = 10;
+        loop{
+            tokio::select!{
+                _ = recv.recv_async()=>{
+                    keep_alive_budget = 10;
+                
+                }
+                _ = crate::async_timer(1000)=>{
+                    keep_alive_budget-=1;
+                    if keep_alive_budget == 0{
+                        // We will consider this foreign server to be disconnected
+                        let mut writer = server.write_server().await;
+                        writer.remove(&addr);
+                        return;
+                    }
+                    
+                    // If we still have a keep alive budget and we haven't received a message for a bit we will prepare a 
+                    // keep alive ping
+                    // TODO: build keep alive ping
+                }
+            }
+        }
+    }
 }
 
 /// State management functionality
 impl LocalServer{
-    pub(crate) async fn read_servers(&self) -> RwLockReadGuard<HashMap<SocketAddr, Arc<ForeignServer>>> {
+    pub(crate) async fn read_servers(&self) -> RwLockReadGuard<HashMap<SocketAddr, flume::Sender<bool>>> {
         self.foreign_servers.read().await
     }
     pub(crate) async fn read_exchanges(&self) -> RwLockReadGuard<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>> {
         self.message_exchanges.read().await
     }
-    pub(crate) async fn read_stations(&self) -> RwLockReadGuard<HashMap<(u64, u32), Arc<crate::Station>>> {
+    pub(crate) async fn read_stations(&self) -> RwLockReadGuard<HashMap<u32, HashMap<u64, flume::Sender<Vec<u8>>>>>  {
         self.stations.read().await
     }
-    pub(crate) async fn write_server(&self) -> RwLockWriteGuard<HashMap<SocketAddr, Arc<ForeignServer>>> {
+    pub(crate) async fn write_server(&self) -> RwLockWriteGuard<HashMap<SocketAddr, flume::Sender<bool>>> {
         self.foreign_servers.write().await
     }
     pub(crate) async fn write_exchanges(&self) -> RwLockWriteGuard<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>> {
         self.message_exchanges.write().await
     }
-    pub(crate) async fn write_stations(&self) -> RwLockWriteGuard<HashMap<(u64, u32), Arc<crate::Station>>> {
+    pub(crate) async fn write_stations(&self) -> RwLockWriteGuard<HashMap<u32, HashMap<u64, flume::Sender<Vec<u8>>>>> {
         self.stations.write().await
     }
-    pub(crate) async fn get_foreign_server(&self, address: SocketAddr) -> Arc<ForeignServer> {
-        let reader = self.read_servers().await;
-        reader.get(&address).expect("Not such known foreign server").clone()
+    pub(crate) async fn update_foreign_server(server:Arc<LocalServer>, addr: SocketAddr){
+        // First we see if on exisits
+        let reader = server.read_servers().await;
+        if let Some(sender) = reader.get(&addr){
+            let _ = sender.send(true);
+        }
+        else{
+            let mut writer = server.write_server().await;
+            // Has one been added since we get the writer?
+            if let Some(sender) = writer.get(&addr){
+                let _ = sender.send(true);
+                return;
+            }
+            // If not we add one
+            let channel:(flume::Sender<bool>, flume::Receiver<bool>) = flume::bounded(1);
+            writer.insert(addr, channel.0);
+            tokio::spawn(Self::keep_alive(server.clone(), addr, channel.1));
+            
+        }
     }
 }
+
 
 /// Socket functionality
 impl LocalServer{
@@ -104,7 +156,7 @@ impl LocalServer{
     /// Async waits to receive a viable message
     /// Erroed messages are just dropped
     async fn recieve(&self) -> SocketPacket{    
-        let mut data = [0; 1024];
+        let mut data = [0; MAX_MESSAGE_LENGTH];
         loop {
             if let Ok((len, addr)) = self.socket.recv_from(&mut data).await {
                 return (len, addr, data);
