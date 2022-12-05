@@ -3,6 +3,7 @@ use std::mem::size_of;
 
 
 use local_ip_address::local_ip;
+use tokio::time;
 use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, time::sleep};
 
 use crate::{KEEP_ALIVE_TIMEOUT, KEEP_ALIVE_BUDGET, async_timer};
@@ -97,8 +98,8 @@ impl LocalServer{
             }
         }
         
-        let keep_alive_timeout = KEEP_ALIVE_TIMEOUT;
         let mut keep_alive_budget = KEEP_ALIVE_BUDGET;
+        let mut interval = time::interval(Duration::from_millis(KEEP_ALIVE_TIMEOUT));
         
         while keep_alive_budget > 0{
             // Each loop we must count down the keep alive budget
@@ -128,8 +129,7 @@ impl LocalServer{
             let _ = Self::exchange(server.clone(), op).await;
             
             // Now we wait for a bit and repeat
-            async_timer(keep_alive_timeout).await;
-            
+            interval.tick().await;
         }
         // If we run out of keep alives we will need to remove the entry from the foreign servers list
         let mut writer = server.write_server().await;

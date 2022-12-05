@@ -126,6 +126,8 @@ impl LocalServer{
                         // The exchange channel is where we would receive the communication
                         val = channel.1.recv_async()=>{
                             if Self::retransmit_request(server.clone() ,exchange_id, &fragements, val).await {
+                                // Now that the exchange is complete we can remove it from existence
+                                server.remove_exchange(exchange_id).await;
                                 return Ok(true);
                             }
                         }
@@ -133,6 +135,8 @@ impl LocalServer{
                             timeout_budget -= 1;
                             // We timeout enough times we consider the message status as unknown
                             if timeout_budget == 0{
+                                // Now that the exchange is complete we can remove it from existence
+                                server.remove_exchange(exchange_id).await;
                                 return Err(MessageExchangeError::NoConfirmation);
                             }
                             // However, we will attempt to contact the receive side and ask for an update
@@ -174,6 +178,8 @@ impl LocalServer{
                     tokio::select!{
                         val = channel.1.recv_async()=>{
                             if Self::receive_fragment(server.clone(), header.exchange_id, val, &mut fragments, channel.clone()).await{
+                                // Now that the exchange is complete we can remove it from existence
+                                server.remove_exchange(header.exchange_id).await;
                                 return Ok(true);
                             }
                         
@@ -190,6 +196,8 @@ impl LocalServer{
                             remaining_timeouts -= 1;
                             println!("Receive timeout budget {}", remaining_timeouts);
                             if remaining_timeouts <= 0{
+                                // Now that the exchange is complete we can remove it from existence
+                                server.remove_exchange(header.exchange_id).await;
                                 return Err(MessageExchangeError::Failed);
                             }
                 
