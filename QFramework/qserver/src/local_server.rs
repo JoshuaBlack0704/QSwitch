@@ -5,6 +5,7 @@ use std::mem::size_of;
 use local_ip_address::local_ip;
 use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, time::sleep};
 
+use crate::{KEEP_ALIVE_TIMEOUT, KEEP_ALIVE_BUDGET, async_timer};
 use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::{MessageOp, self}, MAX_MESSAGE_LENGTH, station::{StationHeader, NO_MESSAGE_CHANNEL}};
 
 impl LocalServer{
@@ -22,7 +23,7 @@ impl LocalServer{
         let target_runtime = match target_runtime {
             Some(r) => r,
             None => Arc::new(
-                tokio::runtime::Builder::new_current_thread()
+                tokio::runtime::Builder::new_multi_thread()
                     .enable_all()
                     .build()
                     .unwrap(),
@@ -96,8 +97,8 @@ impl LocalServer{
             }
         }
         
-        let keep_alive_timeout = 5000;
-        let mut keep_alive_budget = 3;
+        let keep_alive_timeout = KEEP_ALIVE_TIMEOUT;
+        let mut keep_alive_budget = KEEP_ALIVE_BUDGET;
         
         while keep_alive_budget > 0{
             // Each loop we must count down the keep alive budget
@@ -107,7 +108,7 @@ impl LocalServer{
             // We need to check for an update
             match rx.try_recv(){
                 Ok(_) => {
-                    keep_alive_budget = 10;
+                    keep_alive_budget = KEEP_ALIVE_BUDGET;
                     println!("Keep alive maintained for tgt {}", addr);
                 },
                 Err(e) => {
@@ -127,7 +128,7 @@ impl LocalServer{
             let _ = Self::exchange(server.clone(), op).await;
             
             // Now we wait for a bit and repeat
-            crate::async_timer(keep_alive_timeout).await;
+            async_timer(keep_alive_timeout).await;
             
         }
         // If we run out of keep alives we will need to remove the entry from the foreign servers list

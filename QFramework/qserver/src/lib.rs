@@ -8,7 +8,9 @@ mod station;
 mod message_exchange;
 
 
-const MAX_MESSAGE_LENGTH: usize = 1024;
+pub(crate) const MAX_MESSAGE_LENGTH: usize = 1024;
+pub(crate) const KEEP_ALIVE_TIMEOUT: u64 = 500;
+pub(crate) const KEEP_ALIVE_BUDGET: usize = 3;
 pub(crate) type SocketPacket = (usize, SocketAddr, [u8; MAX_MESSAGE_LENGTH]);
 
 
