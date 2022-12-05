@@ -1,13 +1,13 @@
 use std::{sync::Arc, net::SocketAddr, collections::HashMap, time::Duration};
-use std::mem::size_of;
+
 
 
 use local_ip_address::local_ip;
-use tokio::time;
+use tokio::time::{self, timeout};
 use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, time::sleep};
 
 use crate::{KEEP_ALIVE_TIMEOUT, KEEP_ALIVE_BUDGET, async_timer};
-use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::{MessageOp, self}, MAX_MESSAGE_LENGTH, station::{StationHeader, NO_MESSAGE_CHANNEL}};
+use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::MessageOp, MAX_MESSAGE_LENGTH, station::StationHeader};
 
 impl LocalServer{
     ///
@@ -24,7 +24,7 @@ impl LocalServer{
         let target_runtime = match target_runtime {
             Some(r) => r,
             None => Arc::new(
-                tokio::runtime::Builder::new_multi_thread()
+                tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .unwrap(),
@@ -87,7 +87,7 @@ impl LocalServer{
             let mut writer = server.write_server().await;
             // Has one been added since we get the writer?
             if let Some(sender) = writer.get(&addr){
-                let _ = sender.send(true);
+                let _ = sender.try_send(true);
                 // If this is the case then there is some other keep alive task going so we 
                 // can go ahead and cancel this one
                 return;
@@ -99,7 +99,6 @@ impl LocalServer{
         }
         
         let mut keep_alive_budget = KEEP_ALIVE_BUDGET;
-        let mut interval = time::interval(Duration::from_millis(KEEP_ALIVE_TIMEOUT));
         
         while keep_alive_budget > 0{
             // Each loop we must count down the keep alive budget
@@ -107,20 +106,9 @@ impl LocalServer{
             keep_alive_budget -= 1;
             
             // We need to check for an update
-            match rx.try_recv(){
-                Ok(_) => {
-                    keep_alive_budget = KEEP_ALIVE_BUDGET;
-                    println!("Keep alive maintained for tgt {}", addr);
-                },
-                Err(e) => {
-                    match e{
-                        flume::TryRecvError::Empty => {},
-                        flume::TryRecvError::Disconnected => {
-                            println!("Keep alive for tgt {} lost its sender!", addr);
-                            break;
-                        },
-                    }
-                },
+            if let Ok(_) = rx.try_recv(){
+                keep_alive_budget = KEEP_ALIVE_BUDGET;
+                println!("Keep alive maintained for tgt {}", addr);
             }
             
             // Now we send this cycle's keep alive message
@@ -128,8 +116,7 @@ impl LocalServer{
             let op = MessageOp::Send(addr,false,header);
             let _ = Self::exchange(server.clone(), op).await;
             
-            // Now we wait for a bit and repeat
-            interval.tick().await;
+            async_timer(KEEP_ALIVE_TIMEOUT).await;
         }
         // If we run out of keep alives we will need to remove the entry from the foreign servers list
         let mut writer = server.write_server().await;
@@ -162,7 +149,7 @@ impl LocalServer{
         // First we see if one exisits
         let reader = server.read_servers().await;
         if let Some(sender) = reader.get(&addr){
-            let _ = sender.send(true);
+            let _ = sender.try_send(true);
         }
         else{
             // If not we start a new keep alive task which will create and manage one

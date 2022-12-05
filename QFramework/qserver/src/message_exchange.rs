@@ -1,8 +1,8 @@
-use std::{sync::Arc, time::Duration, mem::size_of, net::SocketAddr};
+use std::{sync::Arc, mem::size_of, net::SocketAddr};
+use tokio::time::{Duration, timeout};
 
 use flume::RecvError;
 use rand::{thread_rng, Rng};
-use tokio::time::sleep;
 
 use crate::{LocalServer, SocketPacket, MAX_MESSAGE_LENGTH, Bytable, Station};
 pub(crate) type Fragment = (usize, [u8; MAX_MESSAGE_LENGTH]);
@@ -122,28 +122,27 @@ impl LocalServer{
                 // Now we wait for any retransmit requests
                 let mut timeout_budget = SEND_TIMEOUT_CYCLES;
                 loop{
-                    tokio::select!{
-                        // The exchange channel is where we would receive the communication
-                        val = channel.1.recv_async()=>{
-                            if Self::retransmit_request(server.clone() ,exchange_id, &fragements, val).await {
+                    if let Ok(packet) = timeout(Duration::from_millis(SEND_TIMEOUT_TIME), channel.1.recv_async()).await{
+                        if let Ok(packet) = packet{
+                            if Self::retransmit_request(server.clone() ,exchange_id, &fragements, packet).await {
                                 // Now that the exchange is complete we can remove it from existence
                                 server.remove_exchange(exchange_id).await;
                                 return Ok(true);
                             }
                         }
-                        _ = crate::async_timer(SEND_TIMEOUT_TIME)=>{
-                            timeout_budget -= 1;
-                            // We timeout enough times we consider the message status as unknown
-                            if timeout_budget == 0{
-                                // Now that the exchange is complete we can remove it from existence
-                                server.remove_exchange(exchange_id).await;
-                                return Err(MessageExchangeError::NoConfirmation);
-                            }
-                            // However, we will attempt to contact the receive side and ask for an update
-                            let header:[u8; size_of::<MessageExchangeHeader>()] = MessageExchangeHeader::message_complete(exchange_id, nak).into();
-                            server.send(addr, &header).await;
                         
+                    }
+                    else{
+                        timeout_budget -= 1;
+                        // We timeout enough times we consider the message status as unknown
+                        if timeout_budget == 0{
+                            // Now that the exchange is complete we can remove it from existence
+                            server.remove_exchange(exchange_id).await;
+                            return Err(MessageExchangeError::NoConfirmation);
                         }
+                        // However, we will attempt to contact the receive side and ask for an update
+                        let header:[u8; size_of::<MessageExchangeHeader>()] = MessageExchangeHeader::message_complete(exchange_id, nak).into();
+                        server.send(addr, &header).await;
                     }
                 }
             },
@@ -175,39 +174,38 @@ impl LocalServer{
                 
                 // Now, we can begin the receive operation and begin to peice the message together
                 loop{
-                    tokio::select!{
-                        val = channel.1.recv_async()=>{
-                            if Self::receive_fragment(server.clone(), header.exchange_id, val, &mut fragments, channel.clone()).await{
+                    if let Ok(packet) = timeout(Duration::from_millis(RECEIVE_TIMEOUT_TIME), channel.1.recv_async()).await{
+                        if let Ok(packet) = packet{
+                            if Self::receive_fragment(server.clone(), header.exchange_id, packet, &mut fragments, channel.clone()).await{
                                 // Now that the exchange is complete we can remove it from existence
                                 server.remove_exchange(header.exchange_id).await;
                                 return Ok(true);
                             }
+                        }
+                    }
+                    else{
+                        // If we have nak, we need to request retransmits
+                        if header.nak{
+                            for request in Self::prepare_retransmits(header.exchange_id, &fragments).iter(){
+                                server.send(packet.1, request.as_slice()).await;
+                            }
+                        }
                         
+                        // If we timeout too many times then we drop the message
+                        remaining_timeouts -= 1;
+                        println!("Receive timeout budget {}", remaining_timeouts);
+                        if remaining_timeouts <= 0{
+                            // Now that the exchange is complete we can remove it from existence
+                            server.remove_exchange(header.exchange_id).await;
+                            return Err(MessageExchangeError::Failed);
                         }
-                        _ = crate::async_timer(RECEIVE_TIMEOUT_TIME)=>{
-                            // If we have nak, we need to request retransmits
-                            if header.nak{
-                                for request in Self::prepare_retransmits(header.exchange_id, &fragments).iter(){
-                                    server.send(packet.1, request.as_slice()).await;
-                                }
-                            }
-                            
-                            // If we timeout too many times then we drop the message
-                            remaining_timeouts -= 1;
-                            println!("Receive timeout budget {}", remaining_timeouts);
-                            if remaining_timeouts <= 0{
-                                // Now that the exchange is complete we can remove it from existence
-                                server.remove_exchange(header.exchange_id).await;
-                                return Err(MessageExchangeError::Failed);
-                            }
-                
-                        }
+                        
                     }
                 }
             },
         }
     }
-    async fn receive_fragment(server: Arc<LocalServer>, exchange_id: u64, message: Result<SocketPacket, RecvError>, fragments: &mut [Option<Fragment>], channel: Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>) -> bool{
+    async fn receive_fragment(server: Arc<LocalServer>, exchange_id: u64, packet: SocketPacket, fragments: &mut [Option<Fragment>], channel: Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>) -> bool{
         // The receive case can get two message types: A fragment or an update request
         // A fragment is the send case sending the message data
         // An update request is the send case asking what the current state of the receive case is
@@ -215,73 +213,63 @@ impl LocalServer{
         
         // So lets handle both cases
         // If the channel has as error will will tell the recive case to close
-        if let Ok(packet) = message{
-            let header = MessageExchangeHeader::from_bytes(&packet.2);
-            // We need to see what type of message this is
-            if header.message_complete{
-                println!("Receive side for exchange {} asked for state update", exchange_id);
-                // Remember, if the send side sends a message_complete then it is asking for a state update
-                // So we send any retransmits we have
-                for request in Self::prepare_retransmits(exchange_id, fragments).iter(){
-                    server.send(packet.1, request.as_slice()).await;
-                }
+        let header = MessageExchangeHeader::from_bytes(&packet.2);
+        // We need to see what type of message this is
+        if header.message_complete{
+            println!("Receive side for exchange {} asked for state update", exchange_id);
+            // Remember, if the send side sends a message_complete then it is asking for a state update
+            // So we send any retransmits we have
+            for request in Self::prepare_retransmits(exchange_id, fragments).iter(){
+                server.send(packet.1, request.as_slice()).await;
             }
-            else{
-                // If this is not a state update than this is a new fragement
-                // If we get a duplicate fragment then we just overwrite what we already have 
-                let index = header.fragment_index;
-                // println!("Receive side for exchange {} got fragment {} of {}", exchange_id, index + 1, header.fragment_count);
-                
-                fragments[index as usize] = Some((header.fragment_data as usize, packet.2));
-                // Now that we have gotten a new fragment we should check to see if we need to
-                // enter the message complete stage of the receive case
-                // In this stage we will package the message and send it off
-                // as well as notifiy the send case of completion and wait for any update requests it might send
-                
-                let requests = Self::prepare_retransmits(exchange_id, fragments);
-                if requests.len() == 0 {
-                    // We have the complete message
-                    // This means we can peice the message together
-                    if let Ok(message) = Self::fragments_to_message(fragments){
-                        // println!("Exchange {} assembled", exchange_id);
-                        // And send it off
-                        tokio::spawn(Station::route_message(server.clone(), message));
-                        
-                        // Now we wait for awhile and respond to any send case communication with a message complete
-                        // If we have nak of course
-                        if header.nak{
-                            loop{
-                                tokio::select!{
-                                    _ = channel.1.recv_async()=>{
-                                        let header:[u8; size_of::<MessageExchangeHeader>()] = MessageExchangeHeader::message_complete(exchange_id, true).into();
-                                        server.send(packet.1, &header).await;
-                                    }
-                                    _ = crate::async_timer(MESSAGE_COMPLETE_TIMEOUT)=>{
-                                        // If we have waited long enough we will assume that the send case has closed
-                                        return true;
-                        
-                                    }
-                                }
-                            }
-                        }
-                        
-                        // If no nak then we just consider this exchange complete
-                        return true;
-                    }
-                    else{
-                        // This should be an impossible case
-                        return true;
-                    }
-                }
-            }
-            // If we arrive here we have not completed the message yet
             return false;
         }
-        else{
-            // The channel has suffered an error
-            return true;
-        }
         
+        // If this is not a state update than this is a new fragement
+        // If we get a duplicate fragment then we just overwrite what we already have 
+        let index = header.fragment_index;
+        // println!("Receive side for exchange {} got fragment {} of {}", exchange_id, index + 1, header.fragment_count);
+        
+        fragments[index as usize] = Some((header.fragment_data as usize, packet.2));
+        // Now that we have gotten a new fragment we should check to see if we need to
+        // enter the message complete stage of the receive case
+        // In this stage we will package the message and send it off
+        // as well as notifiy the send case of completion and wait for any update requests it might send
+        
+        let requests = Self::prepare_retransmits(exchange_id, fragments);
+        if requests.len() == 0 {
+            // We have the complete message
+            // This means we can peice the message together
+            if let Ok(message) = Self::fragments_to_message(fragments){
+                // println!("Exchange {} assembled", exchange_id);
+                // And send it off
+                tokio::spawn(Station::route_message(server.clone(), message));
+                
+                // Now we wait for awhile and respond to any send case communication with a message complete
+                // If we have nak of course
+                if header.nak{
+                    loop{
+                        match timeout(Duration::from_millis(MESSAGE_COMPLETE_TIMEOUT), channel.1.recv_async()).await{
+                            Ok(_) => {
+                                let header:[u8; size_of::<MessageExchangeHeader>()] = MessageExchangeHeader::message_complete(exchange_id, true).into();
+                                server.send(packet.1, &header).await;
+                            },
+                            Err(_) => {
+                                // If we have waited long enough we will assume that the send case has closed
+                                return true;
+                            },
+                        }
+                    }
+                }
+                // If no nak then we just consider this exchange complete
+                return true;
+            }
+            else{
+                // This should be an impossible case
+                return true;
+            }
+        }
+        return false;
     }
     fn fragments_to_message(fragments: &[Option<Fragment>]) -> Result<Vec<u8>, MessageExchangeError>{
         let mut message = Vec::with_capacity(fragments.len() * MAX_MESSAGE_LENGTH);
@@ -318,37 +306,29 @@ impl LocalServer{
         } 
      /// This function works on the send case and will process any message the send case receives
     /// It returns a bool which signifies if the send case can shutdown
-    async fn retransmit_request(server: Arc<LocalServer>, exchange_id: u64, fragments: &Vec<Fragment>, message: Result<SocketPacket, RecvError>) -> bool{
+    async fn retransmit_request(server: Arc<LocalServer>, exchange_id: u64, fragments: &Vec<Fragment>, packet: SocketPacket) -> bool{
         // The send case can get either a retransmit request or a message complete
         // message
         // The former specifies what fragment to resend, the latter is technically optional
         // and lets the send side know it can close
-        
-        // If the channel suffers an error we will tell the send case to close
-        if let Ok(packet) = message{
-            let header = MessageExchangeHeader::from_bytes(&packet.2);
-            if header.exchange_id != exchange_id{
-                println!("Message from exchange {} landed in exchange {}", header.exchange_id, exchange_id);
-                return false;
-            }
-            // If the message complete flag is on in the send case channel that idicated the receive side has
-            // all of the element
-            if header.message_complete{
-                return true;
-            }
-            
-            // If not, then this is a retransmit request and we must send the requested fragment
-            // Not the receive side will send back the index it needs
-            let requested_fragment = &fragments[header.fragment_index as usize];
-            let requested_data = &requested_fragment.1[0..requested_fragment.0];
-            server.send(packet.1, requested_data).await;
-            
+        let header = MessageExchangeHeader::from_bytes(&packet.2);
+        if header.exchange_id != exchange_id{
+            println!("Message from exchange {} landed in exchange {}", header.exchange_id, exchange_id);
             return false;
-            
         }
-        else{
-            true
+        // If the message complete flag is on in the send case channel that idicated the receive side has
+        // all of the element
+        if header.message_complete{
+            return true;
         }
+        
+        // If not, then this is a retransmit request and we must send the requested fragment
+        // Not the receive side will send back the index it needs
+        let requested_fragment = &fragments[header.fragment_index as usize];
+        let requested_data = &requested_fragment.1[0..requested_fragment.0];
+        server.send(packet.1, requested_data).await;
+        
+        return false;
     }
     fn message_to_fragments(exchange_id: u64, nak:bool, message: &Message) -> Vec<Fragment> {
         let data_size = MAX_MESSAGE_LENGTH - size_of::<MessageExchangeHeader>();
