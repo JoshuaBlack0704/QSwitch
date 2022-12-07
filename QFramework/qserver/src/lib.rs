@@ -11,10 +11,13 @@ mod message_exchange;
 pub(crate) const MAX_MESSAGE_LENGTH: usize = 1024;
 pub(crate) const KEEP_ALIVE_TIMEOUT: u64 = 500;
 pub(crate) const KEEP_ALIVE_BUDGET: usize = 3;
+pub(crate) const NO_MESSAGE_CHANNEL:u32 = u32::MAX;
+pub(crate) const PING_CHANNEL:u32 = u32::MAX - 1;
+pub(crate) const SERVER_CHANNEL:u32 = u32::MAX - 2;
 pub(crate) type SocketPacket = (usize, SocketAddr, [u8; MAX_MESSAGE_LENGTH]);
 
 
-pub trait Bytable{
+pub(crate) trait Serializable{
     fn to_bytes(&self, dst: &mut [u8]);       
     fn from_bytes(src: &[u8]) -> Self;
 }

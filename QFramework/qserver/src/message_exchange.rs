@@ -4,7 +4,7 @@ use tokio::time::{Duration, timeout};
 use flume::RecvError;
 use rand::{thread_rng, Rng};
 
-use crate::{LocalServer, SocketPacket, MAX_MESSAGE_LENGTH, Bytable, Station};
+use crate::{LocalServer, SocketPacket, MAX_MESSAGE_LENGTH, Serializable, Station};
 pub(crate) type Fragment = (usize, [u8; MAX_MESSAGE_LENGTH]);
 pub(crate) type Message = Vec<u8>;
 

@@ -9,3 +9,5 @@ flume = "0.10.14"
 rand = "0.8.5"
 local-ip-address="0.4.9"
 clap = {version = "4.0.26", features = ["derive"]}
+bincode = "1.0"
+serde = {version = "1.0.149", features = ["derive"]}

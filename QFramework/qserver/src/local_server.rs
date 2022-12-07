@@ -112,7 +112,7 @@ impl LocalServer{
             }
             
             // Now we send this cycle's keep alive message
-            let header = StationHeader::no_message().into();
+            let header = bincode::serialize(&StationHeader::no_message()).unwrap();
             let op = MessageOp::Send(addr,false,header);
             let _ = Self::exchange(server.clone(), op).await;
             

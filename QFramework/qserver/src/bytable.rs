@@ -1,9 +1,9 @@
 use std::mem::size_of;
 
-use crate::{Bytable, message_exchange::MessageExchangeHeader, station::StationHeader};
+use crate::{Serializable, message_exchange::MessageExchangeHeader, station::StationHeader};
 
 
-impl Bytable for MessageExchangeHeader{
+impl Serializable for MessageExchangeHeader{
     fn to_bytes(&self, dst: &mut [u8]) {
         let ptr = self as *const Self;
         let bytes = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>())};
@@ -37,7 +37,7 @@ impl Into<[u8; size_of::<Self>()]> for MessageExchangeHeader{
     }
 }
 
-impl<T: Clone> Bytable for Vec<T>{
+impl<T: Clone> Serializable for Vec<T>{
     fn to_bytes(&self, dst: &mut [u8]) {
         let ptr = self.as_ptr();
         let bytes = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<T>() * self.len())};
@@ -66,7 +66,7 @@ impl<T: Clone> Bytable for Vec<T>{
 // }
 
 
-impl Bytable for StationHeader{
+impl Serializable for StationHeader{
     fn to_bytes(&self, dst: &mut [u8]) {
         let ptr = self as *const Self;
         let bytes = unsafe{std::slice::from_raw_parts(ptr as *const u8, size_of::<Self>())};
