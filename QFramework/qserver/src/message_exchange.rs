@@ -1,15 +1,13 @@
 use std::{sync::Arc, mem::size_of, net::SocketAddr};
 use tokio::time::{Duration, timeout};
-
-use flume::RecvError;
+use serde::{Serialize, Deserialize};
 use rand::{thread_rng, Rng};
 
-use crate::{LocalServer, SocketPacket, MAX_MESSAGE_LENGTH, Serializable, Station};
+use crate::{LocalServer, SocketPacket, MAX_MESSAGE_LENGTH, Station, station};
 pub(crate) type Fragment = (usize, [u8; MAX_MESSAGE_LENGTH]);
 pub(crate) type Message = Vec<u8>;
 
-#[repr(C)]
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 ///Will be auto pasted onto any and all message fragments sent
 pub(crate) struct MessageExchangeHeader{
     /// A randomly generated value that will be used by both the sender and reciever to identify
@@ -118,7 +116,6 @@ impl LocalServer{
                     }
                 }
                 println!("Created new active exchange from id {}", exchange_id);
-                
                 // Now we wait for any retransmit requests
                 let mut timeout_budget = SEND_TIMEOUT_CYCLES;
                 loop{
@@ -130,20 +127,21 @@ impl LocalServer{
                                 return Ok(true);
                             }
                         }
-                        
+                        continue;
                     }
-                    else{
-                        timeout_budget -= 1;
-                        // We timeout enough times we consider the message status as unknown
-                        if timeout_budget == 0{
-                            // Now that the exchange is complete we can remove it from existence
-                            server.remove_exchange(exchange_id).await;
-                            return Err(MessageExchangeError::NoConfirmation);
-                        }
-                        // However, we will attempt to contact the receive side and ask for an update
-                        let header:[u8; size_of::<MessageExchangeHeader>()] = MessageExchangeHeader::message_complete(exchange_id, nak).into();
-                        server.send(addr, &header).await;
+                    
+                    timeout_budget -= 1;
+                    // We timeout enough times we consider the message status as unknown
+                    if timeout_budget == 0{
+                        // Now that the exchange is complete we can remove it from existence
+                        server.remove_exchange(exchange_id).await;
+                        return Err(MessageExchangeError::NoConfirmation);
                     }
+                    // However, we will attempt to contact the receive side and ask for an update
+                    let mut header = MessageExchangeHeader::message_complete(exchange_id, nak);
+                    header.fragment_count = fragements.len() as u32;
+                    let Ok(header):Result<Vec<u8>, _> = bincode::serialize(&header) else {return Err(MessageExchangeError::Failed)};
+                    server.send(addr, &header).await;
                 }
             },
             MessageOp::Receive(packet) => {
@@ -155,7 +153,7 @@ impl LocalServer{
                 
                 
                 // Our first step is to try to route the packet
-                let header = MessageExchangeHeader::from_bytes(&packet.2);
+                let Ok(header): Result<MessageExchangeHeader, _> = bincode::deserialize(&packet.2) else { return Err(MessageExchangeError::Failed)};
                 // println!("Received message for exchange {}", header.exchange_id);
                 let (new, channel) = server.get_or_add_exchange(header.exchange_id).await;
                 // We can go ahead and push the message on the channel cause no matter what
@@ -182,24 +180,22 @@ impl LocalServer{
                                 return Ok(true);
                             }
                         }
+                        continue;
                     }
-                    else{
-                        // If we have nak, we need to request retransmits
-                        if header.nak{
-                            for request in Self::prepare_retransmits(header.exchange_id, &fragments).iter(){
-                                server.send(packet.1, request.as_slice()).await;
-                            }
+                    // If we have nak, we need to request retransmits
+                    if header.nak{
+                        for request in Self::prepare_retransmits(header.exchange_id, &fragments).iter(){
+                            server.send(packet.1, request.as_slice()).await;
                         }
-                        
-                        // If we timeout too many times then we drop the message
-                        remaining_timeouts -= 1;
-                        println!("Receive timeout budget {}", remaining_timeouts);
-                        if remaining_timeouts <= 0{
-                            // Now that the exchange is complete we can remove it from existence
-                            server.remove_exchange(header.exchange_id).await;
-                            return Err(MessageExchangeError::Failed);
-                        }
-                        
+                    }
+                    
+                    // If we timeout too many times then we drop the message
+                    remaining_timeouts -= 1;
+                    println!("Receive timeout budget {}", remaining_timeouts);
+                    if remaining_timeouts <= 0{
+                        // Now that the exchange is complete we can remove it from existence
+                        server.remove_exchange(header.exchange_id).await;
+                        return Err(MessageExchangeError::Failed);
                     }
                 }
             },
@@ -213,7 +209,7 @@ impl LocalServer{
         
         // So lets handle both cases
         // If the channel has as error will will tell the recive case to close
-        let header = MessageExchangeHeader::from_bytes(&packet.2);
+        let Ok(header): Result<MessageExchangeHeader, _> = bincode::deserialize(&packet.2) else { return false};
         // We need to see what type of message this is
         if header.message_complete{
             println!("Receive side for exchange {} asked for state update", exchange_id);
@@ -243,7 +239,7 @@ impl LocalServer{
             if let Ok(message) = Self::fragments_to_message(fragments){
                 // println!("Exchange {} assembled", exchange_id);
                 // And send it off
-                tokio::spawn(Station::route_message(server.clone(), message));
+                tokio::spawn(station::route_message(server.clone(), packet.1, message));
                 
                 // Now we wait for awhile and respond to any send case communication with a message complete
                 // If we have nak of course
@@ -251,7 +247,7 @@ impl LocalServer{
                     loop{
                         match timeout(Duration::from_millis(MESSAGE_COMPLETE_TIMEOUT), channel.1.recv_async()).await{
                             Ok(_) => {
-                                let header:[u8; size_of::<MessageExchangeHeader>()] = MessageExchangeHeader::message_complete(exchange_id, true).into();
+                                let Ok(header): Result<Vec<u8>, _> = bincode::serialize(&MessageExchangeHeader::message_complete(exchange_id, true)) else { return true};
                                 server.send(packet.1, &header).await;
                             },
                             Err(_) => {
@@ -286,7 +282,7 @@ impl LocalServer{
         Ok(message)
     }
     
-    fn prepare_retransmits(message_id: u64, fragments: &[Option<Fragment>]) -> Vec<[u8; size_of::<MessageExchangeHeader>()]> {
+    fn prepare_retransmits(message_id: u64, fragments: &[Option<Fragment>]) -> Vec<Vec<u8>> {
             let mut headers = Vec::with_capacity(fragments.len());
             for (index, fragment) in fragments.iter().enumerate(){
                 if let None = fragment{
@@ -297,9 +293,8 @@ impl LocalServer{
                         fragment_data: 0,
                         nak: true,
                         message_complete: false };
-                    let mut header_data = [0u8; size_of::<MessageExchangeHeader>()];
-                    header.to_bytes(&mut header_data);
-                    headers.push(header_data);
+                    let header:Vec<u8> = bincode::serialize(&header).unwrap();
+                    headers.push(header);
                 }
             }
             headers
@@ -311,7 +306,7 @@ impl LocalServer{
         // message
         // The former specifies what fragment to resend, the latter is technically optional
         // and lets the send side know it can close
-        let header = MessageExchangeHeader::from_bytes(&packet.2);
+        let Ok(header): Result<MessageExchangeHeader, _> = bincode::deserialize(&packet.2) else { return false};
         if header.exchange_id != exchange_id{
             println!("Message from exchange {} landed in exchange {}", header.exchange_id, exchange_id);
             return false;
@@ -347,7 +342,7 @@ impl LocalServer{
             
             let mut fragment = (size_of::<MessageExchangeHeader>() + chunk.len(), [0; MAX_MESSAGE_LENGTH]);
             let header_space = &mut fragment.1[0..size_of::<MessageExchangeHeader>()];
-            header.to_bytes(header_space);
+            let _ = bincode::serialize_into(header_space, &header);
             let data_space = &mut fragment.1[size_of::<MessageExchangeHeader>()..];
             for (index, byte) in chunk.iter().enumerate(){
                 data_space[index] = *byte;
