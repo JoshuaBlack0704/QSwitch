@@ -15,6 +15,7 @@ pub(crate) const KEEP_ALIVE_BUDGET: usize = 3;
 pub(crate) const NO_MESSAGE_CHANNEL:u32 = u32::MAX;
 pub(crate) const PING_CHANNEL:u32 = u32::MAX - 1;
 pub(crate) const SERVER_CHANNEL:u32 = u32::MAX - 2;
+pub(crate) const NO_DELIVER_CHANNEL:u32 = u32::MAX - 3;
 pub(crate) type SocketPacket = (usize, SocketAddr, [u8; MAX_MESSAGE_LENGTH]);
 
 pub trait StationOperable{
@@ -43,13 +44,13 @@ pub struct LocalServer{
     /// This is used to shutdown any tasks that the Server spawns
     life: TerminateSignal,
     /// The state of all known servers
-    foreign_servers: RwLock<HashMap<SocketAddr, (bool, flume::Sender<bool>)>>,
+    keep_alive_tasks: RwLock<HashMap<SocketAddr, flume::Sender<bool>>>,
     /// The state of all live message exchanges
     message_exchanges: RwLock<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>>,
     /// The state of all known comm ports
     stations: RwLock<HashMap<station::StationChannel, HashMap<station::StationId, flume::Sender<(SocketAddr, Vec<u8>)>>>>,    
     /// Server Communication Station ID
-    internal_station_id: StationId,
+    internal_station_channel: Option<flume::Sender<(SocketAddr, Vec<u8>)>>,
 }
 
 /// The CommPort struct represents a channel for users to push data to a live CommGroup for transfer.
@@ -57,7 +58,7 @@ pub struct Station<T: StationOperable> {
     id: u64,
     channel: u32,
     server: Arc<LocalServer>,
-    intake: flume::Receiver<(SocketAddr, Vec<u8>)>,
+    intake: (flume::Sender<(SocketAddr, Vec<u8>)>, flume::Receiver<(SocketAddr, Vec<u8>)>),
     known_stations: HashMap<station::StationId, SocketAddr>,
     message_queue: VecDeque<(SocketAddr,Vec<u8>)>,
     object: Option<T>,

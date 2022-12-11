@@ -8,7 +8,7 @@ use tokio::time::{self, timeout};
 use tokio::{net::UdpSocket, runtime::Runtime, sync::{RwLock, RwLockReadGuard, RwLockWriteGuard}, time::sleep};
 
 use crate::station::{StationReturn, StationId, self};
-use crate::{KEEP_ALIVE_TIMEOUT, KEEP_ALIVE_BUDGET, async_timer, StationOperable, Station, SERVER_CHANNEL, ServerInternalComm};
+use crate::{KEEP_ALIVE_TIMEOUT, KEEP_ALIVE_BUDGET, async_timer, StationOperable, Station, SERVER_CHANNEL, ServerInternalComm, NO_DELIVER_CHANNEL};
 use crate::{LocalServer, SocketPacket, TerminateSignal, message_exchange::MessageOp, MAX_MESSAGE_LENGTH, station::StationHeader};
 
 impl LocalServer{
@@ -53,21 +53,12 @@ impl LocalServer{
             foreign_servers,
             message_exchanges,
             stations,
-            internal_station_id,
+            internal_station_channel: None,
             });
         target_runtime.spawn(Self::udp_intake(server.clone()));
         let station:Station<ServerInternalComm> = Station::new(server.clone(), SERVER_CHANNEL, Some(internal_station_id));
-        if let Some(tgt) = join_server{
-            // Here we just send the initial server ping
-            let ping = bincode::serialize(&ServerInternalComm::Ping(discoverable)).unwrap();
-            let mut header = bincode::serialize(&station::make_header(SERVER_CHANNEL, station.id, 0)).unwrap();
-            header.extend_from_slice(&ping);
-            let op = MessageOp::Send(tgt, true, header);
-            if let Err(_) = server.runtime.block_on(Self::exchange(server.clone(), op)){
-                panic!("Failed to connect to tgt server");
-            }
-        }
-        target_runtime.spawn(Self::server_comm(server.clone(), station));
+        target_runtime.spawn(Self::server_comm(server.clone(), join_server, station));
+        server.internal_station_channel = Some(station.get_sender());
         server
     }
     
@@ -77,14 +68,22 @@ impl LocalServer{
             tokio::select! {
                 _ = lifetime.terminated()=>{println!("Shutting down main udp listener for {}", server.local_address());break;}
                 message = server.recieve()=>{
+                    // We need to update a keep alive if we get a message
+                    Self::update_foreign_server(server.clone(), message.1);
                     let op = MessageOp::Receive(message);
                     tokio::spawn(Self::exchange(server.clone(), op));
                 }
             }
         }
     }
-    async fn server_comm(server: Arc<Self>, mut station: Station<ServerInternalComm>){
+    /// Server comm is the task that handles inter-server communication
+    /// It is responsible for cluster discovery and contact
+    async fn server_comm(server: Arc<Self>, tgt_cluster: Option<SocketAddr>, mut station: Station<ServerInternalComm>){
         let life = server.life.subscribe();
+        
+        // The server map that stores the discoverablility of known servers
+        let server_map:HashMap<SocketAddr, bool> = HashMap::new();
+        
         loop{
             tokio::select!{
                 _ = life.terminated()=>{println!("Shutting down server comm for {}", server.local_address()); break;}
@@ -92,21 +91,17 @@ impl LocalServer{
                 message = station.listen()=>{
                     // We have to do this cause the traffic we got may have just been internal or no message
                     if let Some(message) = message{
-                        Self::process_message(server.clone(), &mut station, message).await;
+                        Self::process_message(server.clone(), &server_map, &mut station, message).await;
                     }
                 }
             }
         }
         
     }
-    async fn process_message(server: Arc<LocalServer>, station: &mut Station<ServerInternalComm>, message: StationReturn<ServerInternalComm>){
+    async fn process_message(server: Arc<LocalServer>, server_map: &HashMap<SocketAddr, bool>, station: &mut Station<ServerInternalComm>, message: StationReturn<ServerInternalComm>){
         let (source, from_id, message) = message;
         match message{
-            // When we are pinged it is deemed as start to communicaton
-            // We will have to start a keep alive and also send all known 
-            // discoverable addrs. Also, if the ping is discoverable we 
-            // need to let all our known private addrs know of this new public
-            // one
+            // A ping is a server making first contact with:
             ServerInternalComm::Ping(discoverable) => {
                 // First we prepare to send all available public addrs
                 let servers = server.read_servers().await;
@@ -164,7 +159,11 @@ impl LocalServer{
             sleep(Duration::from_millis(1000*5)).await;
         }
     }
-    async fn keep_alive(server: Arc<LocalServer>, discoverable: bool, addr:SocketAddr){
+    
+    // Upon receiving any message from a particular address we update a keep alive process
+    // Keep alives then send a NO_DELIVER message to the source addr which will be ignored by 
+    // the source
+    async fn keep_alive(server: Arc<LocalServer>, addr:SocketAddr){
         println!("Keep alive started for tgt {}", addr);
         // The first thing we need is an entry into the foreign servers list so we can be found
         let (tx, rx) = flume::bounded(1);
@@ -172,14 +171,14 @@ impl LocalServer{
             let mut writer = server.write_server().await;
             // Has one been added since we get the writer?
             if let Some(sender) = writer.get(&addr){
-                let _ = sender.1.try_send(true);
+                let _ = sender.try_send(true);
                 // If this is the case then there is some other keep alive task going so we 
                 // can go ahead and cancel this one
                 return;
             }
             else{
                 // If not we add one and continue
-                writer.insert(addr, (discoverable,tx));
+                writer.insert(addr, tx);
             }
         }
         
@@ -197,14 +196,10 @@ impl LocalServer{
             }
             
             // Now we send this cycle's keep alive message
-            let keep_alive = ServerInternalComm::KeepAlive(server.discoverable);
-            let keep_alive = bincode::serialize(&keep_alive).unwrap();
-            let header = station::make_header(SERVER_CHANNEL, 0, 0);
-            let mut header = bincode::serialize(&header).unwrap();
-            header.extend_from_slice(&keep_alive);
-            let op = MessageOp::Send(addr,true,header);
+            // Keep alive messages are just NO_DELIVERs 
+            let keep_alive = bincode::serialize(&station::make_header(NO_DELIVER_CHANNEL,0,0)).unwrap();
+            let op = MessageOp::Send(addr,true,keep_alive);
             let _ = Self::exchange(server.clone(), op).await;
-            
             async_timer(KEEP_ALIVE_TIMEOUT).await;
         }
         // If we run out of keep alives we will need to remove the entry from the foreign servers list
@@ -216,7 +211,7 @@ impl LocalServer{
 
 /// State management functionality
 impl LocalServer{
-    pub(crate) async fn read_servers(&self) -> RwLockReadGuard<HashMap<SocketAddr, (bool, flume::Sender<bool>)>> {
+    pub(crate) async fn read_servers(&self) -> RwLockReadGuard<HashMap<SocketAddr, flume::Sender<bool>>> {
         self.foreign_servers.read().await
     }
     pub(crate) async fn read_exchanges(&self) -> RwLockReadGuard<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>> {
@@ -225,7 +220,7 @@ impl LocalServer{
     pub(crate) async fn read_stations(&self) -> RwLockReadGuard<HashMap<u32, HashMap<u64, flume::Sender<(SocketAddr, Vec<u8>)>>>> {
         self.stations.read().await
     }
-    pub(crate) async fn write_server(&self) -> RwLockWriteGuard<HashMap<SocketAddr, (bool, flume::Sender<bool>)>> {
+    pub(crate) async fn write_server(&self) -> RwLockWriteGuard<HashMap<SocketAddr, flume::Sender<bool>>> {
         self.foreign_servers.write().await
     }
     pub(crate) async fn write_exchanges(&self) -> RwLockWriteGuard<HashMap<u64, Arc<(flume::Sender<SocketPacket>, flume::Receiver<SocketPacket>)>>> {
@@ -234,14 +229,14 @@ impl LocalServer{
     pub(crate) async fn write_stations(&self) -> RwLockWriteGuard<HashMap<u32, HashMap<u64, flume::Sender<(SocketAddr, Vec<u8>)>>>> {
         self.stations.write().await
     }
-    pub(crate) async fn update_foreign_server(server:Arc<LocalServer>, discoverable: bool, addr: SocketAddr){
+    pub(crate) async fn update_foreign_server(server:Arc<LocalServer>, addr: SocketAddr){
         // First we see if one exisits
         let reader = server.read_servers().await;
         if let Some(sender) = reader.get(&addr){
-            let _ = sender.1.try_send(true);
+            let _ = sender.try_send(true);
         }
         // If not we start one
-        tokio::spawn(Self::keep_alive(server.clone(), discoverable, addr));
+        tokio::spawn(Self::keep_alive(server.clone(), addr));
     }
 }
 

@@ -3,7 +3,7 @@ use std::{sync::Arc, net::SocketAddr, mem::size_of, collections::{HashMap, VecDe
 use rand::{thread_rng, Rng};
 use serde::{Serialize, Deserialize};
 
-use crate::{Station, LocalServer, NO_MESSAGE_CHANNEL, PING_CHANNEL, StationOperable, message_exchange::MessageOp, SERVER_CHANNEL};
+use crate::{Station, LocalServer, NO_MESSAGE_CHANNEL, PING_CHANNEL, StationOperable, message_exchange::MessageOp, SERVER_CHANNEL, NO_DELIVER_CHANNEL};
 
 pub(crate) type StationId = u64;
 pub(crate) type StationChannel = u32;
@@ -26,6 +26,10 @@ pub(crate) async fn route_message(server: Arc<LocalServer>, source:SocketAddr, m
     let header: StationHeader = bincode::deserialize(&message).unwrap();
     let stations = server.read_stations().await;
     
+    if header.channel == NO_DELIVER_CHANNEL{
+        // This header is likley from a keep alive exchange so we can just disregard
+        return;
+    }
     
     // The message can be some channel or it can be a no message channel
     // The no message channel applies to all channels and routing takes place 
@@ -67,7 +71,7 @@ pub(crate) async fn route_message(server: Arc<LocalServer>, source:SocketAddr, m
     // Essentially we just find the single station on our own
     if header.channel == SERVER_CHANNEL{
         if let Some(channel) = stations.get(&header.channel){
-            if let Some(station) = channel.get(&server.internal_station_id){
+            if let Some(station) = channel.get(&server.internal_station_channel){
                 let _ = station.send((source, message));
             }
         }
@@ -99,7 +103,7 @@ impl<T:StationOperable> Station<T>{
             id,
             channel,
             server: server.clone(),
-            intake: intake_channel.1,
+            intake: intake_channel.clone(),
             known_stations: HashMap::new(),
             message_queue: VecDeque::new(),
             object: None };
@@ -117,12 +121,26 @@ impl<T:StationOperable> Station<T>{
             station.ping(addr);
         }
         
+        // Finally we add our presence to server state
+        let mut writer = server.write_stations().await;
+        if let Some(channel) = writer.get_mut(&station.channel){
+            let _ = channel.insert(station.id, intake_channel.0);
+        }
+        else{
+            let mut map = HashMap::new();
+            map.insert(station.id, intake_channel.0);
+            writer.insert(station.channel, map);
+        }
         station
     }
+    
+    pub(crate) fn get_sender(&self) -> flume::Sender<(SocketAddr, Vec<u8>)> {self.intake.0.clone()}
+    
     pub fn new(server: Arc<LocalServer>, channel: StationChannel, external_id: Option<StationId>) -> Station<T> {
         server.runtime.block_on(Self::new_async(server.clone(), channel, external_id))
     }
-    fn ping(&self, tgt_server: SocketAddr){
+    
+    pub(crate) fn ping(&self, tgt_server: SocketAddr){
         // We need the ping header
         let header = StationHeader{ 
             from_id: self.id,
@@ -139,6 +157,9 @@ impl<T:StationOperable> Station<T>{
         tokio::spawn(LocalServer::exchange(self.server.clone(), op));
         
     }
+    
+    async fn no_message(&self, tgt: SocketAddr){}
+    
     pub async fn send(&mut self, tgt:StationId, nak: bool, object: &T) -> Result<bool, StationSendError>{
         // First we ensure our interal state is up to date
         self.queue_intake().await;
@@ -169,6 +190,7 @@ impl<T:StationOperable> Station<T>{
         } 
         else {return Err(StationSendError::UnknownStation);};
     }
+    
     pub async fn receive(&mut self) -> Option<StationReturn<T>>{
         //First we need to update internal state
         self.queue_intake().await;
@@ -181,6 +203,7 @@ impl<T:StationOperable> Station<T>{
         
         Some((source, header.from_id, object))
     }
+    
     pub async fn listen(&mut self) -> Option<StationReturn<T>>{
         // here we wait till something arrives at the station
         self.wait_intake().await;
@@ -196,6 +219,7 @@ impl<T:StationOperable> Station<T>{
         
         None
     }
+    
     pub async fn receive_all(&mut self) -> Vec<StationReturn<T>> {
         let mut objects = vec![];
         //First we need to update internal state
@@ -212,10 +236,12 @@ impl<T:StationOperable> Station<T>{
         
         
     }
+
     async fn wait_intake(&mut self){
-        let intake = self.intake.recv_async().await.unwrap();
+        let intake = self.intake.1.recv_async().await.unwrap();
         self.intake(intake).await;
     }
+
     async fn intake(&mut self, intake: (SocketAddr, Vec<u8>)){
         let (source, message) = intake;
         // First we pull the header
@@ -257,13 +283,15 @@ impl<T:StationOperable> Station<T>{
         // If the message is normal we add it to the message queue
         self.message_queue.push_back((source,message));
     }
+
     /// This function is responsible for seperating internal messages and messages meant for the user
     async fn queue_intake(&mut self){
-        let intakes:Vec<(SocketAddr, Vec<u8>)> = self.intake.try_iter().collect();
+        let intakes:Vec<(SocketAddr, Vec<u8>)> = self.intake.1.try_iter().collect();
         for intake in intakes{
             self.intake(intake).await;
         }
     }
+    
 }
 impl StationHeader{
     pub(crate) fn no_message() -> StationHeader {
