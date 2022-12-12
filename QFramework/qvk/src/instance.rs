@@ -16,8 +16,8 @@ pub trait InstanceSettingsProvider{
 }
 
 pub trait InstanceProvider{
-    fn get_instance(&self) -> &ash::Instance;
-    fn get_entry(&self) -> &ash::Entry;
+    fn instance(&self) -> &ash::Instance;
+    fn entry(&self) -> &ash::Entry;
 }
 
 pub struct SettingsProvider{
@@ -86,11 +86,11 @@ impl Instance{
 }
 
 impl InstanceProvider for Instance{
-    fn get_instance(&self) -> &ash::Instance {
+    fn instance(&self) -> &ash::Instance {
         &self.instance
     }
 
-    fn get_entry(&self) -> &ash::Entry {
+    fn entry(&self) -> &ash::Entry {
         &self.entry
     }
 }

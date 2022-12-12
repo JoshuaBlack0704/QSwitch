@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, collections::{HashSet, VecDeque}};
 
 use ash::{self, vk};
 use winit;
@@ -28,6 +28,24 @@ pub struct Device<I: instance::InstanceProvider>{
     surface_loader: ash::extensions::khr::Surface,
     physical_device: device::PhysicalDeviceData,
     device: ash::Device,
+    created_queue_families: Vec<usize>,
 }
+
+pub mod commandpool;
+pub struct CommandPool<D: device::DeviceProvider, S: commandpool::CommandPoolSettingsProvider>{
+    device: Arc<D>,
+    settings: S,
+    command_pool: vk::CommandPool,
+}
+pub mod commandbuffer;
+pub struct CommandBufferSet<D: device::DeviceProvider, P: commandpool::CommandPoolProvider, S: commandbuffer::CommandBufferSettingsProvider>{
+    device: Arc<D>,
+    cmdpool: Arc<P>,
+    settings: S,
+    cmds: HashSet<vk::CommandBuffer>,
+    free_cmds: VecDeque<vk::CommandBuffer>,
+}
+
+pub mod memory;
 
 

@@ -20,13 +20,17 @@ pub trait DeviceSettingsProvider{
 }
 
 pub trait DeviceProvider{
-    fn get_device(&self) -> &ash::Device;
-    fn get_surface(&self) -> &Option<SurfaceKHR>;
-    fn get_physical_device(&self) -> &PhysicalDeviceData;
-    fn get_grahics_queue(&self) -> (vk::Queue, u32);
-    fn get_compute_queue(&self) -> (vk::Queue, u32);
-    fn get_transfer_queue(&self) -> (vk::Queue, u32);
-    fn get_present_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn device(&self) -> &ash::Device;
+    fn surface(&self) -> &Option<SurfaceKHR>;
+    fn physical_device(&self) -> &PhysicalDeviceData;
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)>;
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn present_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32;
+    fn device_memory_index(&self) -> u32;
+    fn host_memory_index(&self) -> u32;
 }
 
 #[derive(Clone)]
@@ -59,9 +63,9 @@ pub struct SettingsProvider<'a>{
 }
 
 impl<I:InstanceProvider> Device<I>{
-    pub fn new<S:DeviceSettingsProvider>(settings: &S, instance_provider: &Arc<I>) -> Result<Device<I>, DeviceCreateError> {
-        let instance = instance_provider.get_instance();
-        let entry = instance_provider.get_entry();
+    pub fn new<S:DeviceSettingsProvider>(settings: &S, instance_provider: &Arc<I>) -> Result<Arc<Device<I>>, DeviceCreateError> {
+        let instance = instance_provider.instance();
+        let entry = instance_provider.entry();
         let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
         
         let mut surface = None;
@@ -97,6 +101,7 @@ impl<I:InstanceProvider> Device<I>{
         // Now that we have chosen our device we can pull its queues
         let priorities = [1.0;1];
         let q_cinfos = Self::get_queue_infos(&physical_device, &priorities);
+        let q_families = q_cinfos.iter().map(|i| i.queue_family_index as usize).collect();
         
         let mut device_builder = vk::DeviceCreateInfo::builder();
         device_builder = device_builder.queue_create_infos(&q_cinfos);
@@ -145,7 +150,13 @@ impl<I:InstanceProvider> Device<I>{
         match device{
             Ok(d) => {
                 info!("Created logical device {:?}", d.handle());
-                Ok(Device{ instance: instance_provider.clone(), surface, physical_device, device: d, surface_loader })
+                Ok(Arc::new(Device{ 
+                    instance: instance_provider.clone(),
+                    surface,
+                    surface_loader,
+                    physical_device,
+                    device: d,
+                    created_queue_families:  q_families}))
             },
             Err(_) => Err(DeviceCreateError::Unavailable),
         }
@@ -177,7 +188,7 @@ impl<I:InstanceProvider> Device<I>{
             }
             
             // If not we make a new info
-            debug!("Creating queue family {:?}", index);
+            debug!("Using queue family {:?}", index);
             
             let qf_cinfo = vk::DeviceQueueCreateInfo::builder()
             .queue_family_index(index as u32)
@@ -189,6 +200,86 @@ impl<I:InstanceProvider> Device<I>{
         
         qf_cinfos
     }
+}
+
+impl<I:InstanceProvider> InstanceProvider for Device<I>{
+    fn instance(&self) -> &ash::Instance {
+        self.instance.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.instance.entry()
+    }
+}
+
+impl<I:InstanceProvider> DeviceProvider for Device<I>{
+    fn device(&self) -> &ash::Device {
+        &self.device
+    }
+
+    fn surface(&self) -> &Option<SurfaceKHR> {
+        &self.surface
+    }
+
+    fn physical_device(&self) -> &PhysicalDeviceData {
+        &self.physical_device
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        let mut best_score = u32::MAX;
+        let mut target_queue = None;
+        for family in self.created_queue_families.iter(){
+            let props = &self.physical_device.queue_properties[*family];
+            if props.queue_flags.contains(target_flags) {
+                let mut local_score = 0;
+                if props.queue_flags.contains(vk::QueueFlags::GRAPHICS){
+                    local_score += 1;
+                }
+                if props.queue_flags.contains(vk::QueueFlags::TRANSFER){
+                    local_score += 1;
+                }
+                if props.queue_flags.contains(vk::QueueFlags::COMPUTE){
+                    local_score += 1;
+                }
+                if local_score < best_score{
+                    best_score = local_score;
+                    let queue = unsafe{self.device.get_device_queue((*family) as u32, 0)};
+                    target_queue = Some((queue, (*family) as u32));
+                }
+            }
+        }
+        target_queue
+    }
+
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.get_queue(vk::QueueFlags::GRAPHICS)
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.get_queue(vk::QueueFlags::COMPUTE)
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.get_queue(vk::QueueFlags::TRANSFER)
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.get_queue(vk::QueueFlags::GRAPHICS)
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.physical_device.get_memory_index(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.physical_device.get_memory_index(vk::MemoryPropertyFlags::DEVICE_LOCAL)
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.physical_device.get_memory_index(vk::MemoryPropertyFlags::HOST_VISIBLE)
+    }
+
 }
 
 impl<I:InstanceProvider> Drop for Device<I>{
@@ -262,28 +353,33 @@ impl PhysicalDeviceData{
         Ordering::Equal    
     }
     
+    /// Selects the biggest heap that matches properties
     pub fn get_memory_index(&self, properties: vk::MemoryPropertyFlags) -> u32 {
         let mut selected_type: usize = 0;
-        //Selecting the current memory type
-        for type_index in 0..self.mem_props.memory_types.len(){
-            let mem_type = &self.mem_props.memory_types[type_index];
-            let heap = &self.mem_props.memory_heaps[mem_type.heap_index as usize];
-            if mem_type.property_flags & properties != vk::MemoryPropertyFlags::empty() {
-                debug!("Found compatible memory");
-                debug!("Type index: {}, Type property: {:?}, Type heap: {}", type_index, self.mem_props.memory_types[type_index].property_flags, self.mem_props.memory_types[type_index].heap_index);
-                if self.mem_props.memory_types[selected_type].property_flags & properties != vk::MemoryPropertyFlags::empty() {
-                    if heap.size > self.mem_props.memory_heaps[self.mem_props.memory_types[selected_type].heap_index as usize].size && type_index != selected_type{
-                        debug!("  Selecting Memory Type");
-                        selected_type = type_index;
-                    }
-                }
-                else {
-                    debug!("Previously selected memory is of wrong type, selecting current memory type");
-                    selected_type = type_index;
-                }
-            }
+        
+        //First we need to sort by matching properties
+        let mut matches:Vec<MemTH> = self.mem_props.memory_types.iter().enumerate()
+            .filter(|(i,t)| t.property_flags.contains(properties))
+            .map(|(i,t)| MemTH {i, t: *t, h: self.mem_props.memory_heaps[t.heap_index as usize]})
+            .collect();
+        matches.sort_by(MemTH::cmp);
+        
+        //Now we select the first one
+        let selected = matches.get(0).expect("Could not find suitable memory");
+        debug!("Memory type index fetch found memory type {}: properties: {:?} size: {:.2?} Gb", selected.i, selected.t.property_flags, (selected.h.size / 1024 / 1024) as f32 / 1024.0);
+        selected.i as u32
+    }
+}
+struct MemTH {i:usize, t: vk::MemoryType, h: vk::MemoryHeap}
+impl MemTH{
+    fn cmp(a: &Self, imcumbent: &Self) -> Ordering{
+        if a.h.size > imcumbent.h.size{
+            return Ordering::Less;
         }
-        selected_type as u32
+        if a.h.size < imcumbent.h.size{
+            return Ordering::Greater;
+        }
+        Ordering::Equal
     }
 }
 
@@ -320,11 +416,31 @@ impl<'a> SettingsProvider<'a>{
         self.choose_device = allow_option;
     }
     
+    pub fn features11(&mut self, features: vk::PhysicalDeviceVulkan11Features){
+        self.features11 = Some(features);
+    }
+    pub fn features12(&mut self, features: vk::PhysicalDeviceVulkan12Features){
+        self.features12 = Some(features);
+    }
+    pub fn features13(&mut self, features: vk::PhysicalDeviceVulkan13Features){
+        self.features13 = Some(features);
+    }
+    pub fn raytracing_features(&mut self, features: vk::PhysicalDeviceRayTracingPipelineFeaturesKHR){
+        self.raytracing_features = Some(features);
+    }
+    pub fn acc_struct_features(&mut self, features: vk::PhysicalDeviceAccelerationStructureFeaturesKHR){
+        self.acc_struct_features= Some(features);
+    }
+    
 }
 
 impl Default for SettingsProvider<'_>{
     fn default() -> Self {
-        Self::new(false, None, None, None, None, None, None, None, None)
+        let mut settings = Self::new(false, None, None, None, None, None, None, None, None);
+        let features12 = vk::PhysicalDeviceVulkan12Features::builder()
+        .buffer_device_address(true).timeline_semaphore(true).build();
+        settings.features12(features12);
+        settings
     }
 }
 
