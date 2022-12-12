@@ -21,6 +21,45 @@ impl PartitionSystem{
         partitions.push_back(Partition{tracker:Arc::new(true),size, offset: 0 });
         PartitionSystem{ partitions }
     }
+    
+    fn consolidate(&mut self){
+        // We need to loop through the queue and combine touching partitions
+        let mut active_queue:VecDeque<Partition> = VecDeque::with_capacity(self.partitions.len());        
+        for partition in self.partitions.iter(){
+            // If this partition is used we will just put it on the active queue
+            if partition.used(){
+                active_queue.push_back((*partition).clone());
+                continue;
+            }
+            
+            if let Some(mut p) = active_queue.pop_back(){
+                // If something is in the active queue we need to see if its used
+                if p.used(){
+                    // If so we just add it back along with our partition
+                    active_queue.push_back(p);
+                    // Since if we cloned, the partiton's arc counter would have refs to self.partition, we need to make a clean partition
+                    let decoupled_partition = Partition{
+                        tracker: Arc::new(true),
+                        offset: partition.offset(),
+                        size: partition.size(),
+                    };
+                    active_queue.push_back(decoupled_partition);
+                    continue;
+                }
+                
+                // If not we should add our partitions size to it
+                p.size += partition.size();
+                // Then we add it back to the queue
+                active_queue.push_back(p);
+                continue;
+            }
+            
+            //If there is nothing in the queue we just add the parition to it
+            active_queue.push_back((*partition).clone());
+        }
+        
+        self.partitions = active_queue;
+    }
 }
 
 impl PartitionProvider for PartitionSystem{
@@ -28,21 +67,33 @@ impl PartitionProvider for PartitionSystem{
         // As we try accumulating enough memory will will also combine unused memory
         // We will approach this by queueing through the partitions
         let mut res = Err(PartitionError::NoSpace);
-        let mut active_queue:VecDeque<Partition> = VecDeque::with_capacity(self.partitions.len());        
+        self.consolidate();
+        let mut new_queue = VecDeque::with_capacity(self.partitions.len());
         
-        debug!("Looking for partiton of size {}", size);
         for partition in self.partitions.iter(){
-            if let Some(p) = partition.try_claim(&mut active_queue, size, &alignment_fn){
-                if let Err(_) = res{
-                    // We just take the first available partition
-                    // Since we use this double if, we allow the rest of the partitions to be
-                    // organized because even if we find another partition, the traker will be 
-                    // dropped with p
-                    res = Ok(p)
+            if let Some(p) = partition.try_claim(size, &alignment_fn){
+                
+                if let Some(p) = p.0{
+                    // Under flow
+                    new_queue.push_back(p);
                 }
+                
+                // The new partition
+                new_queue.push_back(p.1.clone());
+                
+                if let Some(p) = p.2{
+                    // Overflow
+                    new_queue.push_back(p);
+                }
+                
+                res = Ok(p.1);
+                break;
+            }
+            else{
+                new_queue.push_back((*partition).clone());
             }
         }
-        self.partitions = active_queue;
+        self.partitions = new_queue;
         res
     }
 }
@@ -53,73 +104,57 @@ impl Partition{
     }
     
     /// This function will try to produce a new partition matching alignment and size reqs
-    pub fn try_claim<F:Fn(u64) -> bool>(&self, active_queue: &mut VecDeque<Partition>, size: u64, alignment_fn: &F) -> Option<Partition>{
+    pub fn try_claim<F:Fn(u64) -> bool>(&self, size: u64, alignment_fn: &F) -> Option<(Option<Partition>, Partition, Option<Partition>)>{
         if self.used(){
             // If we are in use we just add ourselves to the active queue and leave
-            active_queue.push_back((*self).clone());
             return None;
-        }
-        
-        let mut best_partition = (*self).clone();
-        // We need to see if we can combine ourselves with the parition before us
-        if let Some(mut p) = active_queue.pop_back(){
-            if !p.used(){
-                // If its free we can add our own size and the set it as the best
-                p.size += self.size();
-                best_partition = p;
-            }
-            else{
-                active_queue.push_back(p);
-            }
         }
         
         // Now we see if the best partition has enough size to hold our aligned request
         let local_offset = 0;
-        while local_offset < best_partition.size(){
-            if !alignment_fn(local_offset + best_partition.offset()) && local_offset + size <= best_partition.size(){
+        while local_offset < self.size(){
+            if !alignment_fn(local_offset + self.offset()){
+                // We are not aligned
                 continue;
             }
-            if best_partition.size() - local_offset < size{
+            if self.size() - local_offset < size{
                 // After our offset we are not big enough
-                break;
+                return None;
             }
+            
+            let mut underflow = None;
+            let mut overflow = None;
             
             // If we are aligned and have enough room we can split ourselves at the local offset
             // Remember, if we had combined ourselves with another partition, we will have taken it off the queue
             if local_offset > 0{
-                // If there is some unused space we make a partition for it and add it to the queue
-                let un_used = Partition{
+                // If there is some unused space before our main partition we make a partition for it
+                underflow = Some(Partition{
                     tracker: Arc::new(true),
-                    offset: best_partition.offset(),
+                    offset: self.offset(),
                     size: local_offset,
-                };
-                active_queue.push_back(un_used);
+                });
             }
                        
-            // Here is the matching queue
-            let used = Partition{
+            // Here is the main partition that will be given to the requester
+            let main = Partition{
                 tracker: Arc::new(true),
-                offset: best_partition.offset() + local_offset,
+                offset: self.offset() + local_offset,
                 size,
             };
-            active_queue.push_back(used.clone());
             
-            if used.offset() + used.size() < best_partition.size(){
+            if main.offset() + main.size() < self.size(){
                 // If we have left overs we need to make a new partition
-                let un_used = Partition{
+                overflow = Some(Partition{
                     tracker: Arc::new(true),
-                    offset: used.offset()+used.size(),
-                    size: best_partition.size() - used.offset()+used.size(),
-                };
-                active_queue.push_back(un_used);
+                    offset: main.offset()+main.size(),
+                    size: self.size() - (local_offset+main.size()),
+                });
             }
             
-            return Some(used);
+            return Some((underflow, main, overflow));
         }
         
-        // If no suitable queue was made we just add the best partition (self or a grown other)
-        // back to the queue
-        active_queue.push_back(best_partition);
         None
     }
     

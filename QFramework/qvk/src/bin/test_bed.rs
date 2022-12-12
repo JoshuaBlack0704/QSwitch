@@ -28,12 +28,7 @@ fn main(){
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
     let mem = qvk::memory::Memory::new(&settings, &device).expect("Could not allocate memory");
     
-    let settings = qvk::memory::bufferarea::SettingsProvider::new(100, vk::BufferUsageFlags::STORAGE_BUFFER);
-    let buf = qvk::memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
-    {
-        let buf = qvk::memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
-        let buf = qvk::memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
-    }
+    let settings = qvk::memory::bufferarea::SettingsProvider::new(10000, vk::BufferUsageFlags::STORAGE_BUFFER);
     let buf = qvk::memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
     
     // event_loop.run(move |event, _, flow|{
