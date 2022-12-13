@@ -1,7 +1,6 @@
 use std::{sync::Arc, collections::{HashSet, VecDeque}};
 
 use ash::{self, vk};
-use winit;
 
 /// The Provider pattern
 /// The framework will provide complete abstraction and zero dependence by using a provider pattern

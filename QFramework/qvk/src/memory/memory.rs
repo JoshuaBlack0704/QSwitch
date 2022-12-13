@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 use tokio::sync::RwLock;
@@ -56,7 +56,7 @@ impl<D: DeviceProvider> Memory<D,PartitionSystem>{
                 info!("Created device memory {:?}", m);
                 let memory = Memory{ 
                     device: device_provider.clone(),
-                    partition_sys: RwLock::new(partition),
+                    partition_sys: Mutex::new(partition),
                     memory: m };
                 return Ok(Arc::new(memory));
             },
@@ -66,7 +66,7 @@ impl<D: DeviceProvider> Memory<D,PartitionSystem>{
 }
 impl<D: DeviceProvider, P: PartitionProvider> MemoryProvider for Memory<D,P>{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError> {
-        self.partition_sys.blocking_write().partition(size, move |offset| {
+        self.partition_sys.lock().unwrap().partition(size, move |offset| {
             if let Some(alignment) = alignment{
                 return offset % alignment == 0;
             }

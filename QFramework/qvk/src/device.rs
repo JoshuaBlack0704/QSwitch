@@ -35,13 +35,13 @@ pub trait DeviceProvider{
 
 #[derive(Clone)]
 pub struct PhysicalDeviceData{
-    physical_device: PhysicalDevice,
-    properties: vk::PhysicalDeviceProperties,
-    queue_properties: Vec<vk::QueueFamilyProperties>,
-    raytracing_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
-    acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
-    mem_props: vk::PhysicalDeviceMemoryProperties,
-    mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT
+    pub physical_device: PhysicalDevice,
+    pub properties: vk::PhysicalDeviceProperties,
+    pub queue_properties: Vec<vk::QueueFamilyProperties>,
+    pub raytracing_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
+    pub acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
+    pub mem_props: vk::PhysicalDeviceMemoryProperties,
+    pub mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT
 }
 
 #[derive(Debug)]
