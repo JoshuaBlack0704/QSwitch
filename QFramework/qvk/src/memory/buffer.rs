@@ -2,11 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use log::{info, debug};
-use tokio::sync::RwLock;
 
 use crate::device;
 
-use super::{Buffer, memory, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition, bufferpartition::{BufferPartitionProvider, BufferPartitioner}, BufferPartition};
+use super::{Buffer, memory, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition, bufferpartition::BufferPartitionProvider, BufferPartition};
 
 pub trait BufferSettingsProvider{
     fn size(&self) -> vk::DeviceSize;
@@ -19,6 +18,7 @@ pub trait BufferSettingsProvider{
 pub trait BufferProvider{
     fn buffer(&self) -> &vk::Buffer;
     fn home_partition(&self) -> &Partition;
+    fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> ;
 }
 
 #[derive(Clone)]
@@ -49,7 +49,7 @@ pub struct SettingsProvider{
 }
 
 impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSystem>{
-    pub fn new<S:BufferSettingsProvider>(settings: &S, device_provider: &Arc<D>, memory_provider: &Arc<M>) -> Result<Buffer<D,M,PartitionSystem>, BufferCreateError>{
+    pub fn new<S:BufferSettingsProvider>(settings: &S, device_provider: &Arc<D>, memory_provider: &Arc<M>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
         // First we need to create the buffer
         let mut b_cinfo = vk::BufferCreateInfo::builder();
         let mut extensions = settings.extensions();
@@ -96,7 +96,7 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
             return Err(BufferCreateError::VulkanResult(e));
         }
 
-        let alignment = BufferAlignmentType::Free;
+        let mut alignment = BufferAlignmentType::Free;
         if settings.usage().contains(vk::BufferUsageFlags::STORAGE_BUFFER){
             alignment = BufferAlignmentType::Aligned(device_provider.physical_device().properties.limits.min_storage_buffer_offset_alignment);
         }
@@ -107,18 +107,19 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
             alignment = BufferAlignmentType::Aligned(device_provider.physical_device().properties.limits.min_texel_buffer_offset_alignment);
         }
         
-        Ok(Buffer{
+        Ok(Arc::new(Buffer{
             device: device_provider.clone(),
             memory: memory_provider.clone(),
             memory_partition,
             partition_sys: Mutex::new(PartitionSystem::new(settings.size())),
             buffer,
             alignment_type: alignment,
-        })
+        }))
     }
 }
 
-impl <D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> BufferProvider for Buffer<D,M,P>{
+impl<D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> BufferProvider for Buffer<D,M,P>{
+
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer
     }
@@ -126,46 +127,19 @@ impl <D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> B
     fn home_partition(&self) -> &Partition {
         &self.memory_partition
     }
-}
 
-impl <D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> BufferPartitioner for Buffer<D,M,P>{
-    type Provider = BufferPartition<D,Self,P>;
-
-    fn partition(&self, size: u64) -> Result<Arc<Self::Provider>, PartitionError> {
-        let alignmen_fn = |offset: u64|{
+    fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> {
+        self.partition_sys.lock().unwrap().partition(size, |offset|{
+            if let BufferAlignmentType::Aligned(a) = alignment_type{
+                return offset % a == 0;
+            } 
             if let BufferAlignmentType::Aligned(a) = self.alignment_type{
                 return offset % a == 0;
-            }
+            } 
             true
-        };
-
-        let partition = self.partition_sys.lock().unwrap().partition(size, alignmen_fn);
-
-        match partition{
-            Ok(p) => {
-                
-            },
-            Err(e) => todo!(),
-        }
-
-    }
-
-    fn partition_aligned(&self, size: u64, alignment: BufferAlignmentType) -> Arc<Self::Provider> {
-        todo!()
+        })
     }
 }
-
-impl <D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> BufferPartitionProvider for Buffer<D,M,P>{
-    fn alignment_type(&self) -> BufferAlignmentType {
-        todo!()
-    }
-
-    fn device_addr(&self) -> vk::DeviceSize {
-        todo!()
-    }
-}
-
-
 
 impl<D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> Drop for Buffer<D,M,P>{
     fn drop(&mut self) {

@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{self, device::{DeviceProvider, self}, commandbuffer::{CommandBufferProvider, self}, CommandBufferSet, commandpool::{self, CommandPoolProvider}, CommandPool, Device, instance, Instance};
+use qvk::{self, device::{DeviceProvider, self}, commandbuffer::{CommandBufferProvider, self}, CommandBufferSet, commandpool::{self, CommandPoolProvider}, CommandPool, Device, instance, Instance, memory::{self, bufferpartition::BufferPartitionProvider}};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent}};
 
@@ -16,6 +16,7 @@ fn main(){
     
     let mut settings = device::SettingsProvider::default();
     settings.add_window(&window);
+    settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     let device = Device::new(&settings, &instance).expect("Could not create device");
     
     let settings = commandpool::SettingsProvider::new(device.grahics_queue().unwrap().1);
@@ -24,12 +25,15 @@ fn main(){
     let settings = commandbuffer::SettingsProvider::default();
     let mut cmds = CommandBufferSet::new(&settings, &device, &cmdpool);
     
-    let mut settings = qvk::memory::memory::SettingsProvider::new(1024, device.device_memory_index());
+    let mut settings = memory::memory::SettingsProvider::new(1024 * 1024 * 100, device.device_memory_index());
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
-    let mem = qvk::memory::Memory::new(&settings, &device).expect("Could not allocate memory");
+    let mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
     
-    let settings = qvk::memory::buffer::SettingsProvider::new(10000, vk::BufferUsageFlags::STORAGE_BUFFER);
-    let buf = qvk::memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
+    let settings = memory::buffer::SettingsProvider::new(10000, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS);
+    let buf = memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
+
+    let part = memory::BufferPartition::new(&device, &buf, 100, None).expect("Could not partition buffer");
+    println!("partitoin device addr: {:?}", part.device_addr());
     
     // event_loop.run(move |event, _, flow|{
     //     flow.set_wait();

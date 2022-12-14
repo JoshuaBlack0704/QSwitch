@@ -21,6 +21,7 @@ pub trait DeviceSettingsProvider{
 
 pub trait DeviceProvider{
     fn device(&self) -> &ash::Device;
+    fn instance(&self) -> &ash::Instance;
     fn surface(&self) -> &Option<SurfaceKHR>;
     fn physical_device(&self) -> &PhysicalDeviceData;
     fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)>;
@@ -217,6 +218,10 @@ impl<I:InstanceProvider> DeviceProvider for Device<I>{
         &self.device
     }
 
+    fn instance(&self) -> &ash::Instance {
+        self.instance.instance()
+    }
+
     fn surface(&self) -> &Option<SurfaceKHR> {
         &self.surface
     }
@@ -224,6 +229,7 @@ impl<I:InstanceProvider> DeviceProvider for Device<I>{
     fn physical_device(&self) -> &PhysicalDeviceData {
         &self.physical_device
     }
+
 
     fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
         let mut best_score = u32::MAX;
@@ -250,7 +256,6 @@ impl<I:InstanceProvider> DeviceProvider for Device<I>{
         }
         target_queue
     }
-
 
     fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
         self.get_queue(vk::QueueFlags::GRAPHICS)
@@ -430,6 +435,9 @@ impl<'a> SettingsProvider<'a>{
     }
     pub fn acc_struct_features(&mut self, features: vk::PhysicalDeviceAccelerationStructureFeaturesKHR){
         self.acc_struct_features= Some(features);
+    }
+    pub fn add_extension(&mut self, name: *const i8){
+        self.device_extensions.get_or_insert(vec![]).push(name);
     }
     
 }

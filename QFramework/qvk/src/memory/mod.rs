@@ -33,7 +33,7 @@ pub struct Buffer<D: DeviceProvider, M: MemoryProvider, P: PartitionProvider>{
     memory_partition: Partition,
     partition_sys: Mutex<P>,
     buffer: vk::Buffer,
-    alignment_type: bufferpartition::BufferAlignmentType,
+    alignment_type: buffer::BufferAlignmentType,
 }
 
 pub mod bufferpartition;

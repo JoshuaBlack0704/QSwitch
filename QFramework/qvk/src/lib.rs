@@ -47,4 +47,12 @@ pub struct CommandBufferSet<D: device::DeviceProvider, P: commandpool::CommandPo
 
 pub mod memory;
 
+pub mod swapchain;
+pub struct Swapchain<D: device::DeviceProvider, S: swapchain::SwapchainSettingsProvider>{
+    device: Arc<D>,
+    settings: S,
+    surface_loader: ash::extensions::khr::Surface,
+    swapchain_loader: ash::extensions::khr::Swapchain,
+    swapchain: vk::SwapchainKHR,
+}
 
