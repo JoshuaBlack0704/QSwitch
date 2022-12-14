@@ -1,7 +1,5 @@
 use std::{sync::Arc, collections::VecDeque};
 
-use log::debug;
-
 use super::{PartitionSystem, Partition};
 
 /// (start_addr, size, tracker)

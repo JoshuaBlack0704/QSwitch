@@ -1,16 +1,15 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use log::{info, debug};
 
-use crate::{Swapchain, device, instance};
+use crate::{Swapchain, device, instance, sync, image::{self, ImageProvider}, imageview, memory::{Memory, PartitionSystem}, Image, ImageView};
 
 pub trait SwapchainSettingsProvider{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
-    fn create_flags(&self) -> vk::SwapchainCreateFlagsKHR;
+    fn create_flags(&self) -> Option<vk::SwapchainCreateFlagsKHR>;
     fn custom_min_image_count(&self) -> Option<u32>;
     fn custom_ranked_image_format(&self) -> Option<&[vk::SurfaceFormatKHR]>;
-    fn image_color_space(&self) -> vk::ColorSpaceKHR;
     fn custom_image_extent(&self) -> Option<vk::Extent2D>;
     fn image_array_layers(&self) -> u32;
     fn image_usage(&self) -> vk::ImageUsageFlags;
@@ -21,6 +20,13 @@ pub trait SwapchainSettingsProvider{
     fn clipped(&self) -> bool;
 }
 
+pub trait SwapchainProvider{
+    fn present<S:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[S]>);
+    fn aquire_next_image<F:sync::fence::FenceProvider, S:sync::semaphore::SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
+    fn resize(&self);
+}
+
+#[derive(Clone)]
 pub enum SwapchainCreateExtension{
     
 }
@@ -31,8 +37,27 @@ pub enum SwapchainCreateError{
     VulkanError(vk::Result),
 }
 
-impl<D: device::DeviceProvider, S:SwapchainSettingsProvider> Swapchain<D,S>{
-    pub fn new<I:instance::InstanceProvider>(instance_provider: &Arc<I>, device_provider: &Arc<D>, settings: S)  -> Result<Arc<Swapchain<D,S>>, SwapchainCreateError>{
+type ImageType<D> = Image<D, Memory<D, PartitionSystem>>;
+type ImageViewType<D> = ImageView<D, ImageType<D>>;
+
+#[derive(Clone)]
+pub struct SettingsProvider{
+    extensions: Option<Vec<SwapchainCreateExtension>>,
+    create_flags: Option<vk::SwapchainCreateFlagsKHR>,
+    custom_min_image_count: Option<u32>,
+    custom_ranked_image_format: Option<Vec<vk::SurfaceFormatKHR>>,
+    custom_image_extent: Option<vk::Extent2D>,
+    image_array_layers: u32,
+    image_usage: vk::ImageUsageFlags,
+    share: Option<Vec<u32>>,
+    custom_pre_transform: Option<vk::SurfaceTransformFlagsKHR>,
+    composite_alpha: vk::CompositeAlphaFlagsKHR,
+    custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
+    clipped: bool,
+}
+
+impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, Image<D,Memory<D,PartitionSystem>>, ImageView<D,Image<D,Memory<D,PartitionSystem>>>>{
+    pub fn new(instance_provider: &Arc<I>, device_provider: &Arc<D>, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>>, SwapchainCreateError>{
         let surface = device_provider.surface();
         if let None = surface{
             return Err(SwapchainCreateError::NoSurface);
@@ -93,7 +118,9 @@ impl<D: device::DeviceProvider, S:SwapchainSettingsProvider> Swapchain<D,S>{
             }
         }
         
-        info = info.flags(settings.create_flags());
+        if let Some(flags) = settings.create_flags(){
+            info = info.flags(flags);
+        }
         info = info.surface(surface);
         info = info.min_image_count(capabilities.min_image_count);
         if let Some(c) = settings.custom_min_image_count(){
@@ -119,6 +146,9 @@ impl<D: device::DeviceProvider, S:SwapchainSettingsProvider> Swapchain<D,S>{
         info = info.composite_alpha(settings.composite_alpha());
         info = info.present_mode(chosen_present_mode);
         info = info.clipped(settings.clipped());
+        if let Some(os) = old_swapchain{
+            info = info.old_swapchain(*os.swapchain.lock().unwrap());
+        }
 
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance_provider.instance(), device_provider.device());
 
@@ -129,27 +159,214 @@ impl<D: device::DeviceProvider, S:SwapchainSettingsProvider> Swapchain<D,S>{
         let swapchain = swapchain.unwrap();
 
         info!("Created swapchain {:?}", swapchain);
-
+        let swapchain = Swapchain{
+                    _instance: instance_provider.clone(),
+                    device: device_provider.clone(),
+                    _settings: settings.clone(),
+                    create_info: info.build(),
+                    surface_loader,
+                    swapchain_loader,
+                    swapchain: Mutex::new(swapchain),
+                    images: Mutex::new(vec![]),
+                    views: Mutex::new(vec![]),
+                };
+        
+        swapchain.get_images(*swapchain.swapchain.lock().unwrap());
 
         Ok(
             Arc::new(
-                Swapchain{
-                    device: device_provider.clone(),
-                    settings,
-                    swapchain,
-                    surface_loader,
-                    swapchain_loader,
-                }
+                swapchain
             )
         )
     }
+
+    fn get_images(&self, swapchain: vk::SwapchainKHR){
+        let mut img_lock = self.images.lock().unwrap();
+        let _img_view_lock = self.views.lock().unwrap();
+        let imgs = unsafe{self.swapchain_loader.get_swapchain_images(swapchain).unwrap()};
+        let mut images = Vec::with_capacity(imgs.len());
+        for image in imgs.iter(){
+            let image = Image::<D,Memory<D,PartitionSystem>>::from_swapchain_image(&self.device, *image);
+            image.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
+            images.push(image);
+        }
+        *img_lock = images;
+    }
 }
 
-impl<D:device::DeviceProvider, S:SwapchainSettingsProvider> Drop for Swapchain<D,S>{
+impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>{
+    fn present<Sem:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[Sem]>) {
+
+        
+        let mut info = vk::PresentInfoKHR::builder();
+        let wait_semaphores:Vec<vk::Semaphore>;
+        if let Some(waits) = waits{
+            wait_semaphores = waits.iter().map(|s| *s.semaphore()).collect();
+            info = info.wait_semaphores(&wait_semaphores);
+        }
+        let swapchains = [*self.swapchain.lock().unwrap()];
+        let images_indices = [next_image];
+        info = info.swapchains(&swapchains);
+        info = info.image_indices(&images_indices);
+
+        let _ = unsafe{self.swapchain_loader.queue_present(self.device.grahics_queue().unwrap().0, &info)};
+    }
+
+    fn resize(&self) {
+        let mut swapchain_lock = self.swapchain.lock().unwrap();
+        let capabilites = unsafe{self.surface_loader.get_physical_device_surface_capabilities(self.device.physical_device().physical_device, self.device.surface().unwrap()).unwrap()};
+        debug!("Resizing swapchain {:?} to {:?}", *swapchain_lock, capabilites.current_extent);
+        let mut info = self.create_info.clone();
+        info.image_extent = capabilites.current_extent;
+        info.old_swapchain = *swapchain_lock;
+        let new_swapchain = unsafe{self.swapchain_loader.create_swapchain(&info, None).unwrap()};
+        unsafe{self.swapchain_loader.destroy_swapchain(*swapchain_lock, None)};
+        debug!("Swapchain {:?} destroyed for swapchain {:?}", *swapchain_lock, new_swapchain);
+        self.get_images(new_swapchain);
+        *swapchain_lock = new_swapchain;
+    }
+
+    fn aquire_next_image<F:sync::fence::FenceProvider, Sem:sync::semaphore::SemaphoreProvider>(&self, timeout: u64, fence: Option<&Arc<F>>, semaphore: Option<&Arc<Sem>>) -> u32{
+        let mut present_fence = vk::Fence::null();
+        let mut present_semaphore = vk::Semaphore::null();
+
+        if let Some(f) = fence{
+            present_fence = *f.fence();
+        }
+        if let Some(s) = semaphore{
+            present_semaphore = *s.semaphore();
+        }
+        let mut swapchain = *self.swapchain.lock().unwrap();
+
+        let mut next_image = unsafe{self.swapchain_loader.acquire_next_image(swapchain, timeout, present_semaphore, present_fence)};
+        if let Err(e) = next_image{
+            if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR){
+                todo!();
+            }
+            self.resize();
+            swapchain = *self.swapchain.lock().unwrap();
+            next_image = unsafe{self.swapchain_loader.acquire_next_image(swapchain, timeout, present_semaphore, present_fence)};
+        }
+        let (next_image, suboptimal) = next_image.unwrap();
+        if !suboptimal{
+            return next_image;
+        }
+
+        self.resize();
+        swapchain = *self.swapchain.lock().unwrap();
+        let (next_image, _) = unsafe{self.swapchain_loader.acquire_next_image(swapchain, timeout, present_semaphore, present_fence).unwrap()};
+
+        next_image
+        
+        
+
+        
+    }
+}
+
+impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider, Img:image::ImageProvider, ImgV: imageview::ImageViewProvider> Drop for Swapchain<I,D,S,Img,ImgV>{
     fn drop(&mut self) {
         debug!("Destroying swapchain {:?}", self.swapchain);
         unsafe{
-            self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+            self.swapchain_loader.destroy_swapchain(*self.swapchain.lock().unwrap(), None);
         }
+    }
+}
+
+impl SettingsProvider{
+    pub fn new(
+    extensions: Option<Vec<SwapchainCreateExtension>>,
+    create_flags: Option<vk::SwapchainCreateFlagsKHR>,
+    custom_min_image_count: Option<u32>,
+    custom_ranked_image_format: Option<Vec<vk::SurfaceFormatKHR>>,
+    custom_image_extent: Option<vk::Extent2D>,
+    image_array_layers: u32,
+    image_usage: vk::ImageUsageFlags,
+    share: Option<Vec<u32>>,
+    custom_pre_transform: Option<vk::SurfaceTransformFlagsKHR>,
+    composite_alpha: vk::CompositeAlphaFlagsKHR,
+    custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
+    clipped: bool,
+    )
+-> SettingsProvider     {
+        SettingsProvider{
+            extensions,
+            create_flags,
+            custom_min_image_count,
+            custom_ranked_image_format,
+            custom_image_extent,
+            image_array_layers,
+            image_usage,
+            share,
+            custom_pre_transform,
+            composite_alpha,
+            custom_ranked_present_modes,
+            clipped,
+        }
+    }
+}
+
+impl Default for SettingsProvider{
+    fn default() -> Self {
+        Self::new(None, None, None, None, None, 1, vk::ImageUsageFlags::TRANSFER_DST, None, None, vk::CompositeAlphaFlagsKHR::OPAQUE, Some(vec![vk::PresentModeKHR::MAILBOX]), true)
+    }
+}
+
+impl SwapchainSettingsProvider for SettingsProvider{
+    fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>> {
+        self.extensions.clone()
+    }
+
+    fn create_flags(&self) -> Option<vk::SwapchainCreateFlagsKHR> {
+        self.create_flags
+    }
+
+    fn custom_min_image_count(&self) -> Option<u32> {
+        self.custom_min_image_count
+    }
+
+    fn custom_ranked_image_format(&self) -> Option<&[vk::SurfaceFormatKHR]> {
+        if let Some(formats) = &self.custom_ranked_image_format{
+            return Some(&formats)
+        }
+        None
+    }
+
+    fn custom_image_extent(&self) -> Option<vk::Extent2D> {
+        self.custom_image_extent
+    }
+
+    fn image_array_layers(&self) -> u32 {
+        self.image_array_layers
+    }
+
+    fn image_usage(&self) -> vk::ImageUsageFlags {
+        self.image_usage
+    }
+
+    fn share(&self) -> Option<&[u32]> {
+        if let Some(indecies) = &self.share{
+            return Some(&indecies)
+        }
+        None
+    }
+
+    fn custom_pre_transform(&self) -> Option<vk::SurfaceTransformFlagsKHR> {
+        self.custom_pre_transform
+    }
+
+    fn composite_alpha(&self) -> vk::CompositeAlphaFlagsKHR {
+        self.composite_alpha
+    }
+
+    fn custom_ranked_present_modes(&self) -> Option<&[vk::PresentModeKHR]> {
+        if let Some(modes) = &self.custom_ranked_present_modes{
+            return Some(&modes);
+        }
+        None
+    }
+
+    fn clipped(&self) -> bool {
+        self.clipped
     }
 }

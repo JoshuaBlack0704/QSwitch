@@ -1,0 +1,237 @@
+use std::sync::{Arc, Mutex};
+
+use ash::vk;
+use log::{info, debug};
+
+use crate::{Image, device, memory::{partitionsystem, self, Memory, PartitionSystem}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, sync::{self, fence::FenceProvider}};
+
+pub trait ImageProvider{
+    /// Returns the old layout
+    fn transition(
+        &self, 
+        cmd: &vk::CommandBuffer, 
+        new_layout: vk::ImageLayout, 
+        src_stage: Option<vk::PipelineStageFlags2>,
+        dst_stage: Option<vk::PipelineStageFlags2>,
+        src_access: Option<vk::AccessFlags2>,
+        dst_access: Option<vk::AccessFlags2>,
+        subresources: Option<vk::ImageSubresourceRange>,
+);
+    /// Creates and uses an internal command pool and buffer
+    fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>);
+    fn image(&self) -> &vk::Image;
+    fn layout(&self) -> vk::ImageLayout;
+}
+
+pub trait ImageSettingsProvider{
+    fn extensions(&self) -> Option<Vec<ImageCreateExtensions>>;
+    fn create_flags(&self) -> Option<vk::ImageCreateFlags>;
+    fn image_type(&self) -> vk::ImageType;
+    fn format(&self) -> vk::Format;
+    fn extent(&self) -> vk::Extent3D;
+    fn mip_levels(&self) -> u32;
+    fn array_layers(&self) -> u32;
+    fn samples(&self) -> vk::SampleCountFlags;
+    fn tiling(&self) -> vk::ImageTiling;
+    fn usage(&self) -> vk::ImageUsageFlags;
+    fn share(&self) -> Option<&[u32]>;
+    fn preload_layout(&self) -> Option<vk::ImageLayout>;
+}
+
+pub enum ImageCreateExtensions{
+    
+}
+
+pub enum ImageCreateError{
+    Memory(partitionsystem::PartitionError),
+    Vulkan(vk::Result),
+}
+
+impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> Image<D,M>{
+    pub fn new<S:ImageSettingsProvider>(device_provider: &Arc<D>, memory_provider: &Arc<M>,settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
+        let mut info = vk::ImageCreateInfo::builder();
+        let extensions = settings.extensions();
+        if let Some(mut ext) = extensions{
+            for ext in ext.iter_mut(){
+                match ext{
+                   _ => todo!() 
+                }
+                
+            }
+        }
+        if let Some(flags) = settings.create_flags(){
+            info = info.flags(flags);
+        }
+        info = info.image_type(settings.image_type());
+        info = info.format(settings.format());
+        info = info.extent(settings.extent());
+        info = info.mip_levels(settings.mip_levels());
+        info = info.array_layers(settings.array_layers());
+        info = info.samples(settings.samples());
+        info = info.tiling(settings.tiling());
+        info = info.usage(settings.usage());
+        info = info.sharing_mode(vk::SharingMode::EXCLUSIVE);
+        if let Some(indices) = settings.share(){
+            info = info.sharing_mode(vk::SharingMode::CONCURRENT);
+            info = info.queue_family_indices(indices);
+        }
+        info = info.initial_layout(vk::ImageLayout::UNDEFINED);
+
+        let device = device_provider.device();
+        let image = unsafe{device.create_image(&info, None)};
+        if let Err(e) = image{
+            return Err(ImageCreateError::Vulkan(e));
+        }
+        let image = image.unwrap();
+        info!("Created image {:?}", image);
+
+        let reqs = unsafe{device.get_image_memory_requirements(image)};
+        let memory_partition = memory_provider.partition(reqs.size, Some(reqs.alignment));
+        if let Err(e) = memory_partition{
+            return Err(ImageCreateError::Memory(e));
+        }
+        let memory_partition = memory_partition.unwrap();
+
+        let image = Image{
+            device: device_provider.clone(),
+            memory: Some(memory_provider.clone()),
+            _partition: Some(memory_partition),
+            image,
+            create_info: info.clone(),
+            current_layout: Mutex::new(info.initial_layout),
+        };
+
+        if let Some(layout) = settings.preload_layout(){
+            image.internal_transistion(layout, None);
+        }
+
+        Ok(Arc::new(image))
+    }
+
+    pub fn from_swapchain_image(device_provider: &Arc<D>, image: vk::Image) -> Arc<Image<D,Memory<D, PartitionSystem>>>{
+        Arc::new(
+            Image{
+                device: device_provider.clone(),
+                memory: None,
+                _partition: None,
+                image,
+                create_info: vk::ImageCreateInfo::builder().mip_levels(1).array_layers(1).build(),
+                current_layout: Mutex::new(vk::ImageLayout::UNDEFINED),
+            }
+        )
+    }
+}
+
+impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> ImageProvider for Image<D,M>{
+    fn transition(
+        &self, 
+        cmd: &vk::CommandBuffer, 
+        new_layout: vk::ImageLayout, 
+        src_stage: Option<vk::PipelineStageFlags2>,
+        dst_stage: Option<vk::PipelineStageFlags2>,
+        src_access: Option<vk::AccessFlags2>,
+        dst_access: Option<vk::AccessFlags2>,
+        subresources: Option<vk::ImageSubresourceRange>,
+    ) {
+        let mut lock = self.current_layout.lock().unwrap();
+        let mut image_transition = vk::ImageMemoryBarrier2::builder();
+        if let Some(stage) = src_stage{
+            image_transition = image_transition.src_stage_mask(stage);
+        }
+        else{
+            image_transition = image_transition.src_stage_mask(vk::PipelineStageFlags2::TOP_OF_PIPE);
+        }
+        
+        if let Some(stage) = dst_stage{
+            image_transition = image_transition.dst_stage_mask(stage);
+        }
+        else{
+            image_transition = image_transition.dst_stage_mask(vk::PipelineStageFlags2::BOTTOM_OF_PIPE);
+        }
+        
+        if let Some(access) = src_access{
+            image_transition = image_transition.src_access_mask(access);
+        }
+        else{
+            image_transition = image_transition.src_access_mask(vk::AccessFlags2::MEMORY_WRITE);
+        }
+        
+        if let Some(access) = dst_access{
+            image_transition = image_transition.dst_access_mask(access);
+        }
+        else{
+            image_transition = image_transition.dst_access_mask(vk::AccessFlags2::MEMORY_READ);
+        }
+
+        if let Some(range) = subresources{
+            image_transition = image_transition.subresource_range(range);
+        }
+        else{
+            image_transition = image_transition.subresource_range(vk::ImageSubresourceRange{
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: self.create_info.mip_levels,
+                base_array_layer: 0,
+                layer_count: self.create_info.array_layers,
+            })
+        }
+
+        image_transition = image_transition.old_layout(*lock);
+        image_transition = image_transition.new_layout(new_layout);
+        image_transition = image_transition.image(self.image);
+
+        let image_transition = [image_transition.build()];
+
+        let info = vk::DependencyInfo::builder()
+        .image_memory_barriers(&image_transition);
+
+        unsafe{self.device.device().cmd_pipeline_barrier2(*cmd, &info)};
+
+        *lock = new_layout;
+    }
+
+    fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>) {
+        let settings = commandpool::SettingsProvider::new(self.device.grahics_queue().unwrap().1);
+        let pool = CommandPool::new(&settings, &self.device).unwrap();
+        let settings = commandbuffer::SettingsProvider::default();
+        let bset = CommandBufferSet::new(&settings, &self.device, &pool);
+        let cmd = bset.next_cmd();
+        let begin = vk::CommandBufferBeginInfo::default();
+        unsafe{self.device.device().begin_command_buffer(cmd, &begin).unwrap()};
+        if let Some(range) = subresources{
+            self.transition(&cmd, new_layout, None, None, None, None,Some(range));
+        }
+        else{
+            self.transition(&cmd, new_layout, None, None, None, None, None);
+        }
+        unsafe{self.device.device().end_command_buffer(cmd)}.unwrap();
+        let fence = sync::Fence::new(&self.device, false);
+        let queue = self.device.grahics_queue().unwrap().0;
+        let cmd = [cmd];
+        let submit = [vk::SubmitInfo::builder().command_buffers(&cmd).build()];
+        unsafe{
+            self.device.device().queue_submit(queue, submit.as_slice(), *fence.fence()).unwrap();
+        }
+        fence.wait(None);
+    }
+
+    fn image(&self) -> &vk::Image {
+        &self.image
+    }
+
+    fn layout(&self) -> vk::ImageLayout {
+        let lock = self.current_layout.lock().unwrap();
+        *lock
+    }
+}
+
+impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> Drop for Image<D,M>{
+    fn drop(&mut self) {
+        debug!("Destroyed image {:?}", self.image);
+        if let Some(_) = self.memory{
+            unsafe{
+                self.device.device().destroy_image(self.image, None);
+            }
+        }
+    }
+}

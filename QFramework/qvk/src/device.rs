@@ -360,11 +360,9 @@ impl PhysicalDeviceData{
     
     /// Selects the biggest heap that matches properties
     pub fn get_memory_index(&self, properties: vk::MemoryPropertyFlags) -> u32 {
-        let mut selected_type: usize = 0;
-        
         //First we need to sort by matching properties
         let mut matches:Vec<MemTH> = self.mem_props.memory_types.iter().enumerate()
-            .filter(|(i,t)| t.property_flags.contains(properties))
+            .filter(|(_,t)| t.property_flags.contains(properties))
             .map(|(i,t)| MemTH {i, t: *t, h: self.mem_props.memory_heaps[t.heap_index as usize]})
             .collect();
         matches.sort_by(MemTH::cmp);
@@ -445,9 +443,16 @@ impl<'a> SettingsProvider<'a>{
 impl Default for SettingsProvider<'_>{
     fn default() -> Self {
         let mut settings = Self::new(false, None, None, None, None, None, None, None, None);
+        settings.add_extension(ash::extensions::khr::Synchronization2::name().as_ptr());
         let features12 = vk::PhysicalDeviceVulkan12Features::builder()
-        .buffer_device_address(true).timeline_semaphore(true).build();
+        .buffer_device_address(true)
+        .timeline_semaphore(true)
+        .build();
+        let features13 = vk::PhysicalDeviceVulkan13Features::builder()
+        .synchronization2(true)
+        .build();
         settings.features12(features12);
+        settings.features13(features13);
         settings
     }
 }

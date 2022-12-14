@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use crate::{device, instance};
+use crate::device;
 
 use super::{BufferPartition, PartitionSystem, Partition, buffer, partitionsystem::{self, PartitionError}};
 
@@ -32,9 +32,9 @@ impl<D:device::DeviceProvider, B:buffer::BufferProvider> BufferPartition<D,B,Par
             Arc::new(BufferPartition{
             device: device_provider.clone(),
             buffer: buffer_provider.clone(),
-            partition_sys: Mutex::new(PartitionSystem::new(p.size)),
+            _partition_sys: Mutex::new(PartitionSystem::new(p.size)),
             partition: p,
-            device_addr: None,
+            _device_addr: None,
             })
         )
                 

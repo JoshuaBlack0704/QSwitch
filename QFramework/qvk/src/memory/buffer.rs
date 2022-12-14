@@ -5,7 +5,7 @@ use log::{info, debug};
 
 use crate::device;
 
-use super::{Buffer, memory, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition, bufferpartition::BufferPartitionProvider, BufferPartition};
+use super::{Buffer, memory, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition};
 
 pub trait BufferSettingsProvider{
     fn size(&self) -> vk::DeviceSize;
@@ -109,7 +109,7 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
         
         Ok(Arc::new(Buffer{
             device: device_provider.clone(),
-            memory: memory_provider.clone(),
+            _memory: memory_provider.clone(),
             memory_partition,
             partition_sys: Mutex::new(PartitionSystem::new(settings.size())),
             buffer,

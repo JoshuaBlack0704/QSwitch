@@ -1,7 +1,6 @@
 use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
-use tokio::sync::RwLock;
 
 use crate::device::DeviceProvider;
 
