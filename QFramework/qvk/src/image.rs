@@ -193,7 +193,8 @@ impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> ImageProvider f
     fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>) {
         let settings = commandpool::SettingsProvider::new(self.device.grahics_queue().unwrap().1);
         let pool = CommandPool::new(&settings, &self.device).unwrap();
-        let settings = commandbuffer::SettingsProvider::default();
+        let mut settings = commandbuffer::SettingsProvider::default();
+        settings.batch_size = 1;
         let bset = CommandBufferSet::new(&settings, &self.device, &pool);
         let cmd = bset.next_cmd();
         let begin = vk::CommandBufferBeginInfo::default();

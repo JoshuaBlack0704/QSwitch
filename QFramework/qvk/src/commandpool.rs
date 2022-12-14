@@ -17,9 +17,9 @@ pub trait CommandPoolProvider{
 
 #[derive(Clone)]
 pub struct SettingsProvider{
-    queue_family_index: u32,
-    create_flags: Option<CommandPoolCreateFlags>,
-    reset_flags: Option<vk::CommandPoolResetFlags>,
+    pub queue_family_index: u32,
+    pub create_flags: Option<CommandPoolCreateFlags>,
+    pub reset_flags: Option<vk::CommandPoolResetFlags>,
 }
 
 impl<D: device::DeviceProvider, S: CommandPoolSettingsProvider + Clone> CommandPool<D,S>{

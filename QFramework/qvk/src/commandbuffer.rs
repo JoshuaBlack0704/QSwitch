@@ -18,9 +18,9 @@ pub trait CommandBufferProvider{
 
 #[derive(Clone)]
 pub struct SettingsProvider{
-    cmd_level: vk::CommandBufferLevel,
-    batch_size: u32,
-    reset_flags: Option<vk::CommandBufferResetFlags>,
+    pub cmd_level: vk::CommandBufferLevel,
+    pub batch_size: u32,
+    pub reset_flags: Option<vk::CommandBufferResetFlags>,
 }
 
 impl<D: device::DeviceProvider, P: commandpool::CommandPoolProvider, S: CommandBufferSettingsProvider + Clone> CommandBufferSet<D, P, S>{

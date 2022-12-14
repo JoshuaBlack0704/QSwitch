@@ -41,11 +41,11 @@ pub enum BufferCreateError{
 }
 
 pub struct SettingsProvider{
-    size: vk::DeviceSize,
-    flags: Option<vk::BufferCreateFlags>,
-    extensions: Option<Vec<BufferCreateExtension>>,
-    usage: vk::BufferUsageFlags,
-    share: Option<Vec<u32>>,
+    pub size: vk::DeviceSize,
+    pub flags: Option<vk::BufferCreateFlags>,
+    pub extensions: Option<Vec<BufferCreateExtension>>,
+    pub usage: vk::BufferUsageFlags,
+    pub share: Option<Vec<u32>>,
 }
 
 impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSystem>{

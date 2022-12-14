@@ -42,18 +42,18 @@ type ImageViewType<D> = ImageView<D, ImageType<D>>;
 
 #[derive(Clone)]
 pub struct SettingsProvider{
-    extensions: Option<Vec<SwapchainCreateExtension>>,
-    create_flags: Option<vk::SwapchainCreateFlagsKHR>,
-    custom_min_image_count: Option<u32>,
-    custom_ranked_image_format: Option<Vec<vk::SurfaceFormatKHR>>,
-    custom_image_extent: Option<vk::Extent2D>,
-    image_array_layers: u32,
-    image_usage: vk::ImageUsageFlags,
-    share: Option<Vec<u32>>,
-    custom_pre_transform: Option<vk::SurfaceTransformFlagsKHR>,
-    composite_alpha: vk::CompositeAlphaFlagsKHR,
-    custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
-    clipped: bool,
+    pub extensions: Option<Vec<SwapchainCreateExtension>>,
+    pub create_flags: Option<vk::SwapchainCreateFlagsKHR>,
+    pub custom_min_image_count: Option<u32>,
+    pub custom_ranked_image_format: Option<Vec<vk::SurfaceFormatKHR>>,
+    pub custom_image_extent: Option<vk::Extent2D>,
+    pub image_array_layers: u32,
+    pub image_usage: vk::ImageUsageFlags,
+    pub share: Option<Vec<u32>>,
+    pub custom_pre_transform: Option<vk::SurfaceTransformFlagsKHR>,
+    pub composite_alpha: vk::CompositeAlphaFlagsKHR,
+    pub custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
+    pub clipped: bool,
 }
 
 impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, Image<D,Memory<D,PartitionSystem>>, ImageView<D,Image<D,Memory<D,PartitionSystem>>>>{

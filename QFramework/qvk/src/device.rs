@@ -51,15 +51,15 @@ pub enum DeviceCreateError{
 }
 
 pub struct SettingsProvider<'a>{
-    choose_device:  bool,
-    surface_support:  Option<&'a winit::window::Window>,
-    features: Option<vk::PhysicalDeviceFeatures>,
-    features11: Option<vk::PhysicalDeviceVulkan11Features>,
-    features12: Option<vk::PhysicalDeviceVulkan12Features>,
-    features13: Option<vk::PhysicalDeviceVulkan13Features>,
-    raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
-    acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
-    device_extensions: Option<Vec<*const i8>>,
+    pub choose_device:  bool,
+    pub surface_support:  Option<&'a winit::window::Window>,
+    pub features: Option<vk::PhysicalDeviceFeatures>,
+    pub features11: Option<vk::PhysicalDeviceVulkan11Features>,
+    pub features12: Option<vk::PhysicalDeviceVulkan12Features>,
+    pub features13: Option<vk::PhysicalDeviceVulkan13Features>,
+    pub raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
+    pub acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
+    pub device_extensions: Option<Vec<*const i8>>,
     
 }
 

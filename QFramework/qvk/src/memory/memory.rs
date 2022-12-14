@@ -23,9 +23,9 @@ pub trait MemoryProvider{
 
 #[derive(Clone)]
 pub struct SettingsProvider{
-    size: vk::DeviceSize,
-    memory_type_index: u32,
-    extensions: Option<Vec<MemoryAllocateExtension>>,
+    pub size: vk::DeviceSize,
+    pub memory_type_index: u32,
+    pub extensions: Option<Vec<MemoryAllocateExtension>>,
 }
 
 impl<D: DeviceProvider> Memory<D,PartitionSystem>{
