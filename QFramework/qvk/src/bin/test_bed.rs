@@ -53,9 +53,9 @@ fn main(){
             },
             Event::MainEventsCleared => {
                 
+                aquire_fence.wait(None);
                 aquire_fence.reset();
                 let image = swapchain.aquire_next_image::<_,sync::Semaphore<Device<Instance>>>(u64::MAX, Some(&aquire_fence), None);
-                aquire_fence.wait(None);
                 swapchain.present::<SemaphoreType>(image, None);
             }
             _ => {}

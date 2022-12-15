@@ -15,6 +15,12 @@ pub trait CommandBufferProvider{
     fn return_cmd(&self, cmd: vk::CommandBuffer);
     fn reset_cmd(&self, cmd: &vk::CommandBuffer);
 }
+pub trait CopyOpProvider{
+    fn copy_from_ram(&self);
+    fn copy_to_ram(&self);
+    fn copy_to_partition(&self);
+    fn copy_to_image(&self);
+}
 
 #[derive(Clone)]
 pub struct SettingsProvider{
