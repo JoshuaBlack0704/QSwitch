@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{self, device::{DeviceProvider, self}, commandbuffer, CommandBufferSet, commandpool, CommandPool, Device, instance, Instance, memory, swapchain::{self, SwapchainProvider}, Swapchain, sync};
+use qvk::{self, device::{DeviceProvider, self}, commandbuffer, CommandBufferSet, commandpool, CommandPool, Device, instance, Instance, memory, swapchain::{self, SwapchainProvider}, Swapchain, sync::{self, fence::FenceProvider}};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent}};
 
@@ -38,7 +38,7 @@ fn main(){
     let settings = memory::buffer::SettingsProvider::new(10000, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS);
     let _buf = memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
 
-    let aquire_image = sync::Semaphore::new(&device);
+    let aquire_fence = sync::Fence::new(&device, true);
     
     event_loop.run(move |event, _, flow|{
         flow.set_poll();
@@ -53,7 +53,9 @@ fn main(){
             },
             Event::MainEventsCleared => {
                 
-                let image = swapchain.aquire_next_image::<sync::Fence<Device<Instance>>,_>(u64::MAX, None, Some(&aquire_image));
+                aquire_fence.reset();
+                let image = swapchain.aquire_next_image::<_,sync::Semaphore<Device<Instance>>>(u64::MAX, Some(&aquire_fence), None);
+                aquire_fence.wait(None);
                 swapchain.present::<SemaphoreType>(image, None);
             }
             _ => {}

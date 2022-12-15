@@ -15,7 +15,7 @@ pub trait FenceProvider{
 }
 
 impl<D:device::DeviceProvider> Fence<D>{
-    pub fn new(device_provider: &Arc<D>, signaled: bool) -> Fence<D> {
+    pub fn new(device_provider: &Arc<D>, signaled: bool) -> Arc<Fence<D>> {
         let mut info = vk::FenceCreateInfo::builder();
         if signaled{
             info = info.flags(vk::FenceCreateFlags::SIGNALED);
@@ -24,10 +24,12 @@ impl<D:device::DeviceProvider> Fence<D>{
         let fence = unsafe{device_provider.device().create_fence(&info, None).unwrap()};
         info!("Created fence {:?}", fence);
 
-        Fence{
-            device: device_provider.clone(),
-            fence,
-        }
+        Arc::new(
+            Fence{
+                device: device_provider.clone(),
+                fence,
+            }
+        )
     }
 }
 
