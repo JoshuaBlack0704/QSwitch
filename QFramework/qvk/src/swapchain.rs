@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{sync::{semaphore::SemaphoreProvider, fence::FenceProvider}, image::{Image, ImageView, image::ImageProvider, imageview::ImageViewProvider}, memory::{Memory, PartitionSystem}, instance::{InstanceProvider, UsesInstanceProvider}, device::{DeviceProvider, UsesDeviceProvider}, Swapchain};
+use crate::{sync::{semaphore::SemaphoreProvider, fence::FenceProvider, Semaphore}, image::{Image, ImageView, image::{ImageProvider, UsesImageProvider}, imageview::ImageViewProvider, imageresource::ImageSubresourceProvider, ImageResource}, memory::{Memory, PartitionSystem}, instance::{InstanceProvider, UsesInstanceProvider}, device::{DeviceProvider, UsesDeviceProvider}, Swapchain, queue::{queue::QueueProvider, Queue}};
 
 
 pub trait SwapchainSettingsProvider{
@@ -23,6 +23,7 @@ pub trait SwapchainSettingsProvider{
 
 pub trait SwapchainProvider{
     fn present<S:SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
+    fn wait_present<S:SemaphoreProvider>(&self, next_image: u32, waits: Option<&[&Arc<S>]>);
     fn aquire_next_image<F:FenceProvider, S:SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
     fn resize(&self);
 }
@@ -57,7 +58,7 @@ pub struct SettingsProvider{
     pub clipped: bool,
 }
 
-impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, ImageType<D>, ImageViewType<D>>{
+impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, ImageType<D>, ImageViewType<D>,Queue<D>>{
     pub fn new(device_provider: &Arc<D>, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
         let instance_provider = device_provider.instance_provider();
         let surface = device_provider.surface();
@@ -160,6 +161,8 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         }
         let swapchain = swapchain.unwrap();
 
+        let queue = Queue::new(device_provider, vk::QueueFlags::GRAPHICS).unwrap();
+
         info!("Created swapchain {:?}", swapchain);
         let swapchain = Swapchain{
                     _instance: instance_provider.clone(),
@@ -171,6 +174,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
                     swapchain: Mutex::new(swapchain),
                     images: Mutex::new(vec![]),
                     views: Mutex::new(vec![]),
+                    present_queue: queue,
                 };
         
         swapchain.get_images(*swapchain.swapchain.lock().unwrap());
@@ -194,9 +198,30 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         }
         *img_lock = images;
     }
+
+    pub fn present_image<Img:ImageProvider, IR: ImageSubresourceProvider + UsesImageProvider<Img>, F:FenceProvider>(&self, src: &Arc<IR>){
+        // let semaphore:S
+        let images = self.images.lock().unwrap();
+        
+        let aquire = Semaphore::new(self.device_provider());
+        let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<F>>, Some(&aquire));
+        let dst = &images[dst_index as usize];
+
+        src.image_provider().internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
+        dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
+
+        let dst_res = ImageResource::new(&dst, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), dst.extent()).unwrap();
+        src.copy_to_image_internal(&dst_res).unwrap();
+
+        dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
+
+        let waits = [&aquire];
+        self.present(dst_index, Some(&waits));
+        self.present_queue.wait_idle();
+    }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>{
+impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>,Queue<D>>{
     fn present<Sem:SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
 
         
@@ -211,7 +236,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         info = info.swapchains(&swapchains);
         info = info.image_indices(&images_indices);
 
-        let _ = unsafe{self.swapchain_loader.queue_present(self.device.grahics_queue().unwrap().0, &info)};
+        let _ = unsafe{self.swapchain_loader.queue_present(*self.present_queue.queue(), &info)};
     }
 
     fn resize(&self) {
@@ -264,13 +289,21 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
 
         
     }
+
+    fn wait_present<Sem:SemaphoreProvider>(&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
+        self.present(next_image, waits);
+        self.present_queue.wait_idle();
+        
+    }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider> Drop for Swapchain<I,D,S,Img,ImgV>{
+impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider, Q:QueueProvider> Drop for Swapchain<I,D,S,Img,ImgV,Q>{
     fn drop(&mut self) {
-        debug!("Destroying swapchain {:?}", self.swapchain);
+        let lock = self.swapchain.lock().unwrap();
+        let swapchain = *lock;
+        debug!("Destroying swapchain {:?}", swapchain);
         unsafe{
-            self.swapchain_loader.destroy_swapchain(*self.swapchain.lock().unwrap(), None);
+            self.swapchain_loader.destroy_swapchain(swapchain, None);
         }
     }
 }
@@ -373,13 +406,13 @@ impl SwapchainSettingsProvider for SettingsProvider{
     }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider> UsesDeviceProvider<D> for Swapchain<I,D,S,Img,ImgV>{
+impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider,Q: QueueProvider> UsesDeviceProvider<D> for Swapchain<I,D,S,Img,ImgV,Q>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider> UsesInstanceProvider<I> for Swapchain<I,D,S,Img,ImgV>{
+impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider, Q: QueueProvider> UsesInstanceProvider<I> for Swapchain<I,D,S,Img,ImgV,Q>{
     fn instance_provider(&self) -> &Arc<I> {
         &self._instance
     }

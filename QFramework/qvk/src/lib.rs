@@ -6,6 +6,7 @@ use commandpool::{CommandPoolSettingsProvider, CommandPoolProvider};
 use device::DeviceProvider;
 use image::{image::ImageProvider, imageview::ImageViewProvider};
 use instance::InstanceProvider;
+use queue::queue::QueueProvider;
 use swapchain::SwapchainSettingsProvider;
 
 /// The Provider pattern
@@ -52,7 +53,7 @@ pub struct CommandBufferSet<D: DeviceProvider, P: CommandPoolProvider, S: Comman
 pub mod memory;
 
 pub mod swapchain;
-pub struct Swapchain<I:InstanceProvider, D: DeviceProvider, S: SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider>{
+pub struct Swapchain<I:InstanceProvider, D: DeviceProvider, S: SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider, Q:QueueProvider>{
     _instance: Arc<I>,
     device: Arc<D>,
     _settings: S,
@@ -62,6 +63,7 @@ pub struct Swapchain<I:InstanceProvider, D: DeviceProvider, S: SwapchainSettings
     swapchain: Mutex<vk::SwapchainKHR>,
     images: Mutex<Vec<Arc<Img>>>,
     views: Mutex<Vec<Arc<ImgV>>>,
+    present_queue: Arc<Q>,
 }
 
 pub mod sync;
@@ -69,3 +71,5 @@ pub mod sync;
 pub mod image;
 
 pub mod queue;
+
+pub mod descriptor;

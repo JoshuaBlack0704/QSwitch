@@ -10,18 +10,24 @@ pub trait QueueProvider{
     fn submit<S:SubmitInfoProvider, F:FenceProvider>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
     ///Will create an internal fence to wait on the operation
     fn wait_submit<S:SubmitInfoProvider>(&self, submits: &[S]) -> Result<(), vk::Result>;
+    fn queue(&self) -> &vk::Queue;
+    fn wait_idle(&self);
 }
 
 impl<D:DeviceProvider> Queue<D>{
-    pub fn new(device_provider: &Arc<D>, flags: vk::QueueFlags) -> Option<Self>{
+    pub fn new(device_provider: &Arc<D>, flags: vk::QueueFlags) -> Option<Arc<Self>>{
         let q = device_provider.get_queue(flags);
         match q{
             Some(q) => {
-                return Some(Self{
-                    device: device_provider.clone(),
-                    _queue_family: q.1,
-                    queue: q.0,
-                });
+                return Some(
+                Arc::new(
+                    Self{
+                        device: device_provider.clone(),
+                        _queue_family: q.1,
+                        queue: q.0,
+                    }                       
+                )
+                );
             },
             None => {
                 None
@@ -56,5 +62,13 @@ impl<D:DeviceProvider> QueueProvider for Queue<D>{
         let res = self.submit(submits, Some(&fence));
         fence.wait(None);
         res
+    }
+
+    fn queue(&self) -> &vk::Queue {
+        &self.queue
+    }
+
+    fn wait_idle(&self) {
+        unsafe{self.device.device().queue_wait_idle(self.queue).unwrap()};
     }
 }

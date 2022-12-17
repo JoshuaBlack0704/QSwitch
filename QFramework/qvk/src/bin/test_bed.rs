@@ -1,7 +1,7 @@
 use std::{mem::size_of, sync::Arc};
 
 use ash::vk;
-use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, swapchain::{self, SwapchainProvider}, Swapchain, commandpool, CommandPool, commandbuffer, CommandBufferSet, memory::{self, buffer::bufferpartition::BufferPartitionProvider}, sync};
+use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, swapchain::{self, SwapchainProvider}, Swapchain, commandpool, CommandPool, commandbuffer, CommandBufferSet, memory::{self, buffer::{bufferpartition::BufferPartitionProvider, self}}, sync, image::{self, image::ImageProvider, imageresource::ImageSubresourceProvider}};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent}};
 
@@ -31,20 +31,39 @@ fn main(){
     let settings = commandbuffer::SettingsProvider::default();
     let _cmds = CommandBufferSet::new(&settings, &device, &cmdpool);
     
+    let mut settings = memory::memory::SettingsProvider::new(1024 * 1024 * 100, device.device_memory_index());
+    settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
+    let dev_mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
     let mut settings = memory::memory::SettingsProvider::new(1024 * 1024 * 100, device.host_memory_index());
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
-    let mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
+    let host_mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
+
+    let settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(100).height(100).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
+    let image1 = image::Image::new(&device, &dev_mem, &settings).unwrap();
+    let resource1 = image::ImageResource::new(&image1, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image1.extent()).unwrap();
+    let image2 = image::Image::new(&device, &dev_mem, &settings).unwrap();
+    let resource2 = image::ImageResource::new(&image2, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image2.extent()).unwrap();
     
-    let settings = memory::buffer::buffer::SettingsProvider::new(16000*2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
-    let buf = memory::buffer::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
+    let settings = memory::buffer::buffer::SettingsProvider::new(1024*1024*50, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
+    let buf = memory::buffer::Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
     
-    let data = [5u64;200];
-    let part1 = memory::buffer::BufferPartition::new(&buf, (data.len() * size_of::<u64>()) as u64, None).expect("Could not get partition");
-    let part2 = memory::buffer::BufferPartition::new(&buf, (data.len() * size_of::<u64>()) as u64, None).expect("Could not get partition");
-    let mut dst = [20u64;200];
-    part1.copy_from_ram(&data).unwrap();
-    part1.copy_to_partition_internal(&part2).expect("Could not copy");
-    part2.copy_to_ram(dst.as_mut_slice()).unwrap();
+    let color:u32 = 0x0000ff;
+    let data = vec![color;(image1.extent().width * image1.extent().height) as usize];
+    let mut dst = vec![0u32;(image1.extent().width * image1.extent().height) as usize];
+    {
+        let part = buffer::BufferPartition::new(&buf, size_of::<u32>() as u64 * image1.extent().width as u64 * image1.extent().height as u64, None).unwrap();
+        part.copy_from_ram(&data).unwrap();
+        part.copy_to_image_internal(&resource1, None).unwrap();
+    }
+
+    {
+        image1.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
+        resource1.copy_to_image_internal(&resource2).unwrap();
+        let part = buffer::BufferPartition::new(&buf, size_of::<u32>() as u64 * image2.extent().width as u64 * image2.extent().height as u64, None).unwrap();
+        image2.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
+        resource2.copy_to_buffer_internal(&part, None).unwrap();
+        part.copy_to_ram(&mut dst).unwrap();
+    }
     println!("{:?}", dst);
 
 
@@ -58,6 +77,7 @@ fn main(){
                     flow.set_exit();
                 }
                 if let WindowEvent::Resized(_) = event{
+                    
                     swapchain.resize();
                 }
             },
@@ -65,7 +85,7 @@ fn main(){
                 
                 let image = swapchain.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<Device<Instance>>>>, Some(&aquire));
                 let wait = [&aquire];
-                swapchain.present(image, Some(&wait));
+                swapchain.wait_present(image, Some(&wait));
             }
             _ => {}
         }

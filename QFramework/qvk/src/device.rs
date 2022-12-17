@@ -278,6 +278,9 @@ impl<I:InstanceProvider> DeviceProvider for Device<I>{
 
 impl<I:InstanceProvider> Drop for Device<I>{
     fn drop(&mut self) {
+        unsafe{
+            self.device.device_wait_idle().unwrap();
+        }
         if let Some(s) = self.surface{
             debug!("Destroyed surface {:?}", s);
             unsafe{self.surface_loader.destroy_surface(s, None)};

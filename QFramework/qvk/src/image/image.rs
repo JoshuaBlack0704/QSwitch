@@ -22,7 +22,14 @@ pub trait ImageProvider{
     /// Creates and uses an internal command pool and buffer
     fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>);
     fn image(&self) -> &vk::Image;
-    fn layout(&self) -> vk::ImageLayout;
+    fn layout(&self) -> Arc<Mutex<vk::ImageLayout>>;
+    fn mip_levels(&self) -> u32;
+    fn array_layers(&self) -> u32;
+    fn extent(&self) -> vk::Extent3D;
+}
+
+pub trait UsesImageProvider<I:ImageProvider>{
+    fn image_provider(&self) -> &Arc<I>;
 }
 
 pub trait ImageSettingsProvider{
@@ -40,17 +47,35 @@ pub trait ImageSettingsProvider{
     fn preload_layout(&self) -> Option<vk::ImageLayout>;
 }
 
+#[derive(Clone)]
 pub enum ImageCreateExtensions{
     
 }
 
+#[derive(Debug)]
 pub enum ImageCreateError{
     Memory(partitionsystem::PartitionError),
     Vulkan(vk::Result),
 }
 
+pub struct SettingsProvider{
+    extensions:  Option<Vec<ImageCreateExtensions>>,
+    create_flags:  Option<vk::ImageCreateFlags>,
+    image_type:  vk::ImageType,
+    format:  vk::Format,
+    extent:  vk::Extent3D,
+    mip_levels:  u32,
+    array_layers:  u32,
+    samples:  vk::SampleCountFlags,
+    tiling:  vk::ImageTiling,
+    usage:  vk::ImageUsageFlags,
+    share:  Option<Vec<u32>>,
+    preload_layout:  Option<vk::ImageLayout>,
+    
+}
+
 impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
-    pub fn new<S:ImageSettingsProvider>(device_provider: &Arc<D>, memory_provider: &Arc<M>,settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
+    pub fn new<S:ImageSettingsProvider>(device_provider: &Arc<D>, memory_provider: &Arc<M>, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         let extensions = settings.extensions();
         if let Some(mut ext) = extensions{
@@ -94,13 +119,18 @@ impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
         }
         let memory_partition = memory_partition.unwrap();
 
+        let res = unsafe{device.bind_image_memory(image, *memory_provider.memory(), memory_partition.offset)};
+        if let Err(e) = res{
+            return Err(ImageCreateError::Vulkan(e));
+        }
+
         let image = Image{
             device: device_provider.clone(),
             memory: Some(memory_provider.clone()),
             _partition: Some(memory_partition),
             image,
             create_info: info.clone(),
-            current_layout: Mutex::new(info.initial_layout),
+            current_layout: Arc::new(Mutex::new(info.initial_layout)),
         };
 
         if let Some(layout) = settings.preload_layout(){
@@ -118,7 +148,7 @@ impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
                 _partition: None,
                 image,
                 create_info: vk::ImageCreateInfo::builder().mip_levels(1).array_layers(1).build(),
-                current_layout: Mutex::new(vk::ImageLayout::UNDEFINED),
+                current_layout: Arc::new(Mutex::new(vk::ImageLayout::UNDEFINED)),
             }
         )
     }
@@ -136,6 +166,9 @@ impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
         subresources: Option<vk::ImageSubresourceRange>,
     ) {
         let mut lock = self.current_layout.lock().unwrap();
+        if *lock == new_layout{
+            return;
+        }
         let mut image_transition = vk::ImageMemoryBarrier2::builder();
         if let Some(stage) = src_stage{
             image_transition = image_transition.src_stage_mask(stage);
@@ -187,12 +220,18 @@ impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
         let info = vk::DependencyInfo::builder()
         .image_memory_barriers(&image_transition);
 
+        debug!("Transitioning layer range {:?} of image {:?} from layout {:?} to layout {:?}", image_transition[0].subresource_range, self.image, *lock, new_layout);
+
         unsafe{self.device.device().cmd_pipeline_barrier2(*cmd, &info)};
 
         *lock = new_layout;
     }
 
     fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>) {
+        let old_layout = *self.layout().lock().unwrap();
+        if old_layout == new_layout{
+            return;
+        }
         let settings = commandpool::SettingsProvider::new(self.device.grahics_queue().unwrap().1);
         let pool = CommandPool::new(&settings, &self.device).unwrap();
         let mut settings = commandbuffer::SettingsProvider::default();
@@ -220,9 +259,20 @@ impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
         &self.image
     }
 
-    fn layout(&self) -> vk::ImageLayout {
-        let lock = self.current_layout.lock().unwrap();
-        *lock
+    fn layout(&self) -> Arc<Mutex<vk::ImageLayout>> {
+        self.current_layout.clone()
+    }
+
+    fn mip_levels(&self) -> u32 {
+        self.create_info.mip_levels
+    }
+
+    fn array_layers(&self) -> u32 {
+        self.create_info.array_layers
+    }
+
+    fn extent(&self) -> vk::Extent3D {
+        self.create_info.extent
     }
 
 }
@@ -241,5 +291,101 @@ impl<D:DeviceProvider, M:MemoryProvider> Drop for Image<D,M>{
 impl<D:DeviceProvider, M:MemoryProvider> UsesDeviceProvider<D> for Image<D,M>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
+    }
+}
+
+impl SettingsProvider{
+    pub fn new(
+        extensions:  Option<Vec<ImageCreateExtensions>>,
+        create_flags:  Option<vk::ImageCreateFlags>,
+        image_type:  vk::ImageType,
+        format:  vk::Format,
+        extent:  vk::Extent3D,
+        mip_levels:  u32,
+        array_layers:  u32,
+        samples:  vk::SampleCountFlags,
+        tiling:  vk::ImageTiling,
+        usage:  vk::ImageUsageFlags,
+        share:  Option<Vec<u32>>,
+        preload_layout:  Option<vk::ImageLayout>,
+    ) -> SettingsProvider {
+        Self{
+            extensions,
+            create_flags,
+            image_type,
+            format,
+            extent,
+            mip_levels,
+            array_layers,
+            samples,
+            tiling,
+            usage,
+            share,
+            preload_layout,
+        }
+        
+    }
+
+    pub fn new_simple(
+        format:  vk::Format,
+        extent:  vk::Extent3D,
+        usage:  vk::ImageUsageFlags,
+        preload_layout:  Option<vk::ImageLayout>,
+    )
+-> SettingsProvider     {
+        Self::new(None, None, vk::ImageType::TYPE_2D, format, extent, 1, 1, vk::SampleCountFlags::TYPE_1, vk::ImageTiling::OPTIMAL, usage, None, preload_layout)
+    }
+}
+
+impl ImageSettingsProvider for SettingsProvider{
+    fn extensions(&self) -> Option<Vec<ImageCreateExtensions>> {
+        self.extensions.clone()
+    }
+
+    fn create_flags(&self) -> Option<vk::ImageCreateFlags> {
+        self.create_flags
+    }
+
+    fn image_type(&self) -> vk::ImageType {
+        self.image_type
+    }
+
+    fn format(&self) -> vk::Format {
+        self.format
+    }
+
+    fn extent(&self) -> vk::Extent3D {
+        self.extent
+    }
+
+    fn mip_levels(&self) -> u32 {
+        self.mip_levels
+    }
+
+    fn array_layers(&self) -> u32 {
+        self.array_layers
+    }
+
+    fn samples(&self) -> vk::SampleCountFlags {
+        self.samples
+    }
+
+    fn tiling(&self) -> vk::ImageTiling {
+        self.tiling
+    }
+
+    fn usage(&self) -> vk::ImageUsageFlags {
+        self.usage
+    }
+
+    fn share(&self) -> Option<&[u32]> {
+        if let Some(indices) = &self.share{
+            return Some(&indices);
+        }
+        None
+    }
+
+    fn preload_layout(&self) -> Option<vk::ImageLayout> {
+        self.preload_layout
     }
 }

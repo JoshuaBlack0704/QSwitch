@@ -3,19 +3,22 @@ use std::{sync::{Arc, Mutex}, mem::size_of};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}, memory::{Partition, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{PartitionError, PartitionProvider}, buffer::buffer::BufferAlignmentType}};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}, memory::{Partition, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{PartitionError, PartitionProvider}, buffer::buffer::BufferAlignmentType}, image::{imageresource::ImageSubresourceProvider, image::{UsesImageProvider, ImageProvider}}};
 
 use super::{buffer::{BufferProvider, UsesBufferProvider}, BufferPartition};
 
 
-pub trait BufferPartitionProvider<B:BufferProvider>{
+pub trait BufferPartitionProvider{
     fn get_partition(&self) -> &Partition;
     fn device_addr(&self) -> vk::DeviceSize;
     fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferPartitionMemOpError>;
     fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferPartitionMemOpError>;
-    fn copy_to_partition<BP:BufferPartitionProvider<B> + UsesBufferProvider<B>>(&self, cmd: &vk::CommandBuffer, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError>;
-    fn copy_to_partition_internal<BP:BufferPartitionProvider<B> + UsesBufferProvider<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError>;
-    
+    fn copy_to_partition<B:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<B>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError>;
+    fn copy_to_partition_internal<B:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError>;
+    ///Addressing is (bufferRowLength, bufferImageHeight)
+    fn copy_to_image<I:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    ///Addressing is (bufferRowLength, bufferImageHeight)
+    fn copy_to_image_internal<I:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
 
 #[derive(Clone, Debug)]
@@ -58,7 +61,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
     }
 }
 
-impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider> BufferPartitionProvider<B> for BufferPartition<I,D,M,B,P>{
+impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider> BufferPartitionProvider for BufferPartition<I,D,M,B,P>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
@@ -86,7 +89,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         .size(vk::WHOLE_SIZE)
         .build()];
         
-        debug!("Copying {:?} bytes to buffer {:?} at offset {:?}", needed_size, *self.buffer.buffer(), target_offset);
+        debug!("Copying {:?} bytes to buffer {:?} at offset {:?} from ram", needed_size, *self.buffer.buffer(), target_offset);
         unsafe{
             let device = self.buffer.device_provider().device();
             let dst = device.map_memory(*target_memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap();
@@ -113,7 +116,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         .size(vk::WHOLE_SIZE)
         .build()];
         
-        debug!("Copying {:?} bytes from buffer {:?} at offset {:?}", needed_size, *self.buffer.buffer(), target_offset);
+        debug!("Copying {:?} bytes from buffer {:?} at offset {:?} to ram", needed_size, *self.buffer.buffer(), target_offset);
         unsafe{
             let device = self.buffer.device_provider().device();
             let src = device.map_memory(*target_memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap();
@@ -126,7 +129,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         Ok(())
     }
 
-    fn copy_to_partition<BP:BufferPartitionProvider<B> + UsesBufferProvider<B>>(&self, cmd: &vk::CommandBuffer, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
+    fn copy_to_partition<Buf:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<Buf>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
         if self.partition.size > dst.get_partition().size(){
             return Err(BufferPartitionMemOpError::NoSpace);
         }
@@ -139,12 +142,12 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
 
         unsafe{
             let device = self.buffer.device_provider().device();
-            device.cmd_copy_buffer(*cmd, *self.buffer.buffer(), *dst.buffer_provider().buffer(), &op);
+            device.cmd_copy_buffer(**cmd, *self.buffer.buffer(), *dst.buffer_provider().buffer(), &op);
         }
         Ok(())
     }
 
-    fn copy_to_partition_internal<BP:BufferPartitionProvider<B> + UsesBufferProvider<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
+    fn copy_to_partition_internal<Buf:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<Buf>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
         let settings = commandpool::SettingsProvider::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
         let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
@@ -154,6 +157,57 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
             let device = self.buffer.device_provider().device();
             device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
             self.copy_to_partition(&cmd, dst)?;
+            device.end_command_buffer(*cmd).unwrap();
+        }
+        let mut submit = SubmitSet::new();
+        submit.add_cmd(cmd);
+        let submit = [submit];
+        let queue = Queue::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
+        queue.wait_submit(&submit).expect("Could not execute transfer");
+        Ok(())
+    }
+
+    fn copy_to_image<Img:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+        let buffer_offset = self.partition.offset();
+        let mut addressing = (0,0);
+        if let Some(a) = buffer_addressing{
+            addressing = a;
+        }
+
+        let subresource = dst.subresource();
+        let offset = dst.offset();
+        let extent = dst.extent();
+        let image = dst.image_provider().image();
+        let layout = dst.layout();
+        
+        let info = [vk::BufferImageCopy::builder()
+        .buffer_offset(buffer_offset)
+        .buffer_row_length(addressing.0)
+        .buffer_image_height(addressing.1)
+        .image_subresource(subresource)
+        .image_offset(offset)
+        .image_extent(extent)
+        .build()];
+
+        unsafe{
+            let device = self.buffer.device_provider().device();
+            debug!("Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}", self.partition.size, *self.buffer.buffer(), dst.subresource(), *image);
+            device.cmd_copy_buffer_to_image(**cmd, *self.buffer.buffer(), *image, *layout, &info);
+        }
+
+        Ok(())
+    }
+
+    fn copy_to_image_internal<Img:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<Img>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+        let settings = commandpool::SettingsProvider::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
+        let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
+        let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
+        let cmd_set = CommandBufferSet::new(&settings, self.buffer.device_provider(), &pool);
+        let cmd = cmd_set.next_cmd();
+        unsafe{
+            let device = self.buffer.device_provider().device();
+            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
+            self.copy_to_image(&cmd, dst, buffer_addressing)?;
             device.end_command_buffer(*cmd).unwrap();
         }
         let mut submit = SubmitSet::new();
