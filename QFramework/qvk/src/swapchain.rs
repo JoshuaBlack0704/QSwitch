@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{Swapchain, device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, sync, image::ImageProvider, imageview::ImageViewProvider, memory::{Memory, PartitionSystem}, Image, ImageView};
+use crate::{sync::{semaphore::SemaphoreProvider, fence::FenceProvider}, image::{Image, ImageView, image::ImageProvider, imageview::ImageViewProvider}, memory::{Memory, PartitionSystem}, instance::{InstanceProvider, UsesInstanceProvider}, device::{DeviceProvider, UsesDeviceProvider}, Swapchain};
+
 
 pub trait SwapchainSettingsProvider{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
@@ -21,8 +22,8 @@ pub trait SwapchainSettingsProvider{
 }
 
 pub trait SwapchainProvider{
-    fn present<S:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
-    fn aquire_next_image<F:sync::fence::FenceProvider, S:sync::semaphore::SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
+    fn present<S:SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
+    fn aquire_next_image<F:FenceProvider, S:SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
     fn resize(&self);
 }
 
@@ -196,7 +197,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
 }
 
 impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>{
-    fn present<Sem:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
+    fn present<Sem:SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
 
         
         let mut info = vk::PresentInfoKHR::builder();
@@ -227,7 +228,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         *swapchain_lock = new_swapchain;
     }
 
-    fn aquire_next_image<F:sync::fence::FenceProvider, Sem:sync::semaphore::SemaphoreProvider>(&self, timeout: u64, fence: Option<&Arc<F>>, semaphore: Option<&Arc<Sem>>) -> u32{
+    fn aquire_next_image<F:FenceProvider, Sem:SemaphoreProvider>(&self, timeout: u64, fence: Option<&Arc<F>>, semaphore: Option<&Arc<Sem>>) -> u32{
         let mut present_fence = vk::Fence::null();
         let mut present_semaphore = vk::Semaphore::null();
 

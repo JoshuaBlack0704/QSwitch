@@ -3,9 +3,10 @@ use std::{sync::{Arc, Mutex}, mem::size_of};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}, memory::{Partition, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{PartitionError, PartitionProvider}, buffer::buffer::BufferAlignmentType}};
 
-use super::{BufferPartition, PartitionSystem, Partition, buffer::{self, BufferProvider, UsesBufferProvider}, partitionsystem::{PartitionError, PartitionProvider}, memory::{MemoryProvider, UsesMemoryProvider}};
+use super::{buffer::{BufferProvider, UsesBufferProvider}, BufferPartition};
+
 
 pub trait BufferPartitionProvider<B:BufferProvider>{
     fn get_partition(&self) -> &Partition;
@@ -29,10 +30,10 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         
         let p;
         if let Some(a) = custom_alignment{
-            p = buffer_provider.partition(size, buffer::BufferAlignmentType::Aligned(a));
+            p = buffer_provider.partition(size, BufferAlignmentType::Aligned(a));
         }
         else{
-            p = buffer_provider.partition(size, buffer::BufferAlignmentType::Free);
+            p = buffer_provider.partition(size, BufferAlignmentType::Free);
         }
 
         if let Err(e) = p{

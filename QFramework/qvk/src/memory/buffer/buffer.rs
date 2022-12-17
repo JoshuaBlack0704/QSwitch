@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::{DeviceProvider, UsesDeviceProvider};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, memory::{Partition, partitionsystem::{PartitionError, self, PartitionProvider}, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem}};
 
-use super::{Buffer, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition};
+use super::Buffer;
+
 
 pub trait BufferSettingsProvider{
     fn size(&self) -> vk::DeviceSize;

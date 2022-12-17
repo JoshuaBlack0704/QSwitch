@@ -4,10 +4,8 @@ use ash::{self, vk};
 use commandbuffer::CommandBufferSettingsProvider;
 use commandpool::{CommandPoolSettingsProvider, CommandPoolProvider};
 use device::DeviceProvider;
-use image::ImageProvider;
-use imageview::ImageViewProvider;
+use image::{image::ImageProvider, imageview::ImageViewProvider};
 use instance::InstanceProvider;
-use memory::{Partition, memory::MemoryProvider};
 use swapchain::SwapchainSettingsProvider;
 
 /// The Provider pattern
@@ -69,20 +67,5 @@ pub struct Swapchain<I:InstanceProvider, D: DeviceProvider, S: SwapchainSettings
 pub mod sync;
 
 pub mod image;
-pub struct Image<D:DeviceProvider, M:MemoryProvider>{
-    device: Arc<D>,
-    memory: Option<Arc<M>>,
-    _partition: Option<Partition>,
-    image: vk::Image,
-    create_info: vk::ImageCreateInfo,
-    current_layout: Mutex<vk::ImageLayout>,
-}
-
-pub mod imageview;
-pub struct ImageView<D:DeviceProvider, Img:ImageProvider>{
-    _device: Arc<D>,
-    _image: Arc<Img>,
-    _view: vk::ImageView,
-}
 
 pub mod queue;

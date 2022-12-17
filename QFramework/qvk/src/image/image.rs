@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{Image, device::{DeviceProvider, UsesDeviceProvider}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryProvider}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoProvider, queue::QueueProvider}};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryProvider}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoProvider, queue::QueueProvider}};
+
+use super::Image;
 
 pub trait ImageProvider{
     /// Returns the old layout

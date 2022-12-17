@@ -1,4 +1,6 @@
-use crate::{device::DeviceProvider, image::ImageProvider, ImageView};
+use crate::{device::DeviceProvider, image::ImageProvider};
+
+use super::ImageView;
 
 pub trait ImageViewProvider{
     

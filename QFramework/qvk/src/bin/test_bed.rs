@@ -1,7 +1,7 @@
 use std::{mem::size_of, sync::Arc};
 
 use ash::vk;
-use qvk::{self, device::{DeviceProvider, self}, commandbuffer, CommandBufferSet, commandpool, CommandPool, Device, instance, Instance, memory::{self, bufferpartition::BufferPartitionProvider}, swapchain::{self, SwapchainProvider}, Swapchain, sync};
+use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, swapchain::{self, SwapchainProvider}, Swapchain, commandpool, CommandPool, commandbuffer, CommandBufferSet, memory::{self, buffer::bufferpartition::BufferPartitionProvider}, sync};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent}};
 
@@ -35,12 +35,12 @@ fn main(){
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
     let mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
     
-    let settings = memory::buffer::SettingsProvider::new(16000*2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
-    let buf = memory::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
+    let settings = memory::buffer::buffer::SettingsProvider::new(16000*2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
+    let buf = memory::buffer::Buffer::new(&settings, &device, &mem).expect("Could not bind buffer");
     
     let data = [5u64;200];
-    let part1 = memory::BufferPartition::new(&buf, (data.len() * size_of::<u64>()) as u64, None).expect("Could not get partition");
-    let part2 = memory::BufferPartition::new(&buf, (data.len() * size_of::<u64>()) as u64, None).expect("Could not get partition");
+    let part1 = memory::buffer::BufferPartition::new(&buf, (data.len() * size_of::<u64>()) as u64, None).expect("Could not get partition");
+    let part2 = memory::buffer::BufferPartition::new(&buf, (data.len() * size_of::<u64>()) as u64, None).expect("Could not get partition");
     let mut dst = [20u64;200];
     part1.copy_from_ram(&data).unwrap();
     part1.copy_to_partition_internal(&part2).expect("Could not copy");
