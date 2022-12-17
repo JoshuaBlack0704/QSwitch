@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}, collections::{HashSet, VecDeque}};
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use log::info;
@@ -11,9 +11,8 @@ pub trait CommandBufferSettingsProvider{
     fn cmd_reset_flags(&self) -> Option<vk::CommandBufferResetFlags>;
 }
 pub trait CommandBufferProvider{
-    fn next_cmd(&self) -> vk::CommandBuffer;
-    fn return_cmd(&self, cmd: vk::CommandBuffer);
-    fn reset_cmd(&self, cmd: &vk::CommandBuffer);
+    fn next_cmd(&self) -> Arc<vk::CommandBuffer>;
+    fn reset_cmd(&self, cmd: &Arc<vk::CommandBuffer>);
 }
 
 pub enum CopyOpError{
@@ -34,54 +33,44 @@ impl<D: DeviceProvider, P: CommandPoolProvider, S: CommandBufferSettingsProvider
                 device: device_provider.clone(),
                 cmdpool: cmdpool_provider.clone(),
                 settings: settings.clone(),
-                cmds: Mutex::new(HashSet::new()),
-                free_cmds: Mutex::new(VecDeque::new()), }
+                cmds: Mutex::new(vec![]),
+            }
         )
     }
 }
 
 impl<D:DeviceProvider, P:CommandPoolProvider, S:CommandBufferSettingsProvider> CommandBufferProvider for CommandBufferSet<D,P,S>{
-    fn next_cmd(&self) -> vk::CommandBuffer {
+    fn next_cmd(&self) -> Arc<vk::CommandBuffer> {
         // First we need to see if there are any cmds available
-        let mut cmds_set = self.cmds.lock().unwrap();
-        let mut free_cmds = self.free_cmds.lock().unwrap();
-        
-        if let Some(cmd) = free_cmds.pop_front(){
-            return cmd;
+        let mut cmds = self.cmds.lock().unwrap();
+
+        //All we do is loop through cmds and see if we have a free cmd
+        for cmd in cmds.iter(){
+            if Arc::strong_count(cmd) == 1{
+                //If we do we return it
+                return cmd.clone();
+            }
         }
-        
+      
         // If not we need to make a new batch
         let mut alloc_builder = vk::CommandBufferAllocateInfo::builder();
         alloc_builder = alloc_builder.command_pool(*self.cmdpool.cmdpool());
         alloc_builder = alloc_builder.command_buffer_count(self.settings.cmd_batch_size());
         alloc_builder = alloc_builder.level(self.settings.cmd_level());
-        let cmds = unsafe{self.device.device().allocate_command_buffers(&alloc_builder).expect("Could not allocate command buffers")};
+        let new_cmds = unsafe{self.device.device().allocate_command_buffers(&alloc_builder).expect("Could not allocate command buffers")};
         // Now the book keeping and queueing
-        for cmd in cmds{
+        for cmd in new_cmds{
             info!("Created command buffer {:?}", cmd);
-            cmds_set.insert(cmd);
-            free_cmds.push_back(cmd);
+            cmds.push(Arc::new(cmd));
         }
         // Now we get a newly queued element
-        free_cmds.pop_front().unwrap()
-        
-    }
-
-    fn return_cmd(&self, cmd: vk::CommandBuffer) {
-        let cmds_set = self.cmds.lock().unwrap();
-        let mut free_cmds = self.free_cmds.lock().unwrap();
-        // First we checl if this command belongs here
-        if let None = cmds_set.get(&cmd){
-            panic!("Command buffer {:?} returned to wrong set", cmd);
-        }
-        
-        // If it does we add it back to the queue
-        free_cmds.push_back(cmd);
+        cmds.last().unwrap().clone()
+                
     }
 
     /// This requires flags to be set on the parent command pool
-    fn reset_cmd(&self, cmd: &vk::CommandBuffer) {
-        unsafe{self.device.device().reset_command_buffer(*cmd, self.settings.cmd_reset_flags().expect("No command buffer reset flags provided"))}.expect("Failed to reset command buffer");
+    fn reset_cmd(&self, cmd: &Arc<vk::CommandBuffer>) {
+        unsafe{self.device.device().reset_command_buffer(**cmd, self.settings.cmd_reset_flags().expect("No command buffer reset flags provided"))}.expect("Failed to reset command buffer");
     }
 }
 

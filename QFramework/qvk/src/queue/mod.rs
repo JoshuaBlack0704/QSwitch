@@ -2,14 +2,15 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{device::DeviceProvider, sync::semaphore::SemaphoreProvider};
+use crate::device::DeviceProvider;
 
 
 pub mod submit;
-pub struct SubmitSet<'a, S:SemaphoreProvider>{
-    wait_semaphores: Vec<S>,
-    cmds: Vec<&'a vk::CommandBuffer>,
-    signal_semaphores: Vec<S>,
+pub struct SubmitSet{
+    wait_semaphores: Vec<vk::SemaphoreSubmitInfo>,
+    cmds: Vec<Arc<vk::CommandBuffer>>,
+    live_cmds: Vec<vk::CommandBufferSubmitInfo>,
+    signal_semaphores: Vec<vk::SemaphoreSubmitInfo>,
 }
 
 

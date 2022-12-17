@@ -3,7 +3,7 @@ use std::{sync::{Arc, Mutex}, mem::size_of};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}};
 
 use super::{BufferPartition, PartitionSystem, Partition, buffer::{self, BufferProvider, UsesBufferProvider}, partitionsystem::{PartitionError, PartitionProvider}, memory::{MemoryProvider, UsesMemoryProvider}};
 
@@ -19,8 +19,8 @@ pub trait BufferPartitionProvider<B:BufferProvider>{
 
 #[derive(Clone, Debug)]
 pub enum BufferPartitionMemOpError{
-    NoSrcData,
     NoSpace,
+    VulkanError(vk::Result),
 }
 
 
@@ -144,7 +144,23 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
     }
 
     fn copy_to_partition_internal<BP:BufferPartitionProvider<B> + UsesBufferProvider<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
-        todo!()
+        let settings = commandpool::SettingsProvider::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
+        let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
+        let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
+        let cmd_set = CommandBufferSet::new(&settings, self.buffer.device_provider(), &pool);
+        let cmd = cmd_set.next_cmd();
+        unsafe{
+            let device = self.buffer.device_provider().device();
+            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
+            self.copy_to_partition(&cmd, dst)?;
+            device.end_command_buffer(*cmd).unwrap();
+        }
+        let mut submit = SubmitSet::new();
+        submit.add_cmd(cmd);
+        let submit = [submit];
+        let queue = Queue::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
+        queue.wait_submit(&submit).expect("Could not execute transfer");
+        Ok(())
     }
 
 

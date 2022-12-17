@@ -1,4 +1,4 @@
-use std::{sync::{Arc, Mutex}, collections::{HashSet, VecDeque}};
+use std::sync::{Arc, Mutex};
 
 use ash::{self, vk};
 use commandbuffer::CommandBufferSettingsProvider;
@@ -48,8 +48,7 @@ pub struct CommandBufferSet<D: DeviceProvider, P: CommandPoolProvider, S: Comman
     device: Arc<D>,
     cmdpool: Arc<P>,
     settings: S,
-    cmds: Mutex<HashSet<vk::CommandBuffer>>,
-    free_cmds: Mutex<VecDeque<vk::CommandBuffer>>,
+    cmds: Mutex<Vec<Arc<vk::CommandBuffer>>>,
 }
 
 pub mod memory;

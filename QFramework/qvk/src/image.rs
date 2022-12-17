@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{Image, device::{DeviceProvider, UsesDeviceProvider}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryProvider}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, sync::{self, fence::FenceProvider}};
+use crate::{Image, device::{DeviceProvider, UsesDeviceProvider}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryProvider}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoProvider, queue::QueueProvider}};
 
 pub trait ImageProvider{
     /// Returns the old layout
@@ -198,22 +198,20 @@ impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
         let bset = CommandBufferSet::new(&settings, &self.device, &pool);
         let cmd = bset.next_cmd();
         let begin = vk::CommandBufferBeginInfo::default();
-        unsafe{self.device.device().begin_command_buffer(cmd, &begin).unwrap()};
-        if let Some(range) = subresources{
-            self.transition(&cmd, new_layout, None, None, None, None,Some(range));
-        }
-        else{
-            self.transition(&cmd, new_layout, None, None, None, None, None);
-        }
-        unsafe{self.device.device().end_command_buffer(cmd)}.unwrap();
-        let fence = sync::Fence::new(&self.device, false);
-        let queue = self.device.grahics_queue().unwrap().0;
-        let cmd = [cmd];
-        let submit = [vk::SubmitInfo::builder().command_buffers(&cmd).build()];
         unsafe{
-            self.device.device().queue_submit(queue, submit.as_slice(), *fence.fence()).unwrap();
+            self.device.device().begin_command_buffer(*cmd, &begin).unwrap()};
+            if let Some(range) = subresources{
+                self.transition(&cmd, new_layout, None, None, None, None,Some(range));
+            }
+            else{
+                self.transition(&cmd, new_layout, None, None, None, None, None);
         }
-        fence.wait(None);
+        unsafe{self.device.device().end_command_buffer(*cmd)}.unwrap();
+        let mut submit = SubmitSet::new();
+        submit.add_cmd(cmd);
+        let submit = [submit];
+        let queue = crate::queue::Queue::new(self.device_provider(), vk::QueueFlags::GRAPHICS).unwrap();
+        queue.wait_submit(&submit).unwrap();
     }
 
     fn image(&self) -> &vk::Image {

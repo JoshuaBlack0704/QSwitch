@@ -21,7 +21,7 @@ pub trait SwapchainSettingsProvider{
 }
 
 pub trait SwapchainProvider{
-    fn present<S:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[S]>);
+    fn present<S:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
     fn aquire_next_image<F:sync::fence::FenceProvider, S:sync::semaphore::SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
     fn resize(&self);
 }
@@ -196,7 +196,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
 }
 
 impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>{
-    fn present<Sem:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[Sem]>) {
+    fn present<Sem:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
 
         
         let mut info = vk::PresentInfoKHR::builder();

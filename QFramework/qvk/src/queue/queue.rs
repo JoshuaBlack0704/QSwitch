@@ -19,7 +19,7 @@ impl<D:DeviceProvider> Queue<D>{
             Some(q) => {
                 return Some(Self{
                     device: device_provider.clone(),
-                    queue_family: q.1,
+                    _queue_family: q.1,
                     queue: q.0,
                 });
             },
@@ -38,7 +38,7 @@ impl<D:DeviceProvider> UsesDeviceProvider<D> for Queue<D>{
 
 impl<D:DeviceProvider> QueueProvider for Queue<D>{
     fn submit<S:SubmitInfoProvider, F:FenceProvider>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
-        let submits:Vec<vk::SubmitInfo> = submits.iter().map(|s| s.info()).collect();
+        let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
         let device = self.device.device();
 
@@ -47,7 +47,7 @@ impl<D:DeviceProvider> QueueProvider for Queue<D>{
             if let Some(f) = fence{
                 _fence = *f.fence();
             }
-            device.queue_submit(self.queue, &submits, _fence)
+            device.queue_submit2(self.queue, &submits, _fence)
         }
     }
 
