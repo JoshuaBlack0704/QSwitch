@@ -1,7 +1,14 @@
 use std::{sync::{Arc, Mutex}, collections::{HashSet, VecDeque}};
 
 use ash::{self, vk};
-use memory::Partition;
+use commandbuffer::CommandBufferSettingsProvider;
+use commandpool::{CommandPoolSettingsProvider, CommandPoolProvider};
+use device::DeviceProvider;
+use image::ImageProvider;
+use imageview::ImageViewProvider;
+use instance::InstanceProvider;
+use memory::{Partition, memory::MemoryProvider};
+use swapchain::SwapchainSettingsProvider;
 
 /// The Provider pattern
 /// The framework will provide complete abstraction and zero dependence by using a provider pattern
@@ -21,7 +28,7 @@ pub struct Instance{
 }
 
 pub mod device;
-pub struct Device<I: instance::InstanceProvider>{
+pub struct Device<I: InstanceProvider>{
     instance: Arc<I>,
     surface: Option<vk::SurfaceKHR>,
     surface_loader: ash::extensions::khr::Surface,
@@ -31,13 +38,13 @@ pub struct Device<I: instance::InstanceProvider>{
 }
 
 pub mod commandpool;
-pub struct CommandPool<D: device::DeviceProvider, S: commandpool::CommandPoolSettingsProvider>{
+pub struct CommandPool<D: DeviceProvider, S: CommandPoolSettingsProvider>{
     device: Arc<D>,
     settings: S,
     command_pool: vk::CommandPool,
 }
 pub mod commandbuffer;
-pub struct CommandBufferSet<D: device::DeviceProvider, P: commandpool::CommandPoolProvider, S: commandbuffer::CommandBufferSettingsProvider>{
+pub struct CommandBufferSet<D: DeviceProvider, P: CommandPoolProvider, S: CommandBufferSettingsProvider>{
     device: Arc<D>,
     cmdpool: Arc<P>,
     settings: S,
@@ -48,7 +55,7 @@ pub struct CommandBufferSet<D: device::DeviceProvider, P: commandpool::CommandPo
 pub mod memory;
 
 pub mod swapchain;
-pub struct Swapchain<I:instance::InstanceProvider, D: device::DeviceProvider, S: swapchain::SwapchainSettingsProvider, Img:image::ImageProvider, ImgV: imageview::ImageViewProvider>{
+pub struct Swapchain<I:InstanceProvider, D: DeviceProvider, S: SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider>{
     _instance: Arc<I>,
     device: Arc<D>,
     _settings: S,
@@ -63,7 +70,7 @@ pub struct Swapchain<I:instance::InstanceProvider, D: device::DeviceProvider, S:
 pub mod sync;
 
 pub mod image;
-pub struct Image<D:device::DeviceProvider, M:memory::memory::MemoryProvider>{
+pub struct Image<D:DeviceProvider, M:MemoryProvider>{
     device: Arc<D>,
     memory: Option<Arc<M>>,
     _partition: Option<Partition>,
@@ -73,9 +80,10 @@ pub struct Image<D:device::DeviceProvider, M:memory::memory::MemoryProvider>{
 }
 
 pub mod imageview;
-pub struct ImageView<D:device::DeviceProvider, I:image::ImageProvider>{
+pub struct ImageView<D:DeviceProvider, Img:ImageProvider>{
     _device: Arc<D>,
-    _image: Arc<I>,
+    _image: Arc<Img>,
     _view: vk::ImageView,
 }
 
+pub mod queue;

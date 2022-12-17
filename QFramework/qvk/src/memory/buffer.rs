@@ -3,9 +3,9 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device;
+use crate::device::{DeviceProvider, UsesDeviceProvider};
 
-use super::{Buffer, memory, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition};
+use super::{Buffer, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{self, PartitionProvider, PartitionError}, Partition};
 
 pub trait BufferSettingsProvider{
     fn size(&self) -> vk::DeviceSize;
@@ -13,12 +13,17 @@ pub trait BufferSettingsProvider{
     fn extensions(&self) -> Option<Vec<BufferCreateExtension>>;
     fn usage(&self) -> vk::BufferUsageFlags;
     fn share(&self) -> Option<Vec<u32>>;
-    
 }
 pub trait BufferProvider{
     fn buffer(&self) -> &vk::Buffer;
+    ///Gets the Allocation partition this buffer is stored at
     fn home_partition(&self) -> &Partition;
+    ///Partitions this buffer
     fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> ;
+}
+
+pub trait UsesBufferProvider<B:BufferProvider>{
+    fn buffer_provider(&self) -> &Arc<B>;
 }
 
 #[derive(Clone)]
@@ -48,7 +53,7 @@ pub struct SettingsProvider{
     pub share: Option<Vec<u32>>,
 }
 
-impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSystem>{
+impl<D:DeviceProvider, M:MemoryProvider> Buffer<D,M,PartitionSystem>{
     pub fn new<S:BufferSettingsProvider>(settings: &S, device_provider: &Arc<D>, memory_provider: &Arc<M>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
         // First we need to create the buffer
         let mut b_cinfo = vk::BufferCreateInfo::builder();
@@ -80,7 +85,6 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
         }
         
         let buffer = buffer.unwrap();
-        info!("Created buffer {:?}", buffer);
         let reqs:vk::MemoryRequirements = unsafe{device.get_buffer_memory_requirements(buffer)};
         let memory_partition = memory_provider.partition(reqs.size, Some(reqs.alignment));
             
@@ -89,6 +93,7 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
         }
         let memory_partition = memory_partition.unwrap();
         let offset = memory_partition.offset();
+        info!("Created buffer {:?} of size {:?} on memory {:?} at offset {:?}", buffer, settings.size(), *memory_provider.memory(), offset);
         
         // Now that we have a suitable memory partition we need to bind our buffer
         let result = unsafe{device.bind_buffer_memory(buffer, *memory_provider.memory(), offset)};
@@ -109,7 +114,7 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
         
         Ok(Arc::new(Buffer{
             device: device_provider.clone(),
-            _memory: memory_provider.clone(),
+            memory: memory_provider.clone(),
             memory_partition,
             partition_sys: Mutex::new(PartitionSystem::new(settings.size())),
             buffer,
@@ -118,7 +123,7 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider> Buffer<D,M,PartitionSys
     }
 }
 
-impl<D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> BufferProvider for Buffer<D,M,P>{
+impl<D:DeviceProvider, M:MemoryProvider, P:PartitionProvider> BufferProvider for Buffer<D,M,P>{
 
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer
@@ -141,7 +146,7 @@ impl<D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> Bu
     }
 }
 
-impl<D:device::DeviceProvider, M:memory::MemoryProvider, P:PartitionProvider> Drop for Buffer<D,M,P>{
+impl<D:DeviceProvider, M:MemoryProvider, P:PartitionProvider> Drop for Buffer<D,M,P>{
     fn drop(&mut self) {
         debug!("Destroyed buffer {:?}", self.buffer);
         unsafe{
@@ -193,5 +198,17 @@ impl BufferSettingsProvider for SettingsProvider{
 
     fn share(&self) -> Option<Vec<u32>> {
         self.share.clone()
+    }
+}
+
+impl<D:DeviceProvider, P:PartitionProvider, M:MemoryProvider> UsesDeviceProvider<D> for Buffer<D,M,P>{
+    fn device_provider(&self) -> &Arc<D> {
+        &self.device
+    }
+}
+
+impl<D:DeviceProvider, P:PartitionProvider, M:MemoryProvider> UsesMemoryProvider<M> for Buffer<D,M,P>{
+    fn memory_provider(&self) -> &Arc<M> {
+        &self.memory
     }
 }

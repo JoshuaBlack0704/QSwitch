@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{Swapchain, device, instance, sync, image::{self, ImageProvider}, imageview, memory::{Memory, PartitionSystem}, Image, ImageView};
+use crate::{Swapchain, device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, sync, image::ImageProvider, imageview::ImageViewProvider, memory::{Memory, PartitionSystem}, Image, ImageView};
 
 pub trait SwapchainSettingsProvider{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
@@ -56,8 +56,9 @@ pub struct SettingsProvider{
     pub clipped: bool,
 }
 
-impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, Image<D,Memory<D,PartitionSystem>>, ImageView<D,Image<D,Memory<D,PartitionSystem>>>>{
-    pub fn new(instance_provider: &Arc<I>, device_provider: &Arc<D>, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>>, SwapchainCreateError>{
+impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, ImageType<D>, ImageViewType<D>>{
+    pub fn new(device_provider: &Arc<D>, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
+        let instance_provider = device_provider.instance_provider();
         let surface = device_provider.surface();
         if let None = surface{
             return Err(SwapchainCreateError::NoSurface);
@@ -194,7 +195,7 @@ impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSetting
     }
 }
 
-impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>{
+impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>>{
     fn present<Sem:sync::semaphore::SemaphoreProvider> (&self, next_image: u32, waits: Option<&[Sem]>) {
 
         
@@ -264,7 +265,7 @@ impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSetting
     }
 }
 
-impl<I:instance::InstanceProvider, D: device::DeviceProvider, S:SwapchainSettingsProvider, Img:image::ImageProvider, ImgV: imageview::ImageViewProvider> Drop for Swapchain<I,D,S,Img,ImgV>{
+impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider> Drop for Swapchain<I,D,S,Img,ImgV>{
     fn drop(&mut self) {
         debug!("Destroying swapchain {:?}", self.swapchain);
         unsafe{
@@ -370,3 +371,16 @@ impl SwapchainSettingsProvider for SettingsProvider{
         self.clipped
     }
 }
+
+impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider> UsesDeviceProvider<D> for Swapchain<I,D,S,Img,ImgV>{
+    fn device_provider(&self) -> &Arc<D> {
+        &self.device
+    }
+}
+
+impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider> UsesInstanceProvider<I> for Swapchain<I,D,S,Img,ImgV>{
+    fn instance_provider(&self) -> &Arc<I> {
+        &self._instance
+    }
+}
+

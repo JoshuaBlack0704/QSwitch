@@ -1,10 +1,10 @@
-use std::{sync::{Arc, Mutex}, collections::VecDeque};
+use std::{sync::{Arc, Mutex}, collections::VecDeque, marker::PhantomData};
 
 use ash::vk;
 
-use crate::device::{DeviceProvider, self};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}};
 
-use self::{memory::MemoryProvider, partitionsystem::PartitionProvider, buffer::BufferProvider};
+use self::{memory::{MemoryProvider, UsesMemoryProvider}, partitionsystem::PartitionProvider, buffer::BufferProvider};
 
 
 pub mod partitionsystem;
@@ -28,7 +28,7 @@ pub struct Memory<D: DeviceProvider, P: PartitionProvider>{
 pub mod buffer;
 pub struct Buffer<D: DeviceProvider, M: MemoryProvider, P: PartitionProvider>{
     device: Arc<D>,
-    _memory: Arc<M>,
+    memory: Arc<M>,
     memory_partition: Partition,
     partition_sys: Mutex<P>,
     buffer: vk::Buffer,
@@ -36,10 +36,12 @@ pub struct Buffer<D: DeviceProvider, M: MemoryProvider, P: PartitionProvider>{
 }
 
 pub mod bufferpartition;
-pub struct BufferPartition<D: device::DeviceProvider, B: BufferProvider, P:PartitionProvider>{
-    device: Arc<D>,
+pub struct BufferPartition<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B: BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider>{
     buffer: Arc<B>,
     _partition_sys: Mutex<P>,
     partition: Partition,
     _device_addr: Option<vk::DeviceAddress>,
+    _instance: PhantomData<I>,
+    _memory: PhantomData<M>,
+    _device: PhantomData<D>
 }

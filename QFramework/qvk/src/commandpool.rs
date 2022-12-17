@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{info, debug};
 
-use crate::{device, CommandPool};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, CommandPool};
 
 pub trait CommandPoolSettingsProvider{
     fn queue_family_index(&self) -> u32;
@@ -22,7 +22,7 @@ pub struct SettingsProvider{
     pub reset_flags: Option<vk::CommandPoolResetFlags>,
 }
 
-impl<D: device::DeviceProvider, S: CommandPoolSettingsProvider + Clone> CommandPool<D,S>{
+impl<D: DeviceProvider, S: CommandPoolSettingsProvider + Clone> CommandPool<D,S>{
     pub fn new(settings: &S, device_provider: &Arc<D>) -> Result<Arc<CommandPool<D,S>>, vk::Result>{
         
         let mut cmdpool_cinfo = CommandPoolCreateInfo::builder();
@@ -46,7 +46,7 @@ impl<D: device::DeviceProvider, S: CommandPoolSettingsProvider + Clone> CommandP
     }
 }
 
-impl <D: device::DeviceProvider, S: CommandPoolSettingsProvider> CommandPoolProvider for CommandPool<D,S>{
+impl <D: DeviceProvider, S: CommandPoolSettingsProvider> CommandPoolProvider for CommandPool<D,S>{
     fn cmdpool(&self) -> &vk::CommandPool {
         &self.command_pool
     }
@@ -63,7 +63,7 @@ impl <D: device::DeviceProvider, S: CommandPoolSettingsProvider> CommandPoolProv
     }
 }
 
-impl<D: device::DeviceProvider, S: CommandPoolSettingsProvider> Drop for CommandPool<D,S>{
+impl<D: DeviceProvider, S: CommandPoolSettingsProvider> Drop for CommandPool<D,S>{
     fn drop(&mut self) {
         debug!("Destroyed command pool {:?}", self.command_pool);
         unsafe{
@@ -97,4 +97,10 @@ impl CommandPoolSettingsProvider for SettingsProvider{
         self.reset_flags
     }
 
+}
+
+impl<D: DeviceProvider, S: CommandPoolSettingsProvider> UsesDeviceProvider<D> for CommandPool<D,S>{
+    fn device_provider(&self) -> &Arc<D> {
+        &self.device
+    }
 }

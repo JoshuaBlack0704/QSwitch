@@ -20,6 +20,10 @@ pub trait InstanceProvider{
     fn entry(&self) -> &ash::Entry;
 }
 
+pub trait UsesInstanceProvider<I:InstanceProvider>{
+    fn instance_provider(&self) -> &Arc<I>;
+}
+
 pub struct SettingsProvider{
     pub app_name: CString,
     pub engine_name: CString,

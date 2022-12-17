@@ -67,8 +67,13 @@ impl PartitionProvider for PartitionSystem{
         let mut res = Err(PartitionError::NoSpace);
         self.consolidate();
         let mut new_queue = VecDeque::with_capacity(self.partitions.len());
-        
+                
         for partition in self.partitions.iter(){
+            if let Ok(_) = res{
+                new_queue.push_back(partition.clone());
+                continue;
+            }
+            
             if let Some(p) = partition.try_claim(size, &alignment_fn){
                 
                 if let Some(p) = p.0{
@@ -85,7 +90,6 @@ impl PartitionProvider for PartitionSystem{
                 }
                 
                 res = Ok(p.1);
-                break;
             }
             else{
                 new_queue.push_back((*partition).clone());
@@ -109,10 +113,11 @@ impl Partition{
         }
         
         // Now we see if the best partition has enough size to hold our aligned request
-        let local_offset = 0;
+        let mut local_offset = 0;
         while local_offset < self.size(){
             if !alignment_fn(local_offset + self.offset()){
                 // We are not aligned
+                local_offset += 1;
                 continue;
             }
             if self.size() - local_offset < size{
@@ -141,11 +146,11 @@ impl Partition{
                 size,
             };
             
-            if main.offset() + main.size() < self.size(){
+            if local_offset + main.size() < self.size(){
                 // If we have left overs we need to make a new partition
                 overflow = Some(Partition{
                     tracker: Arc::new(true),
-                    offset: main.offset()+main.size(),
+                    offset: self.offset()+local_offset+main.size(),
                     size: self.size() - (local_offset+main.size()),
                 });
             }

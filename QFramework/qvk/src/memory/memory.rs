@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::DeviceProvider;
+use crate::device::{DeviceProvider, UsesDeviceProvider};
 
 use super::{Memory, partitionsystem::{PartitionProvider, self}, PartitionSystem, Partition};
 
@@ -19,6 +19,10 @@ pub trait MemorySettingsProvider{
 pub trait MemoryProvider{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
     fn memory(&self) -> &vk::DeviceMemory;
+}
+
+pub trait UsesMemoryProvider<M:MemoryProvider>{
+    fn memory_provider(&self) -> &Arc<M>;
 }
 
 #[derive(Clone)]
@@ -52,7 +56,7 @@ impl<D: DeviceProvider> Memory<D,PartitionSystem>{
         
         match memory{
             Ok(m) => {
-                info!("Created device memory {:?}", m);
+                info!("Created device memory {:?} of size {:?}", m, settings.size());
                 let memory = Memory{ 
                     device: device_provider.clone(),
                     partition_sys: Mutex::new(partition),
@@ -78,6 +82,7 @@ impl<D: DeviceProvider, P: PartitionProvider> MemoryProvider for Memory<D,P>{
     fn memory(&self) -> &vk::DeviceMemory {
         &self.memory
     }
+
 }
 
 impl<D: DeviceProvider, P: PartitionProvider> Drop for Memory<D,P>{
@@ -117,4 +122,10 @@ impl MemorySettingsProvider for SettingsProvider{
         self.extensions.clone()
     }
 
+}
+
+impl<D:DeviceProvider, P:PartitionProvider> UsesDeviceProvider<D> for Memory<D,P>{
+    fn device_provider(&self) -> &Arc<D> {
+        &self.device
+    }
 }

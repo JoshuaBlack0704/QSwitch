@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{Image, device, memory::{partitionsystem, self, Memory, PartitionSystem}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, sync::{self, fence::FenceProvider}};
+use crate::{Image, device::{DeviceProvider, UsesDeviceProvider}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryProvider}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, sync::{self, fence::FenceProvider}};
 
 pub trait ImageProvider{
     /// Returns the old layout
@@ -47,7 +47,7 @@ pub enum ImageCreateError{
     Vulkan(vk::Result),
 }
 
-impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> Image<D,M>{
+impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
     pub fn new<S:ImageSettingsProvider>(device_provider: &Arc<D>, memory_provider: &Arc<M>,settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         let extensions = settings.extensions();
@@ -122,7 +122,7 @@ impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> Image<D,M>{
     }
 }
 
-impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> ImageProvider for Image<D,M>{
+impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
     fn transition(
         &self, 
         cmd: &vk::CommandBuffer, 
@@ -224,9 +224,10 @@ impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> ImageProvider f
         let lock = self.current_layout.lock().unwrap();
         *lock
     }
+
 }
 
-impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> Drop for Image<D,M>{
+impl<D:DeviceProvider, M:MemoryProvider> Drop for Image<D,M>{
     fn drop(&mut self) {
         debug!("Destroyed image {:?}", self.image);
         if let Some(_) = self.memory{
@@ -234,5 +235,11 @@ impl<D:device::DeviceProvider, M:memory::memory::MemoryProvider> Drop for Image<
                 self.device.device().destroy_image(self.image, None);
             }
         }
+    }
+}
+
+impl<D:DeviceProvider, M:MemoryProvider> UsesDeviceProvider<D> for Image<D,M>{
+    fn device_provider(&self) -> &Arc<D> {
+        &self.device
     }
 }

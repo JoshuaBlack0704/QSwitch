@@ -5,7 +5,7 @@ use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
-use crate::{Device, instance::InstanceProvider};
+use crate::{Device, instance::{InstanceProvider, UsesInstanceProvider}};
 
 pub trait DeviceSettingsProvider{
     fn choose_device(&self) -> bool;
@@ -21,7 +21,6 @@ pub trait DeviceSettingsProvider{
 
 pub trait DeviceProvider{
     fn device(&self) -> &ash::Device;
-    fn instance(&self) -> &ash::Instance;
     fn surface(&self) -> &Option<SurfaceKHR>;
     fn physical_device(&self) -> &PhysicalDeviceData;
     fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)>;
@@ -32,6 +31,10 @@ pub trait DeviceProvider{
     fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32;
     fn device_memory_index(&self) -> u32;
     fn host_memory_index(&self) -> u32;
+}
+
+pub trait UsesDeviceProvider<D:DeviceProvider>{
+    fn device_provider(&self) -> &Arc<D>;
 }
 
 #[derive(Clone)]
@@ -203,33 +206,19 @@ impl<I:InstanceProvider> Device<I>{
     }
 }
 
-impl<I:InstanceProvider> InstanceProvider for Device<I>{
-    fn instance(&self) -> &ash::Instance {
-        self.instance.instance()
-    }
-
-    fn entry(&self) -> &ash::Entry {
-        self.instance.entry()
-    }
-}
-
 impl<I:InstanceProvider> DeviceProvider for Device<I>{
     fn device(&self) -> &ash::Device {
         &self.device
-    }
-
-    fn instance(&self) -> &ash::Instance {
-        self.instance.instance()
     }
 
     fn surface(&self) -> &Option<SurfaceKHR> {
         &self.surface
     }
 
+
     fn physical_device(&self) -> &PhysicalDeviceData {
         &self.physical_device
     }
-
 
     fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
         let mut best_score = u32::MAX;
@@ -486,3 +475,8 @@ impl<'a> DeviceSettingsProvider for SettingsProvider<'a>{
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{self.acc_struct_features}
 }
 
+impl<I:InstanceProvider> UsesInstanceProvider<I> for Device<I>{
+    fn instance_provider(&self) -> &Arc<I> {
+        &self.instance
+    }
+}

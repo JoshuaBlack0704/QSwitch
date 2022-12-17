@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::device;
+use crate::device::{DeviceProvider, UsesDeviceProvider};
 
 use super::Fence;
 
@@ -14,7 +14,7 @@ pub trait FenceProvider{
     fn reset(&self);
 }
 
-impl<D:device::DeviceProvider> Fence<D>{
+impl<D:DeviceProvider> Fence<D>{
     pub fn new(device_provider: &Arc<D>, signaled: bool) -> Arc<Fence<D>> {
         let mut info = vk::FenceCreateInfo::builder();
         if signaled{
@@ -33,7 +33,7 @@ impl<D:device::DeviceProvider> Fence<D>{
     }
 }
 
-impl<D:device::DeviceProvider> FenceProvider for Fence<D>{
+impl<D:DeviceProvider> FenceProvider for Fence<D>{
     fn fence(&self) -> &vk::Fence {
         &self.fence
     }
@@ -58,11 +58,17 @@ impl<D:device::DeviceProvider> FenceProvider for Fence<D>{
     }
 }
 
-impl<D:device::DeviceProvider> Drop for Fence<D>{
+impl<D:DeviceProvider> Drop for Fence<D>{
     fn drop(&mut self) {
         debug!{"Destroyed fence {:?}", self.fence};
         unsafe{
             self.device.device().destroy_fence(self.fence, None);
         }
+    }
+}
+
+impl<D:DeviceProvider> UsesDeviceProvider<D> for Fence<D>{
+    fn device_provider(&self) -> &Arc<D> {
+        &self.device
     }
 }

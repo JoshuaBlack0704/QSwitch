@@ -3,7 +3,7 @@ use std::{sync::{Arc, Mutex}, collections::{HashSet, VecDeque}};
 use ash::vk;
 use log::info;
 
-use crate::{device, commandpool, CommandBufferSet};
+use crate::{device::DeviceProvider, commandpool::CommandPoolProvider, CommandBufferSet};
 
 pub trait CommandBufferSettingsProvider{
     fn cmd_level(&self) -> vk::CommandBufferLevel;
@@ -15,11 +15,9 @@ pub trait CommandBufferProvider{
     fn return_cmd(&self, cmd: vk::CommandBuffer);
     fn reset_cmd(&self, cmd: &vk::CommandBuffer);
 }
-pub trait CopyOpProvider{
-    fn copy_from_ram(&self);
-    fn copy_to_ram(&self);
-    fn copy_to_partition(&self);
-    fn copy_to_image(&self);
+
+pub enum CopyOpError{
+    NoSpace,
 }
 
 #[derive(Clone)]
@@ -29,8 +27,8 @@ pub struct SettingsProvider{
     pub reset_flags: Option<vk::CommandBufferResetFlags>,
 }
 
-impl<D: device::DeviceProvider, P: commandpool::CommandPoolProvider, S: CommandBufferSettingsProvider + Clone> CommandBufferSet<D, P, S>{
-    pub fn new(settings: &S, device_provider: &Arc<D>, cmdpool_provider: &Arc<P>) -> Arc<CommandBufferSet<D, P, S>> {
+impl<D: DeviceProvider, P: CommandPoolProvider, S: CommandBufferSettingsProvider + Clone> CommandBufferSet<D,P,S>{
+    pub fn new(settings: &S, device_provider: &Arc<D>, cmdpool_provider: &Arc<P>) -> Arc<CommandBufferSet<D,P,S>> {
         Arc::new(
             CommandBufferSet{ 
                 device: device_provider.clone(),
@@ -42,7 +40,7 @@ impl<D: device::DeviceProvider, P: commandpool::CommandPoolProvider, S: CommandB
     }
 }
 
-impl<D:device::DeviceProvider, P:commandpool::CommandPoolProvider, S:CommandBufferSettingsProvider> CommandBufferProvider for CommandBufferSet<D,P,S>{
+impl<D:DeviceProvider, P:CommandPoolProvider, S:CommandBufferSettingsProvider> CommandBufferProvider for CommandBufferSet<D,P,S>{
     fn next_cmd(&self) -> vk::CommandBuffer {
         // First we need to see if there are any cmds available
         let mut cmds_set = self.cmds.lock().unwrap();
