@@ -1,9 +1,11 @@
-use std::sync::{MutexGuard, Arc};
+use std::{sync::{MutexGuard, Arc}, mem::size_of};
+use image::{self, EncodableLayout};
 
 use ash::vk;
 use log::debug;
 
-use crate::{device::{UsesDeviceProvider, DeviceProvider}, memory::buffer::{buffer::{BufferProvider, UsesBufferProvider}, bufferpartition::BufferPartitionProvider}, commandpool, CommandPool, commandbuffer::{self, CommandBufferProvider}, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoProvider, Queue, queue::QueueProvider}};
+
+use crate::{memory::{buffer::{buffer::BufferProvider, buffer::UsesBufferProvider, Buffer, BufferPartition}, buffer::{bufferpartition::BufferPartitionProvider, buffer}, Memory, memory}, device::{DeviceProvider, UsesDeviceProvider}, commandpool, CommandPool, commandbuffer::{self, CommandBufferProvider}, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoProvider, Queue, queue::QueueProvider}, instance::{InstanceProvider, UsesInstanceProvider}};
 
 use super::{image::{ImageProvider, UsesImageProvider}, ImageResource};
 
@@ -16,6 +18,8 @@ pub trait ImageSubresourceProvider{
     fn copy_to_buffer_internal<B:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
     fn copy_to_image<I:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
     fn copy_to_image_internal<I:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<I>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
+    fn blit_to_image<I:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
+    fn blit_to_image_internal<I:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<I>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
 
 #[derive(Clone, Debug)]
@@ -28,8 +32,8 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageResource<D,I>{
-    pub fn new(image_provider: &Arc<I>, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
+impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, Img:ImageProvider + UsesDeviceProvider<D>> ImageResource<I,D,Img>{
+    pub fn new(image_provider: &Arc<Img>, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
         
         if miplevel > image_provider.mip_levels(){
             return Err(ImageResourceCreateError::ResorcesDontExist);
@@ -65,14 +69,43 @@ impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageResource<D,
                     extent,
                     layout,
                     _device: std::marker::PhantomData,
+                    _instance: std::marker::PhantomData,
                 }
             )
         )
 
     }
+
+    pub fn load_image(tgt: &Arc<Self>, file: &String){
+        let reader = image::io::Reader::open(file).unwrap();
+        let data = reader.decode().unwrap();
+        let image = data.to_rgba8();
+        let bytes = image.as_bytes();
+        let image_extent = vk::Extent3D::builder().width(image.width()).height(image.height()).depth(1).build();
+
+        let settings = memory::SettingsProvider::new(bytes.len() as u64 * 2, tgt.image.device_provider().device_memory_index());
+        let dev_mem = Memory::new(&settings, tgt.image.device_provider()).expect("Could not allocate memory");
+        let image_settings = crate::image::image::SettingsProvider::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
+        let image = crate::image::Image::new(tgt.image.device_provider(), &dev_mem, &image_settings).unwrap();
+        let resource = crate::image::ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
+        
+        let settings = memory::SettingsProvider::new(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index());
+        let host_mem = Memory::new(&settings, tgt.image.device_provider()).unwrap();
+        let settings = buffer::SettingsProvider::new(bytes.len() as u64 * 2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
+        let buf = Buffer::new(&settings, tgt.image.device_provider(), &host_mem).expect("Could not bind buffer");
+        let part = BufferPartition::new(&buf, bytes.len() as u64, None).unwrap();
+        part.copy_from_ram(&bytes).unwrap();
+        part.copy_to_image_internal(&resource, None).unwrap();
+
+        image.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
+        resource.blit_to_image_internal(tgt, vk::Filter::LINEAR).unwrap();
+        
+
+        
+    }
 }
 
-impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageSubresourceProvider for ImageResource<D,I>{
+impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, Img:ImageProvider + UsesDeviceProvider<D>> ImageSubresourceProvider for ImageResource<I,D,Img>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }
@@ -140,7 +173,7 @@ impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageSubresource
         Ok(())
     }
 
-    fn copy_to_image<Img:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_image<ImgExt:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<ImgExt>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -182,7 +215,25 @@ impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageSubresource
         Ok(())
     }
 
-    fn copy_to_image_internal<Img:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<Img>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_image_internal<ImgExt:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<ImgExt>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+        if self.extent.width == 0{
+            return Ok(());
+        }
+        if self.extent.height== 0{
+            return Ok(());
+        }
+        if self.extent.depth == 0{
+            return Ok(());
+        }
+        if dst.extent().width == 0{
+            return Ok(());
+        }
+        if dst.extent().height== 0{
+            return Ok(());
+        }
+        if dst.extent().depth == 0{
+            return Ok(());
+        }
         let settings = commandpool::SettingsProvider::new(self.image.device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
         let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
@@ -202,10 +253,95 @@ impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageSubresource
         Ok(())
     }
 
+    fn blit_to_image<ImgExt:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<ImgExt>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
+        if self.extent.width == 0{
+            return Ok(());
+        }
+        if self.extent.height== 0{
+            return Ok(());
+        }
+        if self.extent.depth == 0{
+            return Ok(());
+        }
+        if dst.extent().width == 0{
+            return Ok(());
+        }
+        if dst.extent().height== 0{
+            return Ok(());
+        }
+        if dst.extent().depth == 0{
+            return Ok(());
+        }
+
+        let src_layout = self.layout();
+        let dst_layout = dst.layout();
+
+        let src_image = self.image.image();
+        let dst_image = dst.image_provider().image();
+
+        let src_lower = self.offset;
+        let src_upper = vk::Offset3D::builder().x(src_lower.x + self.extent.width as i32).y(src_lower.y + self.extent.height as i32).z(src_lower.z + self.extent.depth as i32).build();
+        let dst_lower = self.offset;
+        let dst_upper = vk::Offset3D::builder().x(dst_lower.x + dst.extent().width as i32).y(dst_lower.y + dst.extent().height as i32).z(dst_lower.z + dst.extent().depth as i32).build();
+
+        let blit = [vk::ImageBlit::builder()
+        .src_subresource(self.resorces)
+        .dst_subresource(dst.subresource())
+        .src_offsets([src_lower, src_upper])
+        .dst_offsets([dst_lower, dst_upper])
+        .build()];
+
+        unsafe{
+            let device = self.image.device_provider().device();
+            device.cmd_blit_image(**cmd, *src_image, *src_layout, *dst_image, *dst_layout, &blit, scale_filter);
+        }
+
+        Ok(())
+    }
+
+    fn blit_to_image_internal<ImgExt:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<ImgExt>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
+        if self.extent.width == 0{
+            return Ok(());
+        }
+        if self.extent.height== 0{
+            return Ok(());
+        }
+        if self.extent.depth == 0{
+            return Ok(());
+        }
+        if dst.extent().width == 0{
+            return Ok(());
+        }
+        if dst.extent().height== 0{
+            return Ok(());
+        }
+        if dst.extent().depth == 0{
+            return Ok(());
+        }
+        let settings = commandpool::SettingsProvider::new(self.image.device_provider().grahics_queue().unwrap().1);
+        let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
+        let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
+        let cmd_set = CommandBufferSet::new(&settings, self.image.device_provider(), &pool);
+        let cmd = cmd_set.next_cmd();
+        unsafe{
+            let device = self.image.device_provider().device();
+            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
+            self.blit_to_image(&cmd, dst, scale_filter)?;
+            device.end_command_buffer(*cmd).unwrap();
+        }
+        let mut submit = SubmitSet::new();
+        submit.add_cmd(cmd);
+        let submit = [submit];
+        let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS).unwrap();
+        queue.wait_submit(&submit).expect("Could not execute transfer");
+        Ok(())
+    }
+
+
 }
 
-impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> UsesImageProvider<I> for ImageResource<D,I>{
-    fn image_provider(&self) -> &Arc<I> {
+impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, Img:ImageProvider + UsesDeviceProvider<D>> UsesImageProvider<Img> for ImageResource<I,D,Img>{
+    fn image_provider(&self) -> &Arc<Img> {
         &self.image
     }
 }

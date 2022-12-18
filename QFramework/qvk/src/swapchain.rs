@@ -212,7 +212,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
 
         let dst_res = ImageResource::new(&dst, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), dst.extent()).unwrap();
-        src.copy_to_image_internal(&dst_res).unwrap();
+        src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR).unwrap();
 
         dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
 

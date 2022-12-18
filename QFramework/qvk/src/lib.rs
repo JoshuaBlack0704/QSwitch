@@ -4,7 +4,7 @@ use ash::{self, vk};
 use commandbuffer::CommandBufferSettingsProvider;
 use commandpool::{CommandPoolSettingsProvider, CommandPoolProvider};
 use device::DeviceProvider;
-use image::{image::ImageProvider, imageview::ImageViewProvider};
+use self::image::{image::ImageProvider, imageview::ImageViewProvider};
 use instance::InstanceProvider;
 use queue::queue::QueueProvider;
 use swapchain::SwapchainSettingsProvider;
