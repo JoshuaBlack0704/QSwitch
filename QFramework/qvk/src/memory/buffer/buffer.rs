@@ -21,6 +21,7 @@ pub trait BufferProvider{
     fn home_partition(&self) -> &Partition;
     ///Partitions this buffer
     fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> ;
+    fn usage(&self) -> vk::BufferUsageFlags;
 }
 
 pub trait UsesBufferProvider<B:BufferProvider>{
@@ -57,7 +58,7 @@ pub struct SettingsProvider{
 impl<D:DeviceProvider, M:MemoryProvider> Buffer<D,M,PartitionSystem>{
     pub fn new<S:BufferSettingsProvider>(settings: &S, device_provider: &Arc<D>, memory_provider: &Arc<M>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
         // First we need to create the buffer
-        let mut b_cinfo = vk::BufferCreateInfo::builder();
+        let mut info = vk::BufferCreateInfo::builder();
         let mut extensions = settings.extensions();
         if let Some(extensions) = &mut extensions{
             for ext in extensions.iter_mut(){
@@ -67,19 +68,19 @@ impl<D:DeviceProvider, M:MemoryProvider> Buffer<D,M,PartitionSystem>{
             }
         }
         if let Some(flags) = settings.flags(){
-            b_cinfo = b_cinfo.flags(flags);
+            info = info.flags(flags);
         }
-        b_cinfo = b_cinfo.size(settings.size());
-        b_cinfo = b_cinfo.usage(settings.usage());
-        b_cinfo = b_cinfo.sharing_mode(vk::SharingMode::EXCLUSIVE);
+        info = info.size(settings.size());
+        info = info.usage(settings.usage());
+        info = info.sharing_mode(vk::SharingMode::EXCLUSIVE);
         let share = settings.share();
         if let Some(indecies) = &share{
-            b_cinfo = b_cinfo.sharing_mode(vk::SharingMode::CONCURRENT);
-            b_cinfo = b_cinfo.queue_family_indices(&indecies);
+            info = info.sharing_mode(vk::SharingMode::CONCURRENT);
+            info = info.queue_family_indices(&indecies);
         }
         
         let device = device_provider.device();
-        let buffer = unsafe{device.create_buffer(&b_cinfo, None)};
+        let buffer = unsafe{device.create_buffer(&info, None)};
         
         if let Err(e) = buffer{
             return Err(BufferCreateError::VulkanResult(e));
@@ -120,6 +121,7 @@ impl<D:DeviceProvider, M:MemoryProvider> Buffer<D,M,PartitionSystem>{
             partition_sys: Mutex::new(PartitionSystem::new(settings.size())),
             buffer,
             alignment_type: alignment,
+            info: info.build(),
         }))
     }
 }
@@ -144,6 +146,10 @@ impl<D:DeviceProvider, M:MemoryProvider, P:PartitionProvider> BufferProvider for
             } 
             true
         })
+    }
+
+    fn usage(&self) -> vk::BufferUsageFlags {
+        self.info.usage
     }
 }
 

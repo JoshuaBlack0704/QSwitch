@@ -1,7 +1,5 @@
-use std::{mem::size_of, sync::Arc};
-
 use ash::vk;
-use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, swapchain::{self, SwapchainProvider}, Swapchain, commandpool, CommandPool, commandbuffer, CommandBufferSet, memory::{self, buffer::{bufferpartition::BufferPartitionProvider, self}}, sync, image::{self, image::ImageProvider, imageresource::ImageSubresourceProvider, ImageResource}};
+use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, swapchain::{self, SwapchainProvider}, Swapchain, memory::{memory, Memory}, image::{Image, ImageResource, image::ImageProvider}};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent}};
 
@@ -25,14 +23,14 @@ fn main(){
     let settings = swapchain::SettingsProvider::default();
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
    
-    let mut settings = memory::memory::SettingsProvider::new(1024 * 1024 * 100, device.device_memory_index());
+    let mut settings = memory::SettingsProvider::new(1024 * 1024 * 100, device.device_memory_index());
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
-    let dev_mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
+    let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
 
-    let image_settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-    let image = image::Image::new(&device, &dev_mem, &image_settings).unwrap();
-    let resource = image::ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
-    let file = String::from("ship.jpg");
+    let image_settings = qvk::image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
+    let image = Image::new(&device, &dev_mem, &image_settings).unwrap();
+    let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
+    let file = String::from("examples/resources/drone.jpg");
     ImageResource::load_image(&resource, &file);
 
     event_loop.run(move |event, _, flow|{

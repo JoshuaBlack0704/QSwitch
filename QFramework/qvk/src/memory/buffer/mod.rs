@@ -16,6 +16,7 @@ pub struct Buffer<D: DeviceProvider, M: MemoryProvider, P: PartitionProvider>{
     memory_partition: Partition,
     partition_sys: Mutex<P>,
     buffer: vk::Buffer,
+    info: vk::BufferCreateInfo,
     alignment_type: buffer::BufferAlignmentType,
 }
 

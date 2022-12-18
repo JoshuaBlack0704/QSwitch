@@ -1,9 +1,9 @@
 use std::{sync::{Arc, Mutex}, mem::size_of};
 
-use ash::vk;
+use ash::vk::{self, BufferUsageFlags};
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}, memory::{Partition, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{PartitionError, PartitionProvider}, buffer::buffer::BufferAlignmentType}, image::{imageresource::ImageSubresourceProvider, image::{UsesImageProvider, ImageProvider}}};
+use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}, memory::{Partition, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{PartitionError, PartitionProvider}, buffer::buffer::BufferAlignmentType}, image::{imageresource::ImageSubresourceProvider, image::{UsesImageProvider, ImageProvider}}, descriptor::descriptorlayout::DescriptorLayoutBindingProvider};
 
 use super::{buffer::{BufferProvider, UsesBufferProvider}, BufferPartition};
 
@@ -234,5 +234,26 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
 impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider> UsesBufferProvider<B> for BufferPartition<I,D,M,B,P>{
     fn buffer_provider(&self) -> &Arc<B> {
         &self.buffer
+    }
+}
+
+impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>> DescriptorLayoutBindingProvider for BufferPartition<I,D,M,B,PartitionSystem>{
+    fn binding(&self) -> vk::DescriptorSetLayoutBinding {
+        let binding_type ;
+        let usage = self.buffer.usage();
+        if usage.contains(BufferUsageFlags::STORAGE_BUFFER){
+            binding_type = vk::DescriptorType::STORAGE_BUFFER;
+        }
+        else if usage.contains(BufferUsageFlags::UNIFORM_BUFFER){
+            binding_type = vk::DescriptorType::UNIFORM_BUFFER;
+        }
+        else{
+            unimplemented!();
+        }
+
+        vk::DescriptorSetLayoutBinding::builder()
+        .descriptor_type(binding_type)
+        .descriptor_count(1)
+        .build()
     }
 }

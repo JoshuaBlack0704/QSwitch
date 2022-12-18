@@ -15,9 +15,8 @@ use swapchain::SwapchainSettingsProvider;
 /// We an object needs a particular dependency it will simply call the provider to give it the data
 /// How the data is aquired is completley opaque to the requester
 
-pub mod qvk_settings;
-pub struct QvkSettings{
-    _instance_settings: instance::SettingsProvider,
+pub trait SettingsProvider<B>{
+    fn add_to_builder(&self, builder: B) -> B;
 }
 
 pub mod instance;
@@ -73,3 +72,5 @@ pub mod image;
 pub mod queue;
 
 pub mod descriptor;
+
+pub mod shader;
