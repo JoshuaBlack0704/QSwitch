@@ -140,14 +140,19 @@ impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
         Ok(Arc::new(image))
     }
 
-    pub fn from_swapchain_image(device_provider: &Arc<D>, image: vk::Image) -> Arc<Image<D,Memory<D, PartitionSystem>>>{
+    pub fn from_swapchain_image(device_provider: &Arc<D>, image: vk::Image, image_extent: vk::Extent2D) -> Arc<Image<D,Memory<D, PartitionSystem>>>{
+        let extent = vk::Extent3D::builder().width(image_extent.width).height(image_extent.height).depth(1).build();
         Arc::new(
             Image{
                 device: device_provider.clone(),
                 memory: None,
                 _partition: None,
                 image,
-                create_info: vk::ImageCreateInfo::builder().mip_levels(1).array_layers(1).build(),
+                create_info: vk::ImageCreateInfo::builder()
+                    .mip_levels(1)
+                    .array_layers(1)
+                    .extent(extent)
+                    .build(),
                 current_layout: Arc::new(Mutex::new(vk::ImageLayout::UNDEFINED)),
             }
         )

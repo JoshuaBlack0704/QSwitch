@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{sync::{semaphore::SemaphoreProvider, fence::FenceProvider, Semaphore}, image::{Image, ImageView, image::{ImageProvider, UsesImageProvider}, imageview::ImageViewProvider, imageresource::ImageSubresourceProvider, ImageResource}, memory::{Memory, PartitionSystem}, instance::{InstanceProvider, UsesInstanceProvider}, device::{DeviceProvider, UsesDeviceProvider}, Swapchain, queue::{queue::QueueProvider, Queue}};
+use crate::{sync::{semaphore::SemaphoreProvider, fence::FenceProvider, Semaphore, self}, image::{Image, ImageView, image::{ImageProvider, UsesImageProvider}, imageview::ImageViewProvider, imageresource::ImageSubresourceProvider, ImageResource}, memory::{Memory, PartitionSystem}, instance::{InstanceProvider, UsesInstanceProvider}, device::{DeviceProvider, UsesDeviceProvider}, Swapchain, queue::{queue::QueueProvider, Queue}};
 
 
 pub trait SwapchainSettingsProvider{
@@ -26,6 +26,7 @@ pub trait SwapchainProvider{
     fn wait_present<S:SemaphoreProvider>(&self, next_image: u32, waits: Option<&[&Arc<S>]>);
     fn aquire_next_image<F:FenceProvider, S:SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
     fn resize(&self);
+    fn extent(&self) -> vk::Extent3D;
 }
 
 #[derive(Clone)]
@@ -177,7 +178,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
                     present_queue: queue,
                 };
         
-        swapchain.get_images(*swapchain.swapchain.lock().unwrap());
+        swapchain.get_images(*swapchain.swapchain.lock().unwrap(), capabilities.current_extent);
 
         Ok(
             Arc::new(
@@ -186,25 +187,25 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         )
     }
 
-    fn get_images(&self, swapchain: vk::SwapchainKHR){
+    fn get_images(&self, swapchain: vk::SwapchainKHR, image_extent: vk::Extent2D){
         let mut img_lock = self.images.lock().unwrap();
         let _img_view_lock = self.views.lock().unwrap();
         let imgs = unsafe{self.swapchain_loader.get_swapchain_images(swapchain).unwrap()};
         let mut images = Vec::with_capacity(imgs.len());
         for image in imgs.iter(){
-            let image = Image::<D,Memory<D,PartitionSystem>>::from_swapchain_image(&self.device, *image);
+            let image = Image::<D,Memory<D,PartitionSystem>>::from_swapchain_image(&self.device, *image, image_extent);
             image.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
             images.push(image);
         }
         *img_lock = images;
     }
 
-    pub fn present_image<Img:ImageProvider, IR: ImageSubresourceProvider + UsesImageProvider<Img>, F:FenceProvider>(&self, src: &Arc<IR>){
+    pub fn present_image<Img:ImageProvider, IR: ImageSubresourceProvider + UsesImageProvider<Img>>(&self, src: &Arc<IR>){
         // let semaphore:S
         let images = self.images.lock().unwrap();
         
         let aquire = Semaphore::new(self.device_provider());
-        let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<F>>, Some(&aquire));
+        let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
         let dst = &images[dst_index as usize];
 
         src.image_provider().internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
@@ -249,7 +250,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         let new_swapchain = unsafe{self.swapchain_loader.create_swapchain(&info, None).unwrap()};
         unsafe{self.swapchain_loader.destroy_swapchain(*swapchain_lock, None)};
         debug!("Swapchain {:?} destroyed for swapchain {:?}", *swapchain_lock, new_swapchain);
-        self.get_images(new_swapchain);
+        self.get_images(new_swapchain, info.image_extent);
         *swapchain_lock = new_swapchain;
     }
 
@@ -294,6 +295,10 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         self.present(next_image, waits);
         self.present_queue.wait_idle();
         
+    }
+
+    fn extent(&self) -> vk::Extent3D {
+        self.images.lock().unwrap()[0].extent()
     }
 }
 

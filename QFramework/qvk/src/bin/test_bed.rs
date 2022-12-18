@@ -38,37 +38,15 @@ fn main(){
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
     let host_mem = memory::Memory::new(&settings, &device).expect("Could not allocate memory");
 
-    let settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(100).height(100).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-    let image1 = image::Image::new(&device, &dev_mem, &settings).unwrap();
-    let resource1 = image::ImageResource::new(&image1, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image1.extent()).unwrap();
-    let image2 = image::Image::new(&device, &dev_mem, &settings).unwrap();
-    let resource2 = image::ImageResource::new(&image2, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image2.extent()).unwrap();
+    let mut image_settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, swapchain.extent(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
+    let mut image = image::Image::new(&device, &dev_mem, &image_settings).unwrap();
+    let mut resource = image::ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
     
-    let settings = memory::buffer::buffer::SettingsProvider::new(1024*1024*50, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
+    let settings = memory::buffer::buffer::SettingsProvider::new(1024*1024*99, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
     let buf = memory::buffer::Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
-    
     let color:u32 = 0x0000ff;
-    let data = vec![color;(image1.extent().width * image1.extent().height) as usize];
-    let mut dst = vec![0u32;(image1.extent().width * image1.extent().height) as usize];
-    {
-        let part = buffer::BufferPartition::new(&buf, size_of::<u32>() as u64 * image1.extent().width as u64 * image1.extent().height as u64, None).unwrap();
-        part.copy_from_ram(&data).unwrap();
-        part.copy_to_image_internal(&resource1, None).unwrap();
-    }
-
-    {
-        image1.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
-        resource1.copy_to_image_internal(&resource2).unwrap();
-        let part = buffer::BufferPartition::new(&buf, size_of::<u32>() as u64 * image2.extent().width as u64 * image2.extent().height as u64, None).unwrap();
-        image2.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
-        resource2.copy_to_buffer_internal(&part, None).unwrap();
-        part.copy_to_ram(&mut dst).unwrap();
-    }
-    println!("{:?}", dst);
-
-
-    let aquire = sync::Semaphore::new(&device);
     
+
     event_loop.run(move |event, _, flow|{
         flow.set_poll();
         match event {
@@ -77,15 +55,22 @@ fn main(){
                     flow.set_exit();
                 }
                 if let WindowEvent::Resized(_) = event{
-                    
                     swapchain.resize();
+                    println!("{:?}", swapchain.extent());
+                    let image_settings = &mut image_settings;
+                    *image_settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, swapchain.extent(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
+                    let image = &mut image;
+                    *image = image::Image::new(&device, &dev_mem, image_settings).unwrap();
+                    resource = image::ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
+                    let data = vec![color;(image.extent().width * image.extent().height) as usize];
+                    let part = buffer::BufferPartition::new(&buf, size_of::<u32>() as u64 * image.extent().width as u64 * image.extent().height as u64, None).unwrap();
+                    part.copy_from_ram(&data).unwrap();
+                    part.copy_to_image_internal(&resource, None).unwrap();
                 }
             },
             Event::MainEventsCleared => {
                 
-                let image = swapchain.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<Device<Instance>>>>, Some(&aquire));
-                let wait = [&aquire];
-                swapchain.wait_present(image, Some(&wait));
+                swapchain.present_image(&resource);
             }
             _ => {}
         }

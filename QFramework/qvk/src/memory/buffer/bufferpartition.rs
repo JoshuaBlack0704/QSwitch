@@ -168,6 +168,16 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
     }
 
     fn copy_to_image<Img:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+        if dst.extent().width == 0{
+            return Ok(());
+        }
+        if dst.extent().height== 0{
+            return Ok(());
+        }
+        if dst.extent().depth == 0{
+            return Ok(());
+        }
+        
         let buffer_offset = self.partition.offset();
         let mut addressing = (0,0);
         if let Some(a) = buffer_addressing{

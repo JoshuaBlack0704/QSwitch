@@ -141,6 +141,26 @@ impl<D:DeviceProvider, I:ImageProvider + UsesDeviceProvider<D>> ImageSubresource
     }
 
     fn copy_to_image<Img:ImageProvider, IR:ImageSubresourceProvider + UsesImageProvider<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+        if self.extent.width == 0{
+            return Ok(());
+        }
+        if self.extent.height== 0{
+            return Ok(());
+        }
+        if self.extent.depth == 0{
+            return Ok(());
+        }
+        if dst.extent().width == 0{
+            return Ok(());
+        }
+        if dst.extent().height== 0{
+            return Ok(());
+        }
+        if dst.extent().depth == 0{
+            return Ok(());
+        }
+
+        
         let src_layout = self.layout();
         let dst_layout = dst.layout();
         let op = [vk::ImageCopy::builder()
