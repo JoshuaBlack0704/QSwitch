@@ -74,3 +74,5 @@ pub mod queue;
 pub mod descriptor;
 
 pub mod shader;
+
+pub mod pipelines;

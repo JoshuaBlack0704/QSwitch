@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, memory::{self, Memory, buffer::{Buffer, BufferPartition, buffer, bufferpartition}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutProvider, Set, self}};
+use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, memory::{self, Memory, buffer::{Buffer, BufferPartition, buffer, bufferpartition}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutProvider, Set, self}, shader::HLSL};
 
 
 fn main(){
@@ -29,5 +29,7 @@ fn main(){
 
     let dset = Set::new(&device, &dlayout, &dpool);
 
+    let code = HLSL::new("examples/resources/shaders/increment-set.hlsl", shaderc::ShaderKind::Compute, None);
+    let shader = qvk::shader::Shader::new(&device, &code, vk::ShaderStageFlags::COMPUTE, None);
     
 }
