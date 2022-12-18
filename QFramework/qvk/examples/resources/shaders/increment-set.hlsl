@@ -1,18 +1,19 @@
-[[vk::binding(0,0)]]
-RWBuffer<uint> data;
-
 struct UBO
 {
 	uint count;
 };
 
-[[vk::binding(0,1)]]
+[[vk::binding(1,0)]]
 cbuffer ubo
 {
 	UBO ubo;
 }
 
-[numthreads(16)]
+
+[[vk::binding(0,0)]]
+RWStructuredBuffer<uint> values;
+
+[numthreads(16,1,1)]
 void main(uint3 GlobalInvocationID : SV_DispatchThreadID, uint3 LocalInvocationID : SV_GroupThreadID)
 {
 	uint index = GlobalInvocationID.x;
@@ -20,5 +21,5 @@ void main(uint3 GlobalInvocationID : SV_DispatchThreadID, uint3 LocalInvocationI
 	{
 		return;
 	}
-	data[GlobalInvocationID.x] += 1;
+	values[GlobalInvocationID.x] += 1;
 }

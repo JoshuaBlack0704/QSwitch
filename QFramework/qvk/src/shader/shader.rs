@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, ffi::CString};
 
 use ash::vk;
 use log::{info, debug};
@@ -9,7 +9,11 @@ use super::Shader;
 
 pub trait SpirvProvider{
     fn code(&self) -> &[u32];
-    
+    fn entry_name(&self) -> &str;
+}
+
+pub trait ShaderProvider{
+    fn stage(&self) -> vk::PipelineShaderStageCreateInfo;
 }
 
 impl<D:DeviceProvider> Shader<D>{
@@ -31,6 +35,7 @@ impl<D:DeviceProvider> Shader<D>{
                 device: device_provider.clone(),
                 module,
                 stage,
+                name: CString::new(spriv_data.entry_name()).unwrap(),
             }
         )
     }
@@ -42,5 +47,15 @@ impl<D:DeviceProvider> Drop for Shader<D>{
         unsafe{
             self.device.device().destroy_shader_module(self.module, None);
         }
+    }
+}
+
+impl<D:DeviceProvider> ShaderProvider for Shader<D>{
+    fn stage(&self) -> vk::PipelineShaderStageCreateInfo {
+        vk::PipelineShaderStageCreateInfo::builder()
+        .stage(self.stage)
+        .module(self.module)
+        .name(&self.name)
+        .build()
     }
 }

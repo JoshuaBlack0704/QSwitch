@@ -15,8 +15,8 @@ use swapchain::SwapchainSettingsProvider;
 /// We an object needs a particular dependency it will simply call the provider to give it the data
 /// How the data is aquired is completley opaque to the requester
 
-pub trait SettingsProvider<B>{
-    fn add_to_builder(&self, builder: B) -> B;
+pub trait SettingsProvider<'a, B>{
+    fn add_to_builder(&'a self, builder: B) -> B;
 }
 
 pub mod instance;
