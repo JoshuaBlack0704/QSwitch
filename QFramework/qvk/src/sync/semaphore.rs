@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, UsesDeviceStore};
 
 use super::Semaphore;
 

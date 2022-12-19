@@ -2,11 +2,9 @@ use std::{sync::{Arc, Mutex}, collections::VecDeque};
 
 use ash::vk;
 
-use crate::device::DeviceStore;
+use crate::init::device::DeviceStore;
 
 use self::partitionsystem::PartitionStore;
-
-
 
 pub mod partitionsystem;
 #[derive(Clone)]

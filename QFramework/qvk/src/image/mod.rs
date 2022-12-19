@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex}, marker::PhantomData};
 
 use ash::vk;
 
-use crate::{device::{DeviceStore, UsesDeviceStore}, memory::{memory::MemoryStore, Partition}, instance::{InstanceStore, UsesInstanceStore}};
+use crate::{init::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}}, memory::{memory::MemoryStore, Partition}};
 
 use self::image::ImageStore;
 

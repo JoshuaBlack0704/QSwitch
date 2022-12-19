@@ -2,9 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use crate::device::DeviceStore;
+use crate::init::device::DeviceStore;
 
 use self::{descriptorlayout::DescriptorLayoutStore, pool::DescriptorPoolStore};
+
 
 // Layouts will simply be built by specifying bindings using method level generics and T::fn() syntax
 pub mod descriptorlayout;

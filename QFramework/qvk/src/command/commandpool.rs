@@ -3,7 +3,10 @@ use std::sync::Arc;
 use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{info, debug};
 
-use crate::{device::{DeviceStore, UsesDeviceStore}, CommandPool};
+use crate::init::device::{DeviceStore, UsesDeviceStore};
+
+use super::CommandPool;
+
 
 pub trait CommandPoolSettingsStore{
     fn queue_family_index(&self) -> u32;

@@ -3,10 +3,9 @@ use std::{sync::{Arc, Mutex}, mem::size_of};
 use ash::vk::{self, BufferUsageFlags};
 use log::{info, debug};
 
-use crate::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferStore}, queue::{SubmitSet, Queue, submit::SubmitInfoStore, queue::QueueStore}, memory::{Partition, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem, partitionsystem::{PartitionError, PartitionStore}, buffer::buffer::BufferAlignmentType}, image::{imageresource::ImageSubresourceStore, image::{UsesImageStore, ImageStore}}, descriptor::descriptorlayout::DescriptorLayoutBindingStore};
+use crate::{memory::{Partition, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem, partitionsystem::{PartitionError, PartitionStore}, buffer::buffer::BufferAlignmentType}, image::{image::{ImageStore, UsesImageStore}, imageresource::ImageSubresourceStore}, init::{instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}}, command::{commandpool, CommandPool, commandbuffer::{self, CommandBufferFactory}, CommandBufferSet}, queue::{SubmitSet, Queue, submit::SubmitInfoStore, queue::QueueStore}, descriptor::descriptorlayout::DescriptorLayoutBindingStore};
 
 use super::{buffer::{BufferStore, UsesBufferStore}, BufferSegment};
-
 
 pub trait BufferSegmentStore{
     fn get_partition(&self) -> &Partition;

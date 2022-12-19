@@ -4,7 +4,7 @@ use ash::vk;
 use log::{debug, info};
 use raw_window_handle::RawDisplayHandle;
 
-use crate::Instance;
+use super::Instance;
 
 pub trait InstanceSettingsStore{
     fn app_info(&self) -> vk::ApplicationInfo;

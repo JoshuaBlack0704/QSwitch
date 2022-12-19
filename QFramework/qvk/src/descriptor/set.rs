@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use log::info;
 
-use crate::device::DeviceStore;
+use crate::init::device::DeviceStore;
 
 use super::{descriptorlayout::DescriptorLayoutStore, pool::DescriptorPoolStore, Set};
 

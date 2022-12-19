@@ -3,10 +3,9 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, UsesDeviceStore};
 
 use super::Fence;
-
 
 pub trait FenceStore{
     fn fence(&self) -> &vk::Fence;

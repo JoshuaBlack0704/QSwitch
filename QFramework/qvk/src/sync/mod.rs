@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use crate::device::DeviceStore;
+use crate::init::device::DeviceStore;
 
 pub mod semaphore;
 pub struct Semaphore<D:DeviceStore>{

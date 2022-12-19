@@ -3,7 +3,10 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::info;
 
-use crate::{device::DeviceStore, commandpool::CommandPoolStore, CommandBufferSet};
+use crate::init::device::DeviceStore;
+
+use super::{commandpool::CommandPoolStore, CommandBufferSet};
+
 
 pub trait CommandBufferSettingsStore{
     fn cmd_level(&self) -> vk::CommandBufferLevel;
@@ -11,6 +14,8 @@ pub trait CommandBufferSettingsStore{
     fn cmd_reset_flags(&self) -> Option<vk::CommandBufferResetFlags>;
 }
 pub trait CommandBufferStore{
+}
+pub trait CommandBufferFactory{
     fn next_cmd(&self) -> Arc<vk::CommandBuffer>;
     fn reset_cmd(&self, cmd: &Arc<vk::CommandBuffer>);
 }
@@ -39,7 +44,7 @@ impl<D: DeviceStore, P: CommandPoolStore, S: CommandBufferSettingsStore + Clone>
     }
 }
 
-impl<D:DeviceStore, P:CommandPoolStore, S:CommandBufferSettingsStore> CommandBufferStore for CommandBufferSet<D,P,S>{
+impl<D:DeviceStore, P:CommandPoolStore, S:CommandBufferSettingsStore> CommandBufferFactory for CommandBufferSet<D,P,S>{
     fn next_cmd(&self) -> Arc<vk::CommandBuffer> {
         // First we need to see if there are any cmds available
         let mut cmds = self.cmds.lock().unwrap();

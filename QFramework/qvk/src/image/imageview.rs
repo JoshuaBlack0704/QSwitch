@@ -1,6 +1,6 @@
-use crate::{device::DeviceStore, image::ImageStore};
+use crate::init::device::DeviceStore;
 
-use super::ImageView;
+use super::{ImageView, image::ImageStore};
 
 pub trait ImageViewStore{
     

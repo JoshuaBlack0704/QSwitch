@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::DeviceStore, descriptor::descriptorlayout::DescriptorLayoutStore, SettingsStore};
+use crate::{init::device::DeviceStore, SettingsStore, descriptor::descriptorlayout::DescriptorLayoutStore};
 
 use super::Layout;
 

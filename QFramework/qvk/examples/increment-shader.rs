@@ -1,19 +1,18 @@
 use ash::vk;
-use qvk::{instance, Instance, device::{self, DeviceStore}, Device, memory::{self, Memory, buffer::{Buffer, BufferSegment, buffer, buffersegment}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutStore, Set, self}, shader::HLSL, pipelines};
-
+use qvk::{init::{instance, device::{self, DeviceStore}, Instance, Device}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutStore, self, Set}, shader::HLSL, pipelines};
 
 fn main(){
     
     pretty_env_logger::init();
     
-    let mut settings = instance::Settings::default();
+    let settings = instance::Settings::default();
     let instance = Instance::new(&settings);
     
     let mut settings = device::Settings::default();
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     let device = Device::new(&settings, &instance).expect("Could not create device");
 
-    let mut settings = memory::memory::SettingsStore::new(1024 * 1024 * 100, device.host_memory_index());
+    let settings = memory::SettingsStore::new(1024 * 1024 * 100, device.host_memory_index());
     let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
 
     let settings = buffer::SettingsStore::new(1024 * 1024 * 50, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);

@@ -5,7 +5,7 @@ use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
-use crate::{Device, instance::{InstanceStore, UsesInstanceStore}};
+use super::{instance::{InstanceStore, UsesInstanceStore}, Device};
 
 pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;

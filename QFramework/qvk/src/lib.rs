@@ -1,14 +1,3 @@
-use std::sync::{Arc, Mutex};
-
-use ash::{self, vk};
-use commandbuffer::CommandBufferSettingsStore;
-use commandpool::{CommandPoolSettingsStore, CommandPoolStore};
-use device::DeviceStore;
-use self::image::{image::ImageStore, imageview::ImageViewStore};
-use instance::InstanceStore;
-use queue::queue::QueueStore;
-use swapchain::SwapchainSettingsStore;
-
 /// The Provider pattern
 /// The framework will provide complete abstraction and zero dependence by using a provider pattern
 /// Essentially each object that has a dependency will take type provider traits instead of concrete objects
@@ -18,61 +7,12 @@ use swapchain::SwapchainSettingsStore;
 pub trait SettingsStore<'a, B>{
     fn add_to_builder(&'a self, builder: B) -> B;
 }
-
-pub mod instance;
-pub struct Instance{
-    entry: ash::Entry,
-    instance: ash::Instance,
-}
-
-pub mod device;
-pub struct Device<I: InstanceStore>{
-    instance: Arc<I>,
-    surface: Option<vk::SurfaceKHR>,
-    surface_loader: ash::extensions::khr::Surface,
-    physical_device: device::PhysicalDeviceData,
-    device: ash::Device,
-    created_queue_families: Vec<usize>,
-}
-
-pub mod commandpool;
-pub struct CommandPool<D: DeviceStore, S: CommandPoolSettingsStore>{
-    device: Arc<D>,
-    settings: S,
-    command_pool: vk::CommandPool,
-}
-pub mod commandbuffer;
-pub struct CommandBufferSet<D: DeviceStore, P: CommandPoolStore, S: CommandBufferSettingsStore>{
-    device: Arc<D>,
-    cmdpool: Arc<P>,
-    settings: S,
-    cmds: Mutex<Vec<Arc<vk::CommandBuffer>>>,
-}
-
+pub mod init;
+pub mod command;
 pub mod memory;
-
-pub mod swapchain;
-pub struct Swapchain<I:InstanceStore, D: DeviceStore, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore>{
-    _instance: Arc<I>,
-    device: Arc<D>,
-    _settings: S,
-    create_info: vk::SwapchainCreateInfoKHR,
-    surface_loader: ash::extensions::khr::Surface,
-    swapchain_loader: ash::extensions::khr::Swapchain,
-    swapchain: Mutex<vk::SwapchainKHR>,
-    images: Mutex<Vec<Arc<Img>>>,
-    views: Mutex<Vec<Arc<ImgV>>>,
-    present_queue: Arc<Q>,
-}
-
 pub mod sync;
-
 pub mod image;
-
 pub mod queue;
-
 pub mod descriptor;
-
 pub mod shader;
-
 pub mod pipelines;

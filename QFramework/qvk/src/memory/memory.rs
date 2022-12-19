@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, UsesDeviceStore};
 
 use super::{Memory, partitionsystem::{PartitionStore, self}, PartitionSystem, Partition};
 

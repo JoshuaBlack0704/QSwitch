@@ -3,7 +3,7 @@ use std::{sync::Arc, collections::HashMap};
 use ash::vk;
 use log::{debug,info};
 
-use crate::device::DeviceStore;
+use crate::init::device::DeviceStore;
 
 use super::{Pool, descriptorlayout::DescriptorLayoutStore};
 

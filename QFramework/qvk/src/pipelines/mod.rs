@@ -2,9 +2,14 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::device::DeviceStore;
+use crate::init::device::DeviceStore;
 
 use self::layout::PipelineLayoutStore;
+
+pub trait BindPipelineFactory{
+    ///Should bind the pipeline to the command buffer
+    fn bind(&self, cmd: &Arc<vk::CommandBuffer>);
+}
 
 pub mod layout;
 pub struct Layout<D:DeviceStore>{

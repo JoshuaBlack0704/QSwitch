@@ -3,10 +3,9 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::DeviceStore, shader::shader::ShaderStore};
+use crate::{init::device::DeviceStore, shader::shader::ShaderStore};
 
-use super::{Compute, layout::PipelineLayoutStore};
-
+use super::{Compute, layout::PipelineLayoutStore, BindPipelineFactory};
 
 impl<D:DeviceStore, L:PipelineLayoutStore> Compute<D,L>{
     pub fn new<Shd:ShaderStore>(device_provider: &Arc<D>, shader: &Arc<Shd>, layout_provider: &Arc<L>, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
@@ -36,6 +35,15 @@ impl<D:DeviceStore, L:PipelineLayoutStore> Compute<D,L>{
         
     }
 }
+
+impl<D:DeviceStore, L:PipelineLayoutStore> BindPipelineFactory for Compute<D,L>{
+    fn bind(&self, cmd: &Arc<vk::CommandBuffer>) {
+        unsafe{
+            self.device.device().cmd_bind_pipeline(**cmd, vk::PipelineBindPoint::COMPUTE, self.pipeline);
+        }
+    }
+}
+
 
 impl<D:DeviceStore, L:PipelineLayoutStore> Drop for Compute<D,L>{
     fn drop(&mut self) {

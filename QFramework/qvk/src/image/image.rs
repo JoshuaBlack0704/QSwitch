@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::{DeviceStore, UsesDeviceStore}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryStore}, commandbuffer::{self, CommandBufferStore}, CommandPool, commandpool, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoStore, queue::QueueStore}};
+use crate::{memory::{partitionsystem, memory::MemoryStore, Memory, PartitionSystem}, init::device::{DeviceStore, UsesDeviceStore}, command::{commandpool, CommandPool, commandbuffer::{self, CommandBufferFactory}, CommandBufferSet}, queue::{SubmitSet, submit::SubmitInfoStore, queue::QueueStore}};
 
 use super::Image;
 

@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk::{self, DescriptorSetLayoutBinding};
 use log::{debug, info};
 
-use crate::device::{DeviceStore, UsesDeviceStore};
+
+use crate::init::device::{DeviceStore, UsesDeviceStore};
 
 use super::{DescriptorLayout, WriteHolder};
 

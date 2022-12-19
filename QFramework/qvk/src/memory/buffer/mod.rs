@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex}, marker::PhantomData};
 
 use ash::vk;
 
-use crate::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}};
+use crate::init::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}};
 
 use self::buffer::BufferStore;
 

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::{DeviceStore, UsesDeviceStore}, memory::{Partition, partitionsystem::{PartitionError, self, PartitionStore}, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem}};
+use crate::{memory::{Partition, partitionsystem::{PartitionError, self, PartitionStore}, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem}, init::device::{DeviceStore, UsesDeviceStore}};
 
 use super::Buffer;
 

@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::device::DeviceStore;
-
+use crate::init::device::DeviceStore;
 
 pub mod submit;
 pub struct SubmitSet{
