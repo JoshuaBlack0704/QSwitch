@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::DeviceProvider;
+use crate::device::DeviceStore;
 
-use super::{TimelineSemaphore, semaphore::SemaphoreProvider};
+use super::{TimelineSemaphore, semaphore::SemaphoreStore};
 
-impl<D:DeviceProvider> TimelineSemaphore<D>{
+impl<D:DeviceStore> TimelineSemaphore<D>{
     pub fn new(device_provider: &Arc<D>, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
         let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
         .semaphore_type(vk::SemaphoreType::TIMELINE)
@@ -51,7 +51,7 @@ impl<D:DeviceProvider> TimelineSemaphore<D>{
     }
 }
 
-impl<D:DeviceProvider> SemaphoreProvider for TimelineSemaphore<D>{
+impl<D:DeviceStore> SemaphoreStore for TimelineSemaphore<D>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
@@ -69,7 +69,7 @@ impl<D:DeviceProvider> SemaphoreProvider for TimelineSemaphore<D>{
 
 
 
-impl<D:DeviceProvider> Drop for TimelineSemaphore<D>{
+impl<D:DeviceStore> Drop for TimelineSemaphore<D>{
     fn drop(&mut self) {
         debug!("Destroyed timeline semaphore {:?}", self.semaphore);
         unsafe{

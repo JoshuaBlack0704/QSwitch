@@ -2,9 +2,9 @@ use std::{sync::{Arc, Mutex}, collections::VecDeque};
 
 use ash::vk;
 
-use crate::device::DeviceProvider;
+use crate::device::DeviceStore;
 
-use self::partitionsystem::PartitionProvider;
+use self::partitionsystem::PartitionStore;
 
 
 
@@ -20,7 +20,7 @@ pub struct PartitionSystem{
 }
 
 pub mod memory;
-pub struct Memory<D: DeviceProvider, P: PartitionProvider>{
+pub struct Memory<D: DeviceStore, P: PartitionStore>{
     device: Arc<D>,
     partition_sys: Mutex<P>,
     memory: vk::DeviceMemory,

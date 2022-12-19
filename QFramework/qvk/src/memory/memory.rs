@@ -2,38 +2,38 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::{DeviceProvider, UsesDeviceProvider};
+use crate::device::{DeviceStore, UsesDeviceStore};
 
-use super::{Memory, partitionsystem::{PartitionProvider, self}, PartitionSystem, Partition};
+use super::{Memory, partitionsystem::{PartitionStore, self}, PartitionSystem, Partition};
 
 #[derive(Clone)]
 pub enum MemoryAllocateExtension{
     Flags(vk::MemoryAllocateFlagsInfo),
 }
 
-pub trait MemorySettingsProvider{
+pub trait MemorySettingsStore{
     fn size(&self) -> vk::DeviceSize;
     fn memory_type_index(&self) -> u32;
     fn extensions(&self) -> Option<Vec<MemoryAllocateExtension>>;
 }
-pub trait MemoryProvider{
+pub trait MemoryStore{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
     fn memory(&self) -> &vk::DeviceMemory;
 }
 
-pub trait UsesMemoryProvider<M:MemoryProvider>{
+pub trait UsesMemoryStore<M:MemoryStore>{
     fn memory_provider(&self) -> &Arc<M>;
 }
 
 #[derive(Clone)]
-pub struct SettingsProvider{
+pub struct SettingsStore{
     pub size: vk::DeviceSize,
     pub memory_type_index: u32,
     pub extensions: Option<Vec<MemoryAllocateExtension>>,
 }
 
-impl<D: DeviceProvider> Memory<D,PartitionSystem>{
-    pub fn new<S:MemorySettingsProvider>(settings: &S, device_provider: &Arc<D>) -> Result<Arc<Memory<D,PartitionSystem>>, vk::Result>{
+impl<D: DeviceStore> Memory<D,PartitionSystem>{
+    pub fn new<S:MemorySettingsStore>(settings: &S, device_provider: &Arc<D>) -> Result<Arc<Memory<D,PartitionSystem>>, vk::Result>{
         // We need to create the initial memory from our settings
         
         let mut memory_cinfo = vk::MemoryAllocateInfo::builder();
@@ -67,7 +67,7 @@ impl<D: DeviceProvider> Memory<D,PartitionSystem>{
         }
     }
 }
-impl<D: DeviceProvider, P: PartitionProvider> MemoryProvider for Memory<D,P>{
+impl<D: DeviceStore, P: PartitionStore> MemoryStore for Memory<D,P>{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError> {
         self.partition_sys.lock().unwrap().partition(size, move |offset| {
             if let Some(alignment) = alignment{
@@ -85,7 +85,7 @@ impl<D: DeviceProvider, P: PartitionProvider> MemoryProvider for Memory<D,P>{
 
 }
 
-impl<D: DeviceProvider, P: PartitionProvider> Drop for Memory<D,P>{
+impl<D: DeviceStore, P: PartitionStore> Drop for Memory<D,P>{
     fn drop(&mut self) {
         debug!("Destroyed device memory {:?}", self.memory);
         unsafe{
@@ -94,9 +94,9 @@ impl<D: DeviceProvider, P: PartitionProvider> Drop for Memory<D,P>{
     }
 }
 
-impl SettingsProvider{
-    pub fn new(size: vk::DeviceSize, memory_type_index: u32) -> SettingsProvider {
-        SettingsProvider{ size, memory_type_index, extensions: None }
+impl SettingsStore{
+    pub fn new(size: vk::DeviceSize, memory_type_index: u32) -> SettingsStore {
+        SettingsStore{ size, memory_type_index, extensions: None }
     }
     
     pub fn add_extension(&mut self, ext: MemoryAllocateExtension){
@@ -109,7 +109,7 @@ impl SettingsProvider{
     }
 }
 
-impl MemorySettingsProvider for SettingsProvider{
+impl MemorySettingsStore for SettingsStore{
     fn size(&self) -> vk::DeviceSize {
         self.size
     }
@@ -124,7 +124,7 @@ impl MemorySettingsProvider for SettingsProvider{
 
 }
 
-impl<D:DeviceProvider, P:PartitionProvider> UsesDeviceProvider<D> for Memory<D,P>{
+impl<D:DeviceStore, P:PartitionStore> UsesDeviceStore<D> for Memory<D,P>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

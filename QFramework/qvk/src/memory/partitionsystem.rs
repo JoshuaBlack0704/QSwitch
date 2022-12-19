@@ -3,7 +3,7 @@ use std::{sync::Arc, collections::VecDeque};
 use super::{PartitionSystem, Partition};
 
 /// (start_addr, size, tracker)
-pub trait PartitionProvider{
+pub trait PartitionStore{
     /// The alignment fn takes and offset and returns if the offset is aligned
     fn partition<F:Fn(u64) -> bool>(&mut self, size: u64, alignment_fn: F) -> Result<Partition, PartitionError>;    
 }
@@ -60,7 +60,7 @@ impl PartitionSystem{
     }
 }
 
-impl PartitionProvider for PartitionSystem{
+impl PartitionStore for PartitionSystem{
     fn partition<F:Fn(u64) -> bool>(&mut self, size: u64, alignment_fn: F) -> Result<Partition, PartitionError> {
         // As we try accumulating enough memory will will also combine unused memory
         // We will approach this by queueing through the partitions

@@ -3,14 +3,14 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::info;
 
-use crate::{device::DeviceProvider, commandpool::CommandPoolProvider, CommandBufferSet};
+use crate::{device::DeviceStore, commandpool::CommandPoolStore, CommandBufferSet};
 
-pub trait CommandBufferSettingsProvider{
+pub trait CommandBufferSettingsStore{
     fn cmd_level(&self) -> vk::CommandBufferLevel;
     fn cmd_batch_size(&self) -> u32;
     fn cmd_reset_flags(&self) -> Option<vk::CommandBufferResetFlags>;
 }
-pub trait CommandBufferProvider{
+pub trait CommandBufferStore{
     fn next_cmd(&self) -> Arc<vk::CommandBuffer>;
     fn reset_cmd(&self, cmd: &Arc<vk::CommandBuffer>);
 }
@@ -20,13 +20,13 @@ pub enum CopyOpError{
 }
 
 #[derive(Clone)]
-pub struct SettingsProvider{
+pub struct SettingsStore{
     pub cmd_level: vk::CommandBufferLevel,
     pub batch_size: u32,
     pub reset_flags: Option<vk::CommandBufferResetFlags>,
 }
 
-impl<D: DeviceProvider, P: CommandPoolProvider, S: CommandBufferSettingsProvider + Clone> CommandBufferSet<D,P,S>{
+impl<D: DeviceStore, P: CommandPoolStore, S: CommandBufferSettingsStore + Clone> CommandBufferSet<D,P,S>{
     pub fn new(settings: &S, device_provider: &Arc<D>, cmdpool_provider: &Arc<P>) -> Arc<CommandBufferSet<D,P,S>> {
         Arc::new(
             CommandBufferSet{ 
@@ -39,7 +39,7 @@ impl<D: DeviceProvider, P: CommandPoolProvider, S: CommandBufferSettingsProvider
     }
 }
 
-impl<D:DeviceProvider, P:CommandPoolProvider, S:CommandBufferSettingsProvider> CommandBufferProvider for CommandBufferSet<D,P,S>{
+impl<D:DeviceStore, P:CommandPoolStore, S:CommandBufferSettingsStore> CommandBufferStore for CommandBufferSet<D,P,S>{
     fn next_cmd(&self) -> Arc<vk::CommandBuffer> {
         // First we need to see if there are any cmds available
         let mut cmds = self.cmds.lock().unwrap();
@@ -74,22 +74,22 @@ impl<D:DeviceProvider, P:CommandPoolProvider, S:CommandBufferSettingsProvider> C
     }
 }
 
-impl SettingsProvider{
-    pub fn new(level: vk::CommandBufferLevel, batch_size: u32) -> SettingsProvider {
-        SettingsProvider{ cmd_level: level, batch_size, reset_flags: None }
+impl SettingsStore{
+    pub fn new(level: vk::CommandBufferLevel, batch_size: u32) -> SettingsStore {
+        SettingsStore{ cmd_level: level, batch_size, reset_flags: None }
     }
     pub fn use_reset_flags(&mut self, flags: vk::CommandBufferResetFlags){
         self.reset_flags = Some(flags);
     }
 }
 
-impl Default for SettingsProvider{
+impl Default for SettingsStore{
     fn default() -> Self {
         Self::new(vk::CommandBufferLevel::PRIMARY, 3)
     }
 }
 
-impl CommandBufferSettingsProvider for SettingsProvider{
+impl CommandBufferSettingsStore for SettingsStore{
     fn cmd_level(&self) -> vk::CommandBufferLevel {
         self.cmd_level
     }

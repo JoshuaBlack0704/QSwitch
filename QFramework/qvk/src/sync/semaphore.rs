@@ -3,16 +3,16 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::{DeviceProvider, UsesDeviceProvider};
+use crate::device::{DeviceStore, UsesDeviceStore};
 
 use super::Semaphore;
 
-pub trait SemaphoreProvider{
+pub trait SemaphoreStore{
     fn semaphore(&self) -> &vk::Semaphore;
     fn submit_info(&self, stage: vk::PipelineStageFlags2) -> vk::SemaphoreSubmitInfo;
 }
 
-impl<D:DeviceProvider> Semaphore<D>{
+impl<D:DeviceStore> Semaphore<D>{
     pub fn new(device_provider: &Arc<D>) -> Arc<Semaphore<D>>{
         let info = vk::SemaphoreCreateInfo::builder();
         let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).unwrap()};
@@ -24,7 +24,7 @@ impl<D:DeviceProvider> Semaphore<D>{
     }
 }
 
-impl<D:DeviceProvider> Drop for Semaphore<D>{
+impl<D:DeviceStore> Drop for Semaphore<D>{
     fn drop(&mut self) {
         debug!("Destroyed semaphore {:?}", self.semaphore);
         unsafe{
@@ -33,7 +33,7 @@ impl<D:DeviceProvider> Drop for Semaphore<D>{
     }
 }
 
-impl<D:DeviceProvider> SemaphoreProvider for Semaphore<D>{
+impl<D:DeviceStore> SemaphoreStore for Semaphore<D>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
@@ -49,7 +49,7 @@ impl<D:DeviceProvider> SemaphoreProvider for Semaphore<D>{
     }
 }
 
-impl <D:DeviceProvider> UsesDeviceProvider<D> for Semaphore<D>{
+impl <D:DeviceStore> UsesDeviceStore<D> for Semaphore<D>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

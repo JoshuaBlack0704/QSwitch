@@ -1,27 +1,27 @@
 use ash::vk;
-use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, memory::{self, Memory, buffer::{Buffer, BufferPartition, buffer, bufferpartition}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutProvider, Set, self}, shader::HLSL, pipelines};
+use qvk::{instance, Instance, device::{self, DeviceStore}, Device, memory::{self, Memory, buffer::{Buffer, BufferSegment, buffer, buffersegment}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutStore, Set, self}, shader::HLSL, pipelines};
 
 
 fn main(){
     
     pretty_env_logger::init();
     
-    let mut settings = instance::SettingsProvider::default();
+    let mut settings = instance::Settings::default();
     let instance = Instance::new(&settings);
     
-    let mut settings = device::SettingsProvider::default();
+    let mut settings = device::Settings::default();
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     let device = Device::new(&settings, &instance).expect("Could not create device");
 
-    let mut settings = memory::memory::SettingsProvider::new(1024 * 1024 * 100, device.host_memory_index());
+    let mut settings = memory::memory::SettingsStore::new(1024 * 1024 * 100, device.host_memory_index());
     let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
 
-    let settings = buffer::SettingsProvider::new(1024 * 1024 * 50, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
+    let settings = buffer::SettingsStore::new(1024 * 1024 * 50, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
     let storage = Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
-    let starge_access = BufferPartition::new(&storage, 100, None).unwrap();
-    let settings = buffer::SettingsProvider::new(1024 * 1024, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
+    let starge_access = BufferSegment::new(&storage, 100, None).unwrap();
+    let settings = buffer::SettingsStore::new(1024 * 1024, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
     let uniform = Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
-    let uniform_access = BufferPartition::new(&uniform, 100, None).unwrap();
+    let uniform_access = BufferSegment::new(&uniform, 100, None).unwrap();
 
     let dlayout = DescriptorLayout::new(&device, None);
     let storage_write = DescriptorLayout::form_binding(&dlayout, &starge_access, vk::ShaderStageFlags::COMPUTE);

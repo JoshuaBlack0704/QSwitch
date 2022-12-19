@@ -3,13 +3,13 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::DeviceProvider, shader::shader::ShaderProvider};
+use crate::{device::DeviceStore, shader::shader::ShaderStore};
 
-use super::{Compute, layout::PipelineLayoutProvider};
+use super::{Compute, layout::PipelineLayoutStore};
 
 
-impl<D:DeviceProvider, L:PipelineLayoutProvider> Compute<D,L>{
-    pub fn new<Shd:ShaderProvider>(device_provider: &Arc<D>, shader: &Arc<Shd>, layout_provider: &Arc<L>, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
+impl<D:DeviceStore, L:PipelineLayoutStore> Compute<D,L>{
+    pub fn new<Shd:ShaderStore>(device_provider: &Arc<D>, shader: &Arc<Shd>, layout_provider: &Arc<L>, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
         let mut info = vk::ComputePipelineCreateInfo::builder();
         if let Some(flags) = flags{
             info = info.flags(flags);
@@ -37,7 +37,7 @@ impl<D:DeviceProvider, L:PipelineLayoutProvider> Compute<D,L>{
     }
 }
 
-impl<D:DeviceProvider, L:PipelineLayoutProvider> Drop for Compute<D,L>{
+impl<D:DeviceStore, L:PipelineLayoutStore> Drop for Compute<D,L>{
     fn drop(&mut self) {
         debug!("Destroyed compute pipeline {:?}", self.pipeline);
         unsafe{

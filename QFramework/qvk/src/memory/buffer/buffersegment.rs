@@ -3,32 +3,32 @@ use std::{sync::{Arc, Mutex}, mem::size_of};
 use ash::vk::{self, BufferUsageFlags};
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferProvider}, queue::{SubmitSet, Queue, submit::SubmitInfoProvider, queue::QueueProvider}, memory::{Partition, memory::{MemoryProvider, UsesMemoryProvider}, PartitionSystem, partitionsystem::{PartitionError, PartitionProvider}, buffer::buffer::BufferAlignmentType}, image::{imageresource::ImageSubresourceProvider, image::{UsesImageProvider, ImageProvider}}, descriptor::descriptorlayout::DescriptorLayoutBindingProvider};
+use crate::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}, CommandPool, commandpool, CommandBufferSet, commandbuffer::{self, CommandBufferStore}, queue::{SubmitSet, Queue, submit::SubmitInfoStore, queue::QueueStore}, memory::{Partition, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem, partitionsystem::{PartitionError, PartitionStore}, buffer::buffer::BufferAlignmentType}, image::{imageresource::ImageSubresourceStore, image::{UsesImageStore, ImageStore}}, descriptor::descriptorlayout::DescriptorLayoutBindingStore};
 
-use super::{buffer::{BufferProvider, UsesBufferProvider}, BufferPartition};
+use super::{buffer::{BufferStore, UsesBufferStore}, BufferSegment};
 
 
-pub trait BufferPartitionProvider{
+pub trait BufferSegmentStore{
     fn get_partition(&self) -> &Partition;
     fn device_addr(&self) -> vk::DeviceSize;
-    fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferPartitionMemOpError>;
-    fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferPartitionMemOpError>;
-    fn copy_to_partition<B:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<B>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError>;
-    fn copy_to_partition_internal<B:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError>;
+    fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_partition<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_partition_internal<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image<I:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    fn copy_to_image<I:ImageStore, IS:ImageSubresourceStore + UsesImageStore<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image_internal<I:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    fn copy_to_image_internal<I:ImageStore, IS:ImageSubresourceStore + UsesImageStore<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
 
 #[derive(Clone, Debug)]
-pub enum BufferPartitionMemOpError{
+pub enum BufferSegmentMemOpError{
     NoSpace,
     VulkanError(vk::Result),
 }
 
 
-impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>> BufferPartition<I,D,M,B,PartitionSystem>{
+impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:BufferStore + UsesMemoryStore<M> + UsesDeviceStore<D>> BufferSegment<I,D,M,B,PartitionSystem>{
     pub fn new(buffer_provider: &Arc<B>, size: u64, custom_alignment: Option<u64>) -> Result<Arc<Self>, PartitionError>{
         
         let p;
@@ -47,7 +47,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         let p = p.unwrap();
         info!("Partitioned buffer {:?} at offset {:?} for {:?} bytes", *buffer_provider.buffer(), p.offset, p.size);
         Ok(
-            Arc::new(BufferPartition{
+            Arc::new(BufferSegment{
             buffer: buffer_provider.clone(),
             _partition_sys: Mutex::new(PartitionSystem::new(p.size)),
             partition: p,
@@ -61,7 +61,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
     }
 }
 
-impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider> BufferPartitionProvider for BufferPartition<I,D,M,B,P>{
+impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:BufferStore + UsesMemoryStore<M> + UsesDeviceStore<D>, P:PartitionStore> BufferSegmentStore for BufferSegment<I,D,M,B,P>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
@@ -75,10 +75,10 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         addr
     }
 
-    fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferPartitionMemOpError> {
+    fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError> {
         let needed_size = size_of::<T>() * src.len();
         if needed_size > self.partition.size as usize{
-            return Err(BufferPartitionMemOpError::NoSpace);
+            return Err(BufferSegmentMemOpError::NoSpace);
         }
 
         let target_offset = self.partition.offset + self.buffer.home_partition().offset;
@@ -102,10 +102,10 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         Ok(())
     }
 
-    fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferPartitionMemOpError> {
+    fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError> {
         let needed_size = self.partition.size;
         if needed_size as usize > dst.len() * size_of::<T>(){
-            return Err(BufferPartitionMemOpError::NoSpace)
+            return Err(BufferSegmentMemOpError::NoSpace)
         }
 
         let target_offset = self.partition.offset + self.buffer.home_partition().offset;
@@ -129,9 +129,9 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         Ok(())
     }
 
-    fn copy_to_partition<Buf:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<Buf>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
+    fn copy_to_partition<Buf:BufferStore, BP:BufferSegmentStore + UsesBufferStore<Buf>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
         if self.partition.size > dst.get_partition().size(){
-            return Err(BufferPartitionMemOpError::NoSpace);
+            return Err(BufferSegmentMemOpError::NoSpace);
         }
 
         let op = [vk::BufferCopy::builder()
@@ -147,10 +147,10 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         Ok(())
     }
 
-    fn copy_to_partition_internal<Buf:BufferProvider, BP:BufferPartitionProvider + UsesBufferProvider<Buf>>(&self, dst: &Arc<BP>) -> Result<(), BufferPartitionMemOpError> {
-        let settings = commandpool::SettingsProvider::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
+    fn copy_to_partition_internal<Buf:BufferStore, BP:BufferSegmentStore + UsesBufferStore<Buf>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
+        let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
+        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
         let cmd_set = CommandBufferSet::new(&settings, self.buffer.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
         unsafe{
@@ -167,7 +167,7 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         Ok(())
     }
 
-    fn copy_to_image<Img:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+    fn copy_to_image<Img:ImageStore, IS:ImageSubresourceStore + UsesImageStore<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
         if dst.extent().width == 0{
             return Ok(());
         }
@@ -208,10 +208,10 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
         Ok(())
     }
 
-    fn copy_to_image_internal<Img:ImageProvider, IS:ImageSubresourceProvider + UsesImageProvider<Img>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
-        let settings = commandpool::SettingsProvider::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
+    fn copy_to_image_internal<Img:ImageStore, IS:ImageSubresourceStore + UsesImageStore<Img>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+        let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsProvider::default(); settings.batch_size = 1;
+        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
         let cmd_set = CommandBufferSet::new(&settings, self.buffer.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
         unsafe{
@@ -231,13 +231,13 @@ impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryPro
 
 }
 
-impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider> UsesBufferProvider<B> for BufferPartition<I,D,M,B,P>{
+impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:BufferStore + UsesMemoryStore<M> + UsesDeviceStore<D>, P:PartitionStore> UsesBufferStore<B> for BufferSegment<I,D,M,B,P>{
     fn buffer_provider(&self) -> &Arc<B> {
         &self.buffer
     }
 }
 
-impl<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B:BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>> DescriptorLayoutBindingProvider for BufferPartition<I,D,M,B,PartitionSystem>{
+impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:BufferStore + UsesMemoryStore<M> + UsesDeviceStore<D>> DescriptorLayoutBindingStore for BufferSegment<I,D,M,B,PartitionSystem>{
     fn binding(&self) -> vk::DescriptorSetLayoutBinding {
         let binding_type ;
         let usage = self.buffer.usage();

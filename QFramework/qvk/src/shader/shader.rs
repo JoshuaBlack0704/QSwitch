@@ -3,21 +3,21 @@ use std::{sync::Arc, ffi::CString};
 use ash::vk;
 use log::{info, debug};
 
-use crate::device::DeviceProvider;
+use crate::device::DeviceStore;
 
 use super::Shader;
 
-pub trait SpirvProvider{
+pub trait SpirvStore{
     fn code(&self) -> &[u32];
     fn entry_name(&self) -> &str;
 }
 
-pub trait ShaderProvider{
+pub trait ShaderStore{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo;
 }
 
-impl<D:DeviceProvider> Shader<D>{
-    pub fn new<Spv: SpirvProvider>(device_provider: &Arc<D>, spriv_data: &Spv, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {
+impl<D:DeviceStore> Shader<D>{
+    pub fn new<Spv: SpirvStore>(device_provider: &Arc<D>, spriv_data: &Spv, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {
         let mut info = vk::ShaderModuleCreateInfo::builder();
         if let Some(flags) = flags{
             info = info.flags(flags);
@@ -41,7 +41,7 @@ impl<D:DeviceProvider> Shader<D>{
     }
 }
 
-impl<D:DeviceProvider> Drop for Shader<D>{
+impl<D:DeviceStore> Drop for Shader<D>{
     fn drop(&mut self) {
         debug!("Destroyed shader module {:?}", self.module);
         unsafe{
@@ -50,7 +50,7 @@ impl<D:DeviceProvider> Drop for Shader<D>{
     }
 }
 
-impl<D:DeviceProvider> ShaderProvider for Shader<D>{
+impl<D:DeviceStore> ShaderStore for Shader<D>{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo {
         vk::PipelineShaderStageCreateInfo::builder()
         .stage(self.stage)

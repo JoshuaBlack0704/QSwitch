@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::sync::semaphore::SemaphoreProvider;
+use crate::sync::semaphore::SemaphoreStore;
 
 use super::SubmitSet;
 
-pub trait SubmitInfoProvider{
+pub trait SubmitInfoStore{
     fn info(&self) -> vk::SubmitInfo2;
     fn add_cmd(&mut self, cmd: Arc<vk::CommandBuffer>);
-    fn add_wait<S:SemaphoreProvider>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
-    fn add_signal<S:SemaphoreProvider>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
+    fn add_wait<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
+    fn add_signal<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
 }
 
 
@@ -26,7 +26,7 @@ impl SubmitSet{
     }
 }
 
-impl SubmitInfoProvider for SubmitSet{
+impl SubmitInfoStore for SubmitSet{
     fn info(&self) -> vk::SubmitInfo2 {
       
         vk::SubmitInfo2::builder()
@@ -42,12 +42,12 @@ impl SubmitInfoProvider for SubmitSet{
         self.live_cmds.push(info.build());
     }
 
-    fn add_wait<S:SemaphoreProvider>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
+    fn add_wait<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
         let info = semaphore_provider.submit_info(stage);
         self.wait_semaphores.push(info);
     }
 
-    fn add_signal<S:SemaphoreProvider>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
+    fn add_signal<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
         let info = semaphore_provider.submit_info(stage);
         self.signal_semaphores.push(info);
     }

@@ -2,10 +2,10 @@ use std::{sync::Arc, ffi::CString};
 
 use ash::vk;
 
-use crate::device::DeviceProvider;
+use crate::device::DeviceStore;
 
 pub mod shader;
-pub struct Shader<D:DeviceProvider>{
+pub struct Shader<D:DeviceStore>{
     device: Arc<D>,
     module: vk::ShaderModule,
     stage: vk::ShaderStageFlags,

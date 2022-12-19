@@ -2,12 +2,12 @@ use std::{sync::{Arc, Mutex}, marker::PhantomData};
 
 use ash::vk;
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, memory::{memory::MemoryProvider, Partition}, instance::{InstanceProvider, UsesInstanceProvider}};
+use crate::{device::{DeviceStore, UsesDeviceStore}, memory::{memory::MemoryStore, Partition}, instance::{InstanceStore, UsesInstanceStore}};
 
-use self::image::ImageProvider;
+use self::image::ImageStore;
 
 pub mod image;
-pub struct Image<D:DeviceProvider, M:MemoryProvider>{
+pub struct Image<D:DeviceStore, M:MemoryStore>{
     device: Arc<D>,
     memory: Option<Arc<M>>,
     _partition: Option<Partition>,
@@ -18,7 +18,7 @@ pub struct Image<D:DeviceProvider, M:MemoryProvider>{
 
 
 pub mod imageresource;
-pub struct ImageResource<I:InstanceProvider, D:DeviceProvider + UsesInstanceProvider<I>, Img:ImageProvider + UsesDeviceProvider<D>>{
+pub struct ImageResource<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + UsesDeviceStore<D>>{
     image: Arc<Img>,
     resorces: vk::ImageSubresourceLayers,
     offset: vk::Offset3D,
@@ -29,7 +29,7 @@ pub struct ImageResource<I:InstanceProvider, D:DeviceProvider + UsesInstanceProv
 }
 
 pub mod imageview;
-pub struct ImageView<D:DeviceProvider, Img:ImageProvider>{
+pub struct ImageView<D:DeviceStore, Img:ImageStore>{
     _device: Arc<D>,
     _image: Arc<Img>,
     _view: vk::ImageView,

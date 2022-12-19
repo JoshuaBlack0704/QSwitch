@@ -3,7 +3,7 @@ use std::fs;
 
 use shaderc::{self, Compiler, CompileOptions, ShaderKind};
 
-use super::{HLSL, shader::SpirvProvider};
+use super::{HLSL, shader::SpirvStore};
 
 impl HLSL {
     pub fn new<'a>(file: &str, shader_kind: ShaderKind, entry_name: &str, options: Option<CompileOptions<'a>>) -> HLSL {
@@ -28,7 +28,7 @@ impl HLSL {
     }
 }
 
-impl SpirvProvider for HLSL{
+impl SpirvStore for HLSL{
     fn code(&self) -> &[u32] {
         &self.code
     }

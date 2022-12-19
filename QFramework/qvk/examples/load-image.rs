@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{instance, Instance, device::{self, DeviceProvider}, Device, swapchain::{self, SwapchainProvider}, Swapchain, memory::{memory, Memory}, image::{Image, ImageResource, image::ImageProvider}};
+use qvk::{instance, Instance, device::{self, DeviceStore}, Device, swapchain::{self, SwapchainStore}, Swapchain, memory::{memory, Memory}, image::{Image, ImageResource, image::ImageStore}};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent}};
 
@@ -10,24 +10,24 @@ fn main(){
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
     
-    let mut settings = instance::SettingsProvider::default();
+    let mut settings = instance::Settings::default();
     settings.use_window_extensions(window.raw_display_handle());
     let instance = Instance::new(&settings);
     
-    let mut settings = device::SettingsProvider::default();
+    let mut settings = device::Settings::default();
     settings.add_window(&window);
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     settings.add_extension(ash::extensions::khr::Swapchain::name().as_ptr());
     let device = Device::new(&settings, &instance).expect("Could not create device");
 
-    let settings = swapchain::SettingsProvider::default();
+    let settings = swapchain::SettingsStore::default();
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
    
-    let mut settings = memory::SettingsProvider::new(1024 * 1024 * 100, device.device_memory_index());
+    let mut settings = memory::SettingsStore::new(1024 * 1024 * 100, device.device_memory_index());
     settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
     let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
 
-    let image_settings = qvk::image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
+    let image_settings = qvk::image::image::SettingsStore::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
     let image = Image::new(&device, &dev_mem, &image_settings).unwrap();
     let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
     let file = String::from("examples/resources/drone.jpg");

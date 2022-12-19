@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex};
 
 use ash::{self, vk};
-use commandbuffer::CommandBufferSettingsProvider;
-use commandpool::{CommandPoolSettingsProvider, CommandPoolProvider};
-use device::DeviceProvider;
-use self::image::{image::ImageProvider, imageview::ImageViewProvider};
-use instance::InstanceProvider;
-use queue::queue::QueueProvider;
-use swapchain::SwapchainSettingsProvider;
+use commandbuffer::CommandBufferSettingsStore;
+use commandpool::{CommandPoolSettingsStore, CommandPoolStore};
+use device::DeviceStore;
+use self::image::{image::ImageStore, imageview::ImageViewStore};
+use instance::InstanceStore;
+use queue::queue::QueueStore;
+use swapchain::SwapchainSettingsStore;
 
 /// The Provider pattern
 /// The framework will provide complete abstraction and zero dependence by using a provider pattern
@@ -15,7 +15,7 @@ use swapchain::SwapchainSettingsProvider;
 /// We an object needs a particular dependency it will simply call the provider to give it the data
 /// How the data is aquired is completley opaque to the requester
 
-pub trait SettingsProvider<'a, B>{
+pub trait SettingsStore<'a, B>{
     fn add_to_builder(&'a self, builder: B) -> B;
 }
 
@@ -26,7 +26,7 @@ pub struct Instance{
 }
 
 pub mod device;
-pub struct Device<I: InstanceProvider>{
+pub struct Device<I: InstanceStore>{
     instance: Arc<I>,
     surface: Option<vk::SurfaceKHR>,
     surface_loader: ash::extensions::khr::Surface,
@@ -36,13 +36,13 @@ pub struct Device<I: InstanceProvider>{
 }
 
 pub mod commandpool;
-pub struct CommandPool<D: DeviceProvider, S: CommandPoolSettingsProvider>{
+pub struct CommandPool<D: DeviceStore, S: CommandPoolSettingsStore>{
     device: Arc<D>,
     settings: S,
     command_pool: vk::CommandPool,
 }
 pub mod commandbuffer;
-pub struct CommandBufferSet<D: DeviceProvider, P: CommandPoolProvider, S: CommandBufferSettingsProvider>{
+pub struct CommandBufferSet<D: DeviceStore, P: CommandPoolStore, S: CommandBufferSettingsStore>{
     device: Arc<D>,
     cmdpool: Arc<P>,
     settings: S,
@@ -52,7 +52,7 @@ pub struct CommandBufferSet<D: DeviceProvider, P: CommandPoolProvider, S: Comman
 pub mod memory;
 
 pub mod swapchain;
-pub struct Swapchain<I:InstanceProvider, D: DeviceProvider, S: SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider, Q:QueueProvider>{
+pub struct Swapchain<I:InstanceStore, D: DeviceStore, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore>{
     _instance: Arc<I>,
     device: Arc<D>,
     _settings: S,

@@ -6,7 +6,7 @@ use raw_window_handle::RawDisplayHandle;
 
 use crate::Instance;
 
-pub trait InstanceSettingsProvider{
+pub trait InstanceSettingsStore{
     fn app_info(&self) -> vk::ApplicationInfo;
     fn use_validation_layers(&self) -> bool;
     fn use_debug(&self) -> bool;
@@ -15,16 +15,16 @@ pub trait InstanceSettingsProvider{
     fn validation_disables(&self) -> Option<&[vk::ValidationFeatureDisableEXT]>;
 }
 
-pub trait InstanceProvider{
+pub trait InstanceStore{
     fn instance(&self) -> &ash::Instance;
     fn entry(&self) -> &ash::Entry;
 }
 
-pub trait UsesInstanceProvider<I:InstanceProvider>{
+pub trait UsesInstanceStore<I:InstanceStore>{
     fn instance_provider(&self) -> &Arc<I>;
 }
 
-pub struct SettingsProvider{
+pub struct Settings{
     pub app_name: CString,
     pub engine_name: CString,
     pub app_version: u32,
@@ -38,7 +38,7 @@ pub struct SettingsProvider{
 }
 
 impl Instance{
-    pub fn new<S: InstanceSettingsProvider>(settings: &S) -> Arc<Instance> {
+    pub fn new<S: InstanceSettingsStore>(settings: &S) -> Arc<Instance> {
         // The beginning of our new vulkan system
         let entry = ash::Entry::linked();
         let app_info = settings.app_info();
@@ -86,7 +86,7 @@ impl Instance{
     }
 }
 
-impl InstanceProvider for Instance{
+impl InstanceStore for Instance{
     fn instance(&self) -> &ash::Instance {
         &self.instance
     }
@@ -105,7 +105,7 @@ impl Drop for Instance{
     }
 }
 
-impl SettingsProvider{
+impl Settings{
         pub fn new(
         app_name: CString,
         engine_name: CString,
@@ -116,9 +116,9 @@ impl SettingsProvider{
         validation_enables: Option<Vec<vk::ValidationFeatureEnableEXT>>,
         validation_disables: Option<Vec<vk::ValidationFeatureDisableEXT>>,
         use_debug: bool,
-    ) -> SettingsProvider {
+    ) -> Settings {
         
-        SettingsProvider{ 
+        Settings{ 
             app_name,
             engine_name,
             app_version,
@@ -147,7 +147,7 @@ fn validate() -> bool{
     false
 }
 
-impl Default for SettingsProvider{
+impl Default for Settings{
     fn default() -> Self {
         
         Self::new(
@@ -159,7 +159,7 @@ impl Default for SettingsProvider{
     }
 }
 
-impl InstanceSettingsProvider for SettingsProvider{
+impl InstanceSettingsStore for Settings{
     fn app_info(&self) -> vk::ApplicationInfo {
         vk::ApplicationInfo::builder()
         .api_version(self.api_version)

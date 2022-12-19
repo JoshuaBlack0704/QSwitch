@@ -5,9 +5,9 @@ use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
-use crate::{Device, instance::{InstanceProvider, UsesInstanceProvider}};
+use crate::{Device, instance::{InstanceStore, UsesInstanceStore}};
 
-pub trait DeviceSettingsProvider{
+pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;
     fn surface_support(&self) -> Option<&winit::window::Window>;
     fn use_features(&self) -> Option<vk::PhysicalDeviceFeatures>{None}
@@ -19,7 +19,7 @@ pub trait DeviceSettingsProvider{
     fn use_device_extensions(&self) -> Option<&[*const i8]>;
 }
 
-pub trait DeviceProvider{
+pub trait DeviceStore{
     fn device(&self) -> &ash::Device;
     fn surface(&self) -> &Option<SurfaceKHR>;
     fn physical_device(&self) -> &PhysicalDeviceData;
@@ -33,7 +33,7 @@ pub trait DeviceProvider{
     fn host_memory_index(&self) -> u32;
 }
 
-pub trait UsesDeviceProvider<D:DeviceProvider>{
+pub trait UsesDeviceStore<D:DeviceStore>{
     fn device_provider(&self) -> &Arc<D>;
 }
 
@@ -53,7 +53,7 @@ pub enum DeviceCreateError{
     Unavailable,
 }
 
-pub struct SettingsProvider<'a>{
+pub struct Settings<'a>{
     pub choose_device:  bool,
     pub surface_support:  Option<&'a winit::window::Window>,
     pub features: Option<vk::PhysicalDeviceFeatures>,
@@ -66,8 +66,8 @@ pub struct SettingsProvider<'a>{
     
 }
 
-impl<I:InstanceProvider> Device<I>{
-    pub fn new<S:DeviceSettingsProvider>(settings: &S, instance_provider: &Arc<I>) -> Result<Arc<Device<I>>, DeviceCreateError> {
+impl<I:InstanceStore> Device<I>{
+    pub fn new<S:DeviceSettingsStore>(settings: &S, instance_provider: &Arc<I>) -> Result<Arc<Device<I>>, DeviceCreateError> {
         let instance = instance_provider.instance();
         let entry = instance_provider.entry();
         let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
@@ -206,7 +206,7 @@ impl<I:InstanceProvider> Device<I>{
     }
 }
 
-impl<I:InstanceProvider> DeviceProvider for Device<I>{
+impl<I:InstanceStore> DeviceStore for Device<I>{
     fn device(&self) -> &ash::Device {
         &self.device
     }
@@ -276,7 +276,7 @@ impl<I:InstanceProvider> DeviceProvider for Device<I>{
 
 }
 
-impl<I:InstanceProvider> Drop for Device<I>{
+impl<I:InstanceStore> Drop for Device<I>{
     fn drop(&mut self) {
         unsafe{
             self.device.device_wait_idle().unwrap();
@@ -379,7 +379,7 @@ impl MemTH{
 }
 
 
-impl<'a> SettingsProvider<'a>{
+impl<'a> Settings<'a>{
     pub fn new(
         choose_device:  bool,
         surface_support:  Option<&winit::window::Window>,
@@ -390,8 +390,8 @@ impl<'a> SettingsProvider<'a>{
         raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
         acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
         device_extensions: Option<Vec<*const i8>>,
-    ) -> SettingsProvider {
-        SettingsProvider{ 
+    ) -> Settings {
+        Settings{ 
             choose_device,
             surface_support,
             features,
@@ -432,7 +432,7 @@ impl<'a> SettingsProvider<'a>{
     
 }
 
-impl Default for SettingsProvider<'_>{
+impl Default for Settings<'_>{
     fn default() -> Self {
         let mut settings = Self::new(false, None, None, None, None, None, None, None, None);
         settings.add_extension(ash::extensions::khr::Synchronization2::name().as_ptr());
@@ -449,7 +449,7 @@ impl Default for SettingsProvider<'_>{
     }
 }
 
-impl<'a> DeviceSettingsProvider for SettingsProvider<'a>{
+impl<'a> DeviceSettingsStore for Settings<'a>{
     fn choose_device(&self) -> bool {
         self.choose_device
     }
@@ -478,7 +478,7 @@ impl<'a> DeviceSettingsProvider for SettingsProvider<'a>{
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{self.acc_struct_features}
 }
 
-impl<I:InstanceProvider> UsesInstanceProvider<I> for Device<I>{
+impl<I:InstanceStore> UsesInstanceStore<I> for Device<I>{
     fn instance_provider(&self) -> &Arc<I> {
         &self.instance
     }

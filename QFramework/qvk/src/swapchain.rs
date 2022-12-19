@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{sync::{semaphore::SemaphoreProvider, fence::FenceProvider, Semaphore, self}, image::{Image, ImageView, image::{ImageProvider, UsesImageProvider}, imageview::ImageViewProvider, imageresource::ImageSubresourceProvider, ImageResource}, memory::{Memory, PartitionSystem}, instance::{InstanceProvider, UsesInstanceProvider}, device::{DeviceProvider, UsesDeviceProvider}, Swapchain, queue::{queue::QueueProvider, Queue}};
+use crate::{sync::{semaphore::SemaphoreStore, fence::FenceStore, Semaphore, self}, image::{Image, ImageView, image::{ImageStore, UsesImageStore}, imageview::ImageViewStore, imageresource::ImageSubresourceStore, ImageResource}, memory::{Memory, PartitionSystem}, instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}, Swapchain, queue::{queue::QueueStore, Queue}};
 
 
-pub trait SwapchainSettingsProvider{
+pub trait SwapchainSettingsStore{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
     fn create_flags(&self) -> Option<vk::SwapchainCreateFlagsKHR>;
     fn custom_min_image_count(&self) -> Option<u32>;
@@ -21,10 +21,10 @@ pub trait SwapchainSettingsProvider{
     fn clipped(&self) -> bool;
 }
 
-pub trait SwapchainProvider{
-    fn present<S:SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
-    fn wait_present<S:SemaphoreProvider>(&self, next_image: u32, waits: Option<&[&Arc<S>]>);
-    fn aquire_next_image<F:FenceProvider, S:SemaphoreProvider>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
+pub trait SwapchainStore{
+    fn present<S:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
+    fn wait_present<S:SemaphoreStore>(&self, next_image: u32, waits: Option<&[&Arc<S>]>);
+    fn aquire_next_image<F:FenceStore, S:SemaphoreStore>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
     fn resize(&self);
     fn extent(&self) -> vk::Extent3D;
 }
@@ -44,7 +44,7 @@ type ImageType<D> = Image<D, Memory<D, PartitionSystem>>;
 type ImageViewType<D> = ImageView<D, ImageType<D>>;
 
 #[derive(Clone)]
-pub struct SettingsProvider{
+pub struct SettingsStore{
     pub extensions: Option<Vec<SwapchainCreateExtension>>,
     pub create_flags: Option<vk::SwapchainCreateFlagsKHR>,
     pub custom_min_image_count: Option<u32>,
@@ -59,7 +59,7 @@ pub struct SettingsProvider{
     pub clipped: bool,
 }
 
-impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> Swapchain<I,D,S, ImageType<D>, ImageViewType<D>,Queue<D>>{
+impl<I:InstanceStore, D: DeviceStore + UsesInstanceStore<I>, S:SwapchainSettingsStore + Clone> Swapchain<I,D,S, ImageType<D>, ImageViewType<D>,Queue<D>>{
     pub fn new(device_provider: &Arc<D>, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
         let instance_provider = device_provider.instance_provider();
         let surface = device_provider.surface();
@@ -200,7 +200,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         *img_lock = images;
     }
 
-    pub fn present_image<Img:ImageProvider, IR: ImageSubresourceProvider + UsesImageProvider<Img>>(&self, src: &Arc<IR>){
+    pub fn present_image<Img:ImageStore, IR: ImageSubresourceStore + UsesImageStore<Img>>(&self, src: &Arc<IR>){
         // let semaphore:S
         let images = self.images.lock().unwrap();
         
@@ -222,8 +222,8 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
     }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:SwapchainSettingsProvider + Clone> SwapchainProvider for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>,Queue<D>>{
-    fn present<Sem:SemaphoreProvider> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
+impl<I:InstanceStore, D: DeviceStore + UsesInstanceStore<I>, S:SwapchainSettingsStore + Clone> SwapchainStore for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>,Queue<D>>{
+    fn present<Sem:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
 
         
         let mut info = vk::PresentInfoKHR::builder();
@@ -254,7 +254,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         *swapchain_lock = new_swapchain;
     }
 
-    fn aquire_next_image<F:FenceProvider, Sem:SemaphoreProvider>(&self, timeout: u64, fence: Option<&Arc<F>>, semaphore: Option<&Arc<Sem>>) -> u32{
+    fn aquire_next_image<F:FenceStore, Sem:SemaphoreStore>(&self, timeout: u64, fence: Option<&Arc<F>>, semaphore: Option<&Arc<Sem>>) -> u32{
         let mut present_fence = vk::Fence::null();
         let mut present_semaphore = vk::Semaphore::null();
 
@@ -291,7 +291,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
         
     }
 
-    fn wait_present<Sem:SemaphoreProvider>(&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
+    fn wait_present<Sem:SemaphoreStore>(&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
         self.present(next_image, waits);
         self.present_queue.wait_idle();
         
@@ -302,7 +302,7 @@ impl<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, S:Swapchai
     }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider, Q:QueueProvider> Drop for Swapchain<I,D,S,Img,ImgV,Q>{
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore> Drop for Swapchain<I,D,S,Img,ImgV,Q>{
     fn drop(&mut self) {
         let lock = self.swapchain.lock().unwrap();
         let swapchain = *lock;
@@ -313,7 +313,7 @@ impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:Ima
     }
 }
 
-impl SettingsProvider{
+impl SettingsStore{
     pub fn new(
     extensions: Option<Vec<SwapchainCreateExtension>>,
     create_flags: Option<vk::SwapchainCreateFlagsKHR>,
@@ -328,8 +328,8 @@ impl SettingsProvider{
     custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
     clipped: bool,
     )
--> SettingsProvider     {
-        SettingsProvider{
+-> SettingsStore     {
+        SettingsStore{
             extensions,
             create_flags,
             custom_min_image_count,
@@ -346,13 +346,13 @@ impl SettingsProvider{
     }
 }
 
-impl Default for SettingsProvider{
+impl Default for SettingsStore{
     fn default() -> Self {
         Self::new(None, None, None, None, None, 1, vk::ImageUsageFlags::TRANSFER_DST, None, None, vk::CompositeAlphaFlagsKHR::OPAQUE, Some(vec![vk::PresentModeKHR::MAILBOX]), true)
     }
 }
 
-impl SwapchainSettingsProvider for SettingsProvider{
+impl SwapchainSettingsStore for SettingsStore{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>> {
         self.extensions.clone()
     }
@@ -411,13 +411,13 @@ impl SwapchainSettingsProvider for SettingsProvider{
     }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider,Q: QueueProvider> UsesDeviceProvider<D> for Swapchain<I,D,S,Img,ImgV,Q>{
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> UsesDeviceStore<D> for Swapchain<I,D,S,Img,ImgV,Q>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }
 }
 
-impl<I:InstanceProvider, D: DeviceProvider, S:SwapchainSettingsProvider, Img:ImageProvider, ImgV: ImageViewProvider, Q: QueueProvider> UsesInstanceProvider<I> for Swapchain<I,D,S,Img,ImgV,Q>{
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> UsesInstanceStore<I> for Swapchain<I,D,S,Img,ImgV,Q>{
     fn instance_provider(&self) -> &Arc<I> {
         &self._instance
     }

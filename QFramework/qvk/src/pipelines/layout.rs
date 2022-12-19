@@ -3,11 +3,11 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::DeviceProvider, descriptor::descriptorlayout::DescriptorLayoutProvider, SettingsProvider};
+use crate::{device::DeviceStore, descriptor::descriptorlayout::DescriptorLayoutStore, SettingsStore};
 
 use super::Layout;
 
-pub trait PipelineLayoutProvider{
+pub trait PipelineLayoutStore{
     fn layout(&self) -> vk::PipelineLayout;
 }
 
@@ -17,8 +17,8 @@ pub struct Settings{
     pushes: Vec<vk::PushConstantRange>,
 }
 
-impl<'a, D:DeviceProvider> Layout<D>{
-    pub fn new<S:SettingsProvider<'a, vk::PipelineLayoutCreateInfoBuilder<'a>>>(device_provider: &Arc<D>, settings: &'a S) -> Arc<Layout<D>> {
+impl<'a, D:DeviceStore> Layout<D>{
+    pub fn new<S:SettingsStore<'a, vk::PipelineLayoutCreateInfoBuilder<'a>>>(device_provider: &Arc<D>, settings: &'a S) -> Arc<Layout<D>> {
         let mut info = vk::PipelineLayoutCreateInfo::builder();
         info = settings.add_to_builder(info);
 
@@ -39,13 +39,13 @@ impl<'a, D:DeviceProvider> Layout<D>{
     }
 }
 
-impl<D:DeviceProvider> PipelineLayoutProvider for Layout<D>{
+impl<D:DeviceStore> PipelineLayoutStore for Layout<D>{
     fn layout(&self) -> vk::PipelineLayout {
         self.layout
     }
 }
 
-impl<D:DeviceProvider> Drop for Layout<D>{
+impl<D:DeviceStore> Drop for Layout<D>{
     fn drop(&mut self) {
         debug!("Destroyed pipeline layout {:?}", self.layout);
         unsafe{
@@ -62,7 +62,7 @@ impl Settings{
             pushes: vec![],
         }
     }
-    pub fn add_layout<L:DescriptorLayoutProvider>(&mut self, layout: &Arc<L>){
+    pub fn add_layout<L:DescriptorLayoutStore>(&mut self, layout: &Arc<L>){
         self.layouts.push(layout.layout());
     }
     pub fn add_push(&mut self, push: vk::PushConstantRange){
@@ -70,7 +70,7 @@ impl Settings{
     }
 }
 
-impl<'a> SettingsProvider<'a, vk::PipelineLayoutCreateInfoBuilder<'a>> for Settings{
+impl<'a> SettingsStore<'a, vk::PipelineLayoutCreateInfoBuilder<'a>> for Settings{
     fn add_to_builder(&'a self, mut builder: vk::PipelineLayoutCreateInfoBuilder<'a>) -> vk::PipelineLayoutCreateInfoBuilder<'a> {
 
         if let Some(flags) = self.flags{

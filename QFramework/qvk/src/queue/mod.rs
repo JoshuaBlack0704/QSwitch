@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::device::DeviceProvider;
+use crate::device::DeviceStore;
 
 
 pub mod submit;
@@ -15,7 +15,7 @@ pub struct SubmitSet{
 
 
 pub mod queue;
-pub struct Queue<D:DeviceProvider>{
+pub struct Queue<D:DeviceStore>{
     device: Arc<D>,
     _queue_family: u32,
     queue: vk::Queue,

@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryProvider}, commandbuffer::{self, CommandBufferProvider}, CommandPool, commandpool, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoProvider, queue::QueueProvider}};
+use crate::{device::{DeviceStore, UsesDeviceStore}, memory::{partitionsystem, Memory, PartitionSystem, memory::MemoryStore}, commandbuffer::{self, CommandBufferStore}, CommandPool, commandpool, CommandBufferSet, queue::{SubmitSet, submit::SubmitInfoStore, queue::QueueStore}};
 
 use super::Image;
 
-pub trait ImageProvider{
+pub trait ImageStore{
     /// Returns the old layout
     fn transition(
         &self, 
@@ -28,11 +28,11 @@ pub trait ImageProvider{
     fn extent(&self) -> vk::Extent3D;
 }
 
-pub trait UsesImageProvider<I:ImageProvider>{
+pub trait UsesImageStore<I:ImageStore>{
     fn image_provider(&self) -> &Arc<I>;
 }
 
-pub trait ImageSettingsProvider{
+pub trait ImageSettingsStore{
     fn extensions(&self) -> Option<Vec<ImageCreateExtensions>>;
     fn create_flags(&self) -> Option<vk::ImageCreateFlags>;
     fn image_type(&self) -> vk::ImageType;
@@ -58,7 +58,7 @@ pub enum ImageCreateError{
     Vulkan(vk::Result),
 }
 
-pub struct SettingsProvider{
+pub struct SettingsStore{
     extensions:  Option<Vec<ImageCreateExtensions>>,
     create_flags:  Option<vk::ImageCreateFlags>,
     image_type:  vk::ImageType,
@@ -74,8 +74,8 @@ pub struct SettingsProvider{
     
 }
 
-impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
-    pub fn new<S:ImageSettingsProvider>(device_provider: &Arc<D>, memory_provider: &Arc<M>, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
+impl<D:DeviceStore, M:MemoryStore> Image<D,M>{
+    pub fn new<S:ImageSettingsStore>(device_provider: &Arc<D>, memory_provider: &Arc<M>, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         let extensions = settings.extensions();
         if let Some(mut ext) = extensions{
@@ -159,7 +159,7 @@ impl<D:DeviceProvider, M:MemoryProvider> Image<D,M>{
     }
 }
 
-impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
+impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
     fn transition(
         &self, 
         cmd: &vk::CommandBuffer, 
@@ -237,9 +237,9 @@ impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
         if old_layout == new_layout{
             return;
         }
-        let settings = commandpool::SettingsProvider::new(self.device.grahics_queue().unwrap().1);
+        let settings = commandpool::SettingsStore::new(self.device.grahics_queue().unwrap().1);
         let pool = CommandPool::new(&settings, &self.device).unwrap();
-        let mut settings = commandbuffer::SettingsProvider::default();
+        let mut settings = commandbuffer::SettingsStore::default();
         settings.batch_size = 1;
         let bset = CommandBufferSet::new(&settings, &self.device, &pool);
         let cmd = bset.next_cmd();
@@ -282,7 +282,7 @@ impl<D:DeviceProvider, M:MemoryProvider> ImageProvider for Image<D,M>{
 
 }
 
-impl<D:DeviceProvider, M:MemoryProvider> Drop for Image<D,M>{
+impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
     fn drop(&mut self) {
         debug!("Destroyed image {:?}", self.image);
         if let Some(_) = self.memory{
@@ -293,13 +293,13 @@ impl<D:DeviceProvider, M:MemoryProvider> Drop for Image<D,M>{
     }
 }
 
-impl<D:DeviceProvider, M:MemoryProvider> UsesDeviceProvider<D> for Image<D,M>{
+impl<D:DeviceStore, M:MemoryStore> UsesDeviceStore<D> for Image<D,M>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }
 }
 
-impl SettingsProvider{
+impl SettingsStore{
     pub fn new(
         extensions:  Option<Vec<ImageCreateExtensions>>,
         create_flags:  Option<vk::ImageCreateFlags>,
@@ -313,7 +313,7 @@ impl SettingsProvider{
         usage:  vk::ImageUsageFlags,
         share:  Option<Vec<u32>>,
         preload_layout:  Option<vk::ImageLayout>,
-    ) -> SettingsProvider {
+    ) -> SettingsStore {
         Self{
             extensions,
             create_flags,
@@ -337,12 +337,12 @@ impl SettingsProvider{
         usage:  vk::ImageUsageFlags,
         preload_layout:  Option<vk::ImageLayout>,
     )
--> SettingsProvider     {
+-> SettingsStore     {
         Self::new(None, None, vk::ImageType::TYPE_2D, format, extent, 1, 1, vk::SampleCountFlags::TYPE_1, vk::ImageTiling::OPTIMAL, usage, None, preload_layout)
     }
 }
 
-impl ImageSettingsProvider for SettingsProvider{
+impl ImageSettingsStore for SettingsStore{
     fn extensions(&self) -> Option<Vec<ImageCreateExtensions>> {
         self.extensions.clone()
     }

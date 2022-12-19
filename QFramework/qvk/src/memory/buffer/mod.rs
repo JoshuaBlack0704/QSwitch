@@ -2,14 +2,14 @@ use std::{sync::{Arc, Mutex}, marker::PhantomData};
 
 use ash::vk;
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, instance::{InstanceProvider, UsesInstanceProvider}};
+use crate::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}};
 
-use self::buffer::BufferProvider;
+use self::buffer::BufferStore;
 
-use super::{memory::{MemoryProvider, UsesMemoryProvider}, partitionsystem::PartitionProvider, Partition};
+use super::{memory::{MemoryStore, UsesMemoryStore}, partitionsystem::PartitionStore, Partition};
 
 pub mod buffer;
-pub struct Buffer<D: DeviceProvider, M: MemoryProvider, P: PartitionProvider>{
+pub struct Buffer<D: DeviceStore, M: MemoryStore, P: PartitionStore>{
 
     device: Arc<D>,
     memory: Arc<M>,
@@ -20,8 +20,8 @@ pub struct Buffer<D: DeviceProvider, M: MemoryProvider, P: PartitionProvider>{
     alignment_type: buffer::BufferAlignmentType,
 }
 
-pub mod bufferpartition;
-pub struct BufferPartition<I:InstanceProvider, D: DeviceProvider + UsesInstanceProvider<I>, M:MemoryProvider, B: BufferProvider + UsesMemoryProvider<M> + UsesDeviceProvider<D>, P:PartitionProvider>{
+pub mod buffersegment;
+pub struct BufferSegment<I:InstanceStore, D: DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B: BufferStore + UsesMemoryStore<M> + UsesDeviceStore<D>, P:PartitionStore>{
 
     buffer: Arc<B>,
     _partition_sys: Mutex<P>,

@@ -3,26 +3,26 @@ use std::sync::Arc;
 use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{info, debug};
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, CommandPool};
+use crate::{device::{DeviceStore, UsesDeviceStore}, CommandPool};
 
-pub trait CommandPoolSettingsProvider{
+pub trait CommandPoolSettingsStore{
     fn queue_family_index(&self) -> u32;
     fn reset_flags(&self) -> Option<vk::CommandPoolResetFlags>;
     fn create_flags(&self) -> Option<CommandPoolCreateFlags>;
 }
-pub trait CommandPoolProvider{
+pub trait CommandPoolStore{
     fn cmdpool(&self) -> &vk::CommandPool;
     fn reset_cmdpool(&self);
 }
 
 #[derive(Clone)]
-pub struct SettingsProvider{
+pub struct SettingsStore{
     pub queue_family_index: u32,
     pub create_flags: Option<CommandPoolCreateFlags>,
     pub reset_flags: Option<vk::CommandPoolResetFlags>,
 }
 
-impl<D: DeviceProvider, S: CommandPoolSettingsProvider + Clone> CommandPool<D,S>{
+impl<D: DeviceStore, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
     pub fn new(settings: &S, device_provider: &Arc<D>) -> Result<Arc<CommandPool<D,S>>, vk::Result>{
         
         let mut cmdpool_cinfo = CommandPoolCreateInfo::builder();
@@ -46,7 +46,7 @@ impl<D: DeviceProvider, S: CommandPoolSettingsProvider + Clone> CommandPool<D,S>
     }
 }
 
-impl <D: DeviceProvider, S: CommandPoolSettingsProvider> CommandPoolProvider for CommandPool<D,S>{
+impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for CommandPool<D,S>{
     fn cmdpool(&self) -> &vk::CommandPool {
         &self.command_pool
     }
@@ -63,7 +63,7 @@ impl <D: DeviceProvider, S: CommandPoolSettingsProvider> CommandPoolProvider for
     }
 }
 
-impl<D: DeviceProvider, S: CommandPoolSettingsProvider> Drop for CommandPool<D,S>{
+impl<D: DeviceStore, S: CommandPoolSettingsStore> Drop for CommandPool<D,S>{
     fn drop(&mut self) {
         debug!("Destroyed command pool {:?}", self.command_pool);
         unsafe{
@@ -72,9 +72,9 @@ impl<D: DeviceProvider, S: CommandPoolSettingsProvider> Drop for CommandPool<D,S
     }
 }
 
-impl SettingsProvider{
-    pub fn new(queue_family_index: u32) -> SettingsProvider {
-        SettingsProvider{ queue_family_index, create_flags: None, reset_flags: None }
+impl SettingsStore{
+    pub fn new(queue_family_index: u32) -> SettingsStore {
+        SettingsStore{ queue_family_index, create_flags: None, reset_flags: None }
     }
     pub fn set_create_flags(&mut self, flags: CommandPoolCreateFlags){
         self.create_flags = Some(flags);
@@ -84,7 +84,7 @@ impl SettingsProvider{
     }
 }
 
-impl CommandPoolSettingsProvider for SettingsProvider{
+impl CommandPoolSettingsStore for SettingsStore{
     fn queue_family_index(&self) -> u32 {
         self.queue_family_index
     }
@@ -99,7 +99,7 @@ impl CommandPoolSettingsProvider for SettingsProvider{
 
 }
 
-impl<D: DeviceProvider, S: CommandPoolSettingsProvider> UsesDeviceProvider<D> for CommandPool<D,S>{
+impl<D: DeviceStore, S: CommandPoolSettingsStore> UsesDeviceStore<D> for CommandPool<D,S>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

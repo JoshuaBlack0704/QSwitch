@@ -3,22 +3,22 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk::{self, DescriptorSetLayoutBinding};
 use log::{debug, info};
 
-use crate::device::{DeviceProvider, UsesDeviceProvider};
+use crate::device::{DeviceStore, UsesDeviceStore};
 
 use super::{DescriptorLayout, WriteHolder};
 
-pub trait DescriptorLayoutBindingProvider{
+pub trait DescriptorLayoutBindingStore{
     fn binding(&self) -> DescriptorSetLayoutBinding;
     
 }
 
-pub trait DescriptorLayoutProvider{
+pub trait DescriptorLayoutStore{
     fn layout(&self) -> vk::DescriptorSetLayout;
     fn writes(&self) -> MutexGuard<Vec<Arc<WriteHolder>>>;
     fn bindings(&self) -> MutexGuard<Vec<vk::DescriptorSetLayoutBinding>>;
 }
 
-impl<D:DeviceProvider> DescriptorLayout<D>{
+impl<D:DeviceStore> DescriptorLayout<D>{
     pub fn new(device_provider: &Arc<D>, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
         Arc::new(
             Self{
@@ -31,7 +31,7 @@ impl<D:DeviceProvider> DescriptorLayout<D>{
         )
     }
 
-    pub fn form_binding<BP:DescriptorLayoutBindingProvider>(self: &Arc<Self>, binding_provider: &Arc<BP>, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
+    pub fn form_binding<BP:DescriptorLayoutBindingStore>(self: &Arc<Self>, binding_provider: &Arc<BP>, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
         if let Some(_) = *self.layout.lock().unwrap(){
             //The layout will be created the first time it is used
             panic!("Cannot add descriptor layout binding after the first time you use the layout");
@@ -56,7 +56,7 @@ impl<D:DeviceProvider> DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceProvider> DescriptorLayoutProvider for DescriptorLayout<D>{
+impl<D:DeviceStore> DescriptorLayoutStore for DescriptorLayout<D>{
     fn layout(&self) -> vk::DescriptorSetLayout {
         let mut layout = self.layout.lock().unwrap();
         if let Some(l) = *layout{
@@ -87,7 +87,7 @@ impl<D:DeviceProvider> DescriptorLayoutProvider for DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceProvider> Drop for DescriptorLayout<D>{
+impl<D:DeviceStore> Drop for DescriptorLayout<D>{
     fn drop(&mut self) {
         if let Some(l) = *self.layout.lock().unwrap(){
             debug!("Destroyed descriptor set layout {:?}", l);
@@ -98,7 +98,7 @@ impl<D:DeviceProvider> Drop for DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceProvider> UsesDeviceProvider<D> for DescriptorLayout<D>{
+impl<D:DeviceStore> UsesDeviceStore<D> for DescriptorLayout<D>{
     fn device_provider(&self) -> &std::sync::Arc<D> {
         &self.device
     }

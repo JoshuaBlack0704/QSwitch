@@ -2,19 +2,19 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{device::{DeviceProvider, UsesDeviceProvider}, sync::{self, fence::FenceProvider}};
+use crate::{device::{DeviceStore, UsesDeviceStore}, sync::{self, fence::FenceStore}};
 
-use super::{Queue, submit::SubmitInfoProvider};
+use super::{Queue, submit::SubmitInfoStore};
 
-pub trait QueueProvider{
-    fn submit<S:SubmitInfoProvider, F:FenceProvider>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
+pub trait QueueStore{
+    fn submit<S:SubmitInfoStore, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
     ///Will create an internal fence to wait on the operation
-    fn wait_submit<S:SubmitInfoProvider>(&self, submits: &[S]) -> Result<(), vk::Result>;
+    fn wait_submit<S:SubmitInfoStore>(&self, submits: &[S]) -> Result<(), vk::Result>;
     fn queue(&self) -> &vk::Queue;
     fn wait_idle(&self);
 }
 
-impl<D:DeviceProvider> Queue<D>{
+impl<D:DeviceStore> Queue<D>{
     pub fn new(device_provider: &Arc<D>, flags: vk::QueueFlags) -> Option<Arc<Self>>{
         let q = device_provider.get_queue(flags);
         match q{
@@ -36,14 +36,14 @@ impl<D:DeviceProvider> Queue<D>{
     }
 }
 
-impl<D:DeviceProvider> UsesDeviceProvider<D> for Queue<D>{
+impl<D:DeviceStore> UsesDeviceStore<D> for Queue<D>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }
 }
 
-impl<D:DeviceProvider> QueueProvider for Queue<D>{
-    fn submit<S:SubmitInfoProvider, F:FenceProvider>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
+impl<D:DeviceStore> QueueStore for Queue<D>{
+    fn submit<S:SubmitInfoStore, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
         let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
         let device = self.device.device();
@@ -57,7 +57,7 @@ impl<D:DeviceProvider> QueueProvider for Queue<D>{
         }
     }
 
-    fn wait_submit<S:SubmitInfoProvider>(&self, submits: &[S]) -> Result<(), vk::Result> {
+    fn wait_submit<S:SubmitInfoStore>(&self, submits: &[S]) -> Result<(), vk::Result> {
         let fence = sync::Fence::new(self.device_provider(), false);
         let res = self.submit(submits, Some(&fence));
         fence.wait(None);

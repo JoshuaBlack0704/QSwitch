@@ -1,11 +1,11 @@
-use crate::{device::DeviceProvider, image::ImageProvider};
+use crate::{device::DeviceStore, image::ImageStore};
 
 use super::ImageView;
 
-pub trait ImageViewProvider{
+pub trait ImageViewStore{
     
 }
 
-impl<D:DeviceProvider, I:ImageProvider> ImageViewProvider for ImageView<D,I>{
+impl<D:DeviceStore, I:ImageStore> ImageViewStore for ImageView<D,I>{
     
 }
