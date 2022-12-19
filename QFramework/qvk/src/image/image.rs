@@ -3,15 +3,15 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{memory::{partitionsystem, memory::MemoryStore, Memory, PartitionSystem}, init::device::{DeviceStore, UsesDeviceStore}, command::{commandpool, CommandPool, commandbuffer::{self, CommandBufferFactory}, CommandBufferSet}, queue::{SubmitSet, submit::SubmitInfoStore, queue::QueueStore}};
+use crate::{memory::{partitionsystem, memory::MemoryStore, Memory, PartitionSystem}, init::device::{DeviceStore, UsesDeviceStore}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, queue::QueueStore}};
 
 use super::Image;
 
 pub trait ImageStore{
     /// Returns the old layout
-    fn transition(
+    fn transition<C:CommandBufferStore>(
         &self, 
-        cmd: &vk::CommandBuffer, 
+        cmd: &Arc<C>, 
         new_layout: vk::ImageLayout, 
         src_stage: Option<vk::PipelineStageFlags2>,
         dst_stage: Option<vk::PipelineStageFlags2>,
@@ -160,9 +160,9 @@ impl<D:DeviceStore, M:MemoryStore> Image<D,M>{
 }
 
 impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
-    fn transition(
+    fn transition<C:CommandBufferStore>(
         &self, 
-        cmd: &vk::CommandBuffer, 
+        cmd: &Arc<C>, 
         new_layout: vk::ImageLayout, 
         src_stage: Option<vk::PipelineStageFlags2>,
         dst_stage: Option<vk::PipelineStageFlags2>,
@@ -227,7 +227,7 @@ impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
 
         debug!("Transitioning layer range {:?} of image {:?} from layout {:?} to layout {:?}", image_transition[0].subresource_range, self.image, *lock, new_layout);
 
-        unsafe{self.device.device().cmd_pipeline_barrier2(*cmd, &info)};
+        unsafe{self.device.device().cmd_pipeline_barrier2(cmd.cmd(), &info)};
 
         *lock = new_layout;
     }
@@ -239,22 +239,19 @@ impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
         }
         let settings = commandpool::SettingsStore::new(self.device.grahics_queue().unwrap().1);
         let pool = CommandPool::new(&settings, &self.device).unwrap();
-        let mut settings = commandbuffer::SettingsStore::default();
+        let mut settings = commandset::SettingsStore::default();
         settings.batch_size = 1;
-        let bset = CommandBufferSet::new(&settings, &self.device, &pool);
+        let bset = CommandSet::new(&settings, &self.device, &pool);
         let cmd = bset.next_cmd();
-        let begin = vk::CommandBufferBeginInfo::default();
-        unsafe{
-            self.device.device().begin_command_buffer(*cmd, &begin).unwrap()};
-            if let Some(range) = subresources{
-                self.transition(&cmd, new_layout, None, None, None, None,Some(range));
-            }
-            else{
-                self.transition(&cmd, new_layout, None, None, None, None, None);
+        cmd.begin(None).unwrap();
+        if let Some(range) = subresources{
+            self.transition(&cmd, new_layout, None, None, None, None,Some(range));
         }
-        unsafe{self.device.device().end_command_buffer(*cmd)}.unwrap();
-        let mut submit = SubmitSet::new();
-        submit.add_cmd(cmd);
+        else{
+            self.transition(&cmd, new_layout, None, None, None, None, None);
+        }
+        cmd.end().unwrap();
+        let submit = SubmitSet::new(&cmd);
         let submit = [submit];
         let queue = crate::queue::Queue::new(self.device_provider(), vk::QueueFlags::GRAPHICS).unwrap();
         queue.wait_submit(&submit).unwrap();

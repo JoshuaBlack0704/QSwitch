@@ -5,7 +5,7 @@ use image::{self, EncodableLayout};
 use ash::vk;
 use log::debug;
 
-use crate::{memory::{buffer::{buffer::{BufferStore, UsesBufferStore, self}, buffersegment::BufferSegmentStore, Buffer, BufferSegment}, Memory, memory}, init::{instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}}, command::{commandpool, CommandPool, commandbuffer::{self, CommandBufferFactory}, CommandBufferSet}, queue::{SubmitSet, Queue, submit::SubmitInfoStore, queue::QueueStore}};
+use crate::{memory::{buffer::{buffer::{BufferStore, UsesBufferStore, self}, buffersegment::BufferSegmentStore, Buffer, BufferSegment}, Memory, memory}, init::{instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, Queue, queue::QueueStore}};
 
 use super::{image::{ImageStore, UsesImageStore}, ImageResource};
 
@@ -14,11 +14,11 @@ pub trait ImageSubresourceStore{
     fn offset(&self) -> vk::Offset3D;
     fn extent(&self) -> vk::Extent3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
-    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
     fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_image<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
     fn copy_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
+    fn blit_to_image<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
     fn blit_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
 
@@ -122,7 +122,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         self.layout.lock().unwrap()
     }
 
-    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
         let buffer_offset = dst.get_partition().offset();
         let mut addressing = (0,0);
         if let Some(a) = buffer_addressing{
@@ -148,7 +148,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
             let device = self.image.device_provider().device();
             let buffer = dst.buffer_provider().buffer();
             debug!("Copying image layer {:?} from image {:?} to buffer {:?}", self.resorces, *image, *buffer);
-            device.cmd_copy_image_to_buffer(**cmd, *image, *layout, *buffer, &info);
+            device.cmd_copy_image_to_buffer(cmd.cmd(), *image, *layout, *buffer, &info);
         }
         Ok(())
     }
@@ -156,24 +156,22 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
     fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
         let settings = commandpool::SettingsStore::new(self.image.device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandBufferSet::new(&settings, self.image.device_provider(), &pool);
+        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
+        let cmd_set = CommandSet::new(&settings, self.image.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
-        unsafe{
-            let device = self.image.device_provider().device();
-            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
-            self.copy_to_buffer(&cmd, dst, buffer_addressing)?;
-            device.end_command_buffer(*cmd).unwrap();
-        }
-        let mut submit = SubmitSet::new();
-        submit.add_cmd(cmd);
+        
+        cmd.begin(None).unwrap();
+        self.copy_to_buffer(&cmd, dst, buffer_addressing)?;
+        cmd.end().unwrap();
+        
+        let submit = SubmitSet::new(&cmd);
         let submit = [submit];
         let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
         queue.wait_submit(&submit).expect("Could not execute transfer");
         Ok(())
     }
 
-    fn copy_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -210,7 +208,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
 
         unsafe{
             let device = self.image.device_provider().device();
-            device.cmd_copy_image(**cmd, *src_image, *src_layout, *dst_image, *dst_layout, &op);
+            device.cmd_copy_image(cmd.cmd(), *src_image, *src_layout, *dst_image, *dst_layout, &op);
         }
         Ok(())
     }
@@ -236,24 +234,22 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         }
         let settings = commandpool::SettingsStore::new(self.image.device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandBufferSet::new(&settings, self.image.device_provider(), &pool);
+        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
+        let cmd_set = CommandSet::new(&settings, self.image.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
-        unsafe{
-            let device = self.image.device_provider().device();
-            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
-            self.copy_to_image(&cmd, dst)?;
-            device.end_command_buffer(*cmd).unwrap();
-        }
-        let mut submit = SubmitSet::new();
-        submit.add_cmd(cmd);
+        
+        cmd.begin(None).unwrap();
+        self.copy_to_image(&cmd, dst)?;
+        cmd.end().unwrap();
+        
+        let submit = SubmitSet::new(&cmd);
         let submit = [submit];
         let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
         queue.wait_submit(&submit).expect("Could not execute transfer");
         Ok(())
     }
 
-    fn blit_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
+    fn blit_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -293,7 +289,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
 
         unsafe{
             let device = self.image.device_provider().device();
-            device.cmd_blit_image(**cmd, *src_image, *src_layout, *dst_image, *dst_layout, &blit, scale_filter);
+            device.cmd_blit_image(cmd.cmd(), *src_image, *src_layout, *dst_image, *dst_layout, &blit, scale_filter);
         }
 
         Ok(())
@@ -320,17 +316,15 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         }
         let settings = commandpool::SettingsStore::new(self.image.device_provider().grahics_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandBufferSet::new(&settings, self.image.device_provider(), &pool);
+        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
+        let cmd_set = CommandSet::new(&settings, self.image.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
-        unsafe{
-            let device = self.image.device_provider().device();
-            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
-            self.blit_to_image(&cmd, dst, scale_filter)?;
-            device.end_command_buffer(*cmd).unwrap();
-        }
-        let mut submit = SubmitSet::new();
-        submit.add_cmd(cmd);
+        
+        cmd.begin(None).unwrap();
+        self.blit_to_image(&cmd, dst, scale_filter)?;
+        cmd.end().unwrap();
+        
+        let submit = SubmitSet::new(&cmd);
         let submit = [submit];
         let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS).unwrap();
         queue.wait_submit(&submit).expect("Could not execute transfer");

@@ -3,7 +3,7 @@ use std::{sync::{Arc, Mutex}, mem::size_of};
 use ash::vk::{self, BufferUsageFlags};
 use log::{info, debug};
 
-use crate::{memory::{Partition, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem, partitionsystem::{PartitionError, PartitionStore}, buffer::buffer::BufferAlignmentType}, image::{image::{ImageStore, UsesImageStore}, imageresource::ImageSubresourceStore}, init::{instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}}, command::{commandpool, CommandPool, commandbuffer::{self, CommandBufferFactory}, CommandBufferSet}, queue::{SubmitSet, Queue, submit::SubmitInfoStore, queue::QueueStore}, descriptor::descriptorlayout::DescriptorLayoutBindingStore};
+use crate::{memory::{Partition, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem, partitionsystem::{PartitionError, PartitionStore}, buffer::buffer::BufferAlignmentType}, image::{image::{ImageStore, UsesImageStore}, imageresource::ImageSubresourceStore}, init::{instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, Queue, queue::QueueStore}, descriptor::descriptorlayout::DescriptorLayoutBindingStore};
 
 use super::{buffer::{BufferStore, UsesBufferStore}, BufferSegment};
 
@@ -12,10 +12,10 @@ pub trait BufferSegmentStore{
     fn device_addr(&self) -> vk::DeviceSize;
     fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
     fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_partition<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_partition<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
     fn copy_to_partition_internal<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image<I:ImageStore, IS:ImageSubresourceStore + UsesImageStore<I>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    fn copy_to_image<I:ImageStore, IS:ImageSubresourceStore + UsesImageStore<I>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
     fn copy_to_image_internal<I:ImageStore, IS:ImageSubresourceStore + UsesImageStore<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
@@ -128,7 +128,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:Buf
         Ok(())
     }
 
-    fn copy_to_partition<Buf:BufferStore, BP:BufferSegmentStore + UsesBufferStore<Buf>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
+    fn copy_to_partition<Buf:BufferStore, BP:BufferSegmentStore + UsesBufferStore<Buf>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
         if self.partition.size > dst.get_partition().size(){
             return Err(BufferSegmentMemOpError::NoSpace);
         }
@@ -141,7 +141,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:Buf
 
         unsafe{
             let device = self.buffer.device_provider().device();
-            device.cmd_copy_buffer(**cmd, *self.buffer.buffer(), *dst.buffer_provider().buffer(), &op);
+            device.cmd_copy_buffer(cmd.cmd(), *self.buffer.buffer(), *dst.buffer_provider().buffer(), &op);
         }
         Ok(())
     }
@@ -149,24 +149,22 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:Buf
     fn copy_to_partition_internal<Buf:BufferStore, BP:BufferSegmentStore + UsesBufferStore<Buf>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
         let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandBufferSet::new(&settings, self.buffer.device_provider(), &pool);
+        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
+        let cmd_set = CommandSet::new(&settings, self.buffer.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
-        unsafe{
-            let device = self.buffer.device_provider().device();
-            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
-            self.copy_to_partition(&cmd, dst)?;
-            device.end_command_buffer(*cmd).unwrap();
-        }
-        let mut submit = SubmitSet::new();
-        submit.add_cmd(cmd);
+        
+        cmd.begin(None).unwrap();
+        self.copy_to_partition(&cmd, dst)?;
+        cmd.end().unwrap();
+        
+        let submit = SubmitSet::new(&cmd);
         let submit = [submit];
         let queue = Queue::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
         queue.wait_submit(&submit).expect("Could not execute transfer");
         Ok(())
     }
 
-    fn copy_to_image<Img:ImageStore, IS:ImageSubresourceStore + UsesImageStore<Img>>(&self, cmd: &Arc<vk::CommandBuffer>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+    fn copy_to_image<Img:ImageStore, IS:ImageSubresourceStore + UsesImageStore<Img>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
         if dst.extent().width == 0{
             return Ok(());
         }
@@ -201,7 +199,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:Buf
         unsafe{
             let device = self.buffer.device_provider().device();
             debug!("Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}", self.partition.size, *self.buffer.buffer(), dst.subresource(), *image);
-            device.cmd_copy_buffer_to_image(**cmd, *self.buffer.buffer(), *image, *layout, &info);
+            device.cmd_copy_buffer_to_image(cmd.cmd(), *self.buffer.buffer(), *image, *layout, &info);
         }
 
         Ok(())
@@ -210,17 +208,15 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B:Buf
     fn copy_to_image_internal<Img:ImageStore, IS:ImageSubresourceStore + UsesImageStore<Img>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
         let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
-        let mut settings = commandbuffer::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandBufferSet::new(&settings, self.buffer.device_provider(), &pool);
+        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
+        let cmd_set = CommandSet::new(&settings, self.buffer.device_provider(), &pool);
         let cmd = cmd_set.next_cmd();
-        unsafe{
-            let device = self.buffer.device_provider().device();
-            device.begin_command_buffer(*cmd, &vk::CommandBufferBeginInfo::default()).unwrap();
-            self.copy_to_image(&cmd, dst, buffer_addressing)?;
-            device.end_command_buffer(*cmd).unwrap();
-        }
-        let mut submit = SubmitSet::new();
-        submit.add_cmd(cmd);
+        
+        cmd.begin(None).unwrap();
+        self.copy_to_image(&cmd, dst, buffer_addressing)?;
+        cmd.end().unwrap();
+        
+        let submit = SubmitSet::new(&cmd);
         let submit = [submit];
         let queue = Queue::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
         queue.wait_submit(&submit).expect("Could not execute transfer");

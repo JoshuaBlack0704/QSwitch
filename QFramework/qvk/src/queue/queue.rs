@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{sync::{fence::FenceStore, self}, init::device::{DeviceStore, UsesDeviceStore}};
+use crate::{sync::{fence::FenceStore, self}, init::device::{DeviceStore, UsesDeviceStore}, command::CommandBufferStore};
 
 use super::{Queue, submit::SubmitInfoStore};
 
 pub trait QueueStore{
-    fn submit<S:SubmitInfoStore, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
+    fn submit<C:CommandBufferStore, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
     ///Will create an internal fence to wait on the operation
-    fn wait_submit<S:SubmitInfoStore>(&self, submits: &[S]) -> Result<(), vk::Result>;
+    fn wait_submit<C:CommandBufferStore, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result>;
     fn queue(&self) -> &vk::Queue;
     fn wait_idle(&self);
 }
@@ -43,7 +43,7 @@ impl<D:DeviceStore> UsesDeviceStore<D> for Queue<D>{
 }
 
 impl<D:DeviceStore> QueueStore for Queue<D>{
-    fn submit<S:SubmitInfoStore, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
+    fn submit<C:CommandBufferStore, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
         let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
         let device = self.device.device();
@@ -57,7 +57,7 @@ impl<D:DeviceStore> QueueStore for Queue<D>{
         }
     }
 
-    fn wait_submit<S:SubmitInfoStore>(&self, submits: &[S]) -> Result<(), vk::Result> {
+    fn wait_submit<C:CommandBufferStore, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
         let fence = sync::Fence::new(self.device_provider(), false);
         let res = self.submit(submits, Some(&fence));
         fence.wait(None);

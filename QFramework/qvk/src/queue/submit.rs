@@ -2,31 +2,32 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::sync::semaphore::SemaphoreStore;
+use crate::{sync::semaphore::SemaphoreStore, command::CommandBufferStore};
 
 use super::SubmitSet;
 
-pub trait SubmitInfoStore{
+pub trait SubmitInfoStore<C:CommandBufferStore>{
     fn info(&self) -> vk::SubmitInfo2;
-    fn add_cmd(&mut self, cmd: Arc<vk::CommandBuffer>);
+    fn add_cmd(&mut self, cmd: &Arc<C>);
     fn add_wait<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
     fn add_signal<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
 }
 
 
 
-impl SubmitSet{
-    pub fn new() -> Self {
+impl<C:CommandBufferStore> SubmitSet<C>{
+    pub fn new(first_cmd: &Arc<C>) -> Self {
+        let info = vk::CommandBufferSubmitInfo::builder().device_mask(0).command_buffer(first_cmd.cmd());
         Self{
             wait_semaphores: vec![],
-            cmds: vec![],
+            cmds: vec![first_cmd.clone()],
             signal_semaphores: vec![],
-            live_cmds: vec![],
+            live_cmds: vec![info.build()],
         }
     }
 }
 
-impl SubmitInfoStore for SubmitSet{
+impl<C:CommandBufferStore> SubmitInfoStore<C> for SubmitSet<C>{
     fn info(&self) -> vk::SubmitInfo2 {
       
         vk::SubmitInfo2::builder()
@@ -36,9 +37,9 @@ impl SubmitInfoStore for SubmitSet{
         .build()
     }
 
-    fn add_cmd(&mut self, cmd: Arc<vk::CommandBuffer>) {
-        let info = vk::CommandBufferSubmitInfo::builder().device_mask(0).command_buffer(*cmd);
-        self.cmds.push(cmd);
+    fn add_cmd(&mut self, cmd: &Arc<C>) {
+        let info = vk::CommandBufferSubmitInfo::builder().device_mask(0).command_buffer(cmd.cmd());
+        self.cmds.push(cmd.clone());
         self.live_cmds.push(info.build());
     }
 

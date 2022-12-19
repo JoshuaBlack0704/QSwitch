@@ -1,109 +1,61 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ash::vk;
-use log::info;
 
-use crate::init::device::DeviceStore;
+use crate::{init::device::DeviceStore, pipelines::Compute};
 
-use super::{commandpool::CommandPoolStore, CommandBufferSet};
+use super::{CommandBuffer, CommandBufferStore, BindPipelineFactory, BindSetFactory};
 
-
-pub trait CommandBufferSettingsStore{
-    fn cmd_level(&self) -> vk::CommandBufferLevel;
-    fn cmd_batch_size(&self) -> u32;
-    fn cmd_reset_flags(&self) -> Option<vk::CommandBufferResetFlags>;
-}
-pub trait CommandBufferStore{
-}
-pub trait CommandBufferFactory{
-    fn next_cmd(&self) -> Arc<vk::CommandBuffer>;
-    fn reset_cmd(&self, cmd: &Arc<vk::CommandBuffer>);
-}
-
-pub enum CopyOpError{
-    NoSpace,
-}
-
-#[derive(Clone)]
-pub struct SettingsStore{
-    pub cmd_level: vk::CommandBufferLevel,
-    pub batch_size: u32,
-    pub reset_flags: Option<vk::CommandBufferResetFlags>,
-}
-
-impl<D: DeviceStore, P: CommandPoolStore, S: CommandBufferSettingsStore + Clone> CommandBufferSet<D,P,S>{
-    pub fn new(settings: &S, device_provider: &Arc<D>, cmdpool_provider: &Arc<P>) -> Arc<CommandBufferSet<D,P,S>> {
+impl<D:DeviceStore> CommandBuffer<D>{
+    pub fn new(device_store: &Arc<D>, cmd: vk::CommandBuffer) -> Arc<CommandBuffer<D>> {
         Arc::new(
-            CommandBufferSet{ 
-                device: device_provider.clone(),
-                cmdpool: cmdpool_provider.clone(),
-                settings: settings.clone(),
-                cmds: Mutex::new(vec![]),
+            Self{
+                device: device_store.clone(),
+                cmd,
             }
         )
     }
 }
 
-impl<D:DeviceStore, P:CommandPoolStore, S:CommandBufferSettingsStore> CommandBufferFactory for CommandBufferSet<D,P,S>{
-    fn next_cmd(&self) -> Arc<vk::CommandBuffer> {
-        // First we need to see if there are any cmds available
-        let mut cmds = self.cmds.lock().unwrap();
+impl<D:DeviceStore> CommandBufferStore for CommandBuffer<D>{
+    fn cmd(&self) -> vk::CommandBuffer {
+        self.cmd
+    }
 
-        //All we do is loop through cmds and see if we have a free cmd
-        for cmd in cmds.iter(){
-            if Arc::strong_count(cmd) == 1{
-                //If we do we return it
-                return cmd.clone();
+    fn begin(&self, info: Option<vk::CommandBufferBeginInfo>) -> Result<(), vk::Result> {
+        unsafe{
+            let mut begin = vk::CommandBufferBeginInfo::default();
+            if let Some(i) = info{
+                begin = i;
+            }
+            self.device.device().begin_command_buffer(self.cmd, &begin)
+        }
+    }
+
+    fn end(&self) -> Result<(), vk::Result> {
+        unsafe{
+            self.device.device().end_command_buffer(self.cmd)
+        }
+    }
+
+    fn barrier(&self, info: vk::DependencyInfo) {
+        unsafe{
+            self.device.device().cmd_pipeline_barrier2(self.cmd, &info);
+        }
+    }
+
+    fn bind_pipeline<BP: BindPipelineFactory>(&self, pipeline: &Arc<BP>) {
+        unsafe{
+            self.device.device().cmd_bind_pipeline(self.cmd, pipeline.bind_point(), pipeline.pipeline());
+        }
+    }
+
+    fn bind_set<BP:BindPipelineFactory, BS: BindSetFactory>(&self, set: &Arc<BS>, set_index: u32, pipeline: &Arc<BP>) {
+        unsafe{
+            if let Some(o) = set.dynamic_offsets(){
+                let sets = [set.set()];
+                self.device.device().cmd_bind_descriptor_sets(self.cmd, set.bind_point(), pipeline.layout(), set_index, &sets, &o);
             }
         }
-      
-        // If not we need to make a new batch
-        let mut alloc_builder = vk::CommandBufferAllocateInfo::builder();
-        alloc_builder = alloc_builder.command_pool(*self.cmdpool.cmdpool());
-        alloc_builder = alloc_builder.command_buffer_count(self.settings.cmd_batch_size());
-        alloc_builder = alloc_builder.level(self.settings.cmd_level());
-        let new_cmds = unsafe{self.device.device().allocate_command_buffers(&alloc_builder).expect("Could not allocate command buffers")};
-        // Now the book keeping and queueing
-        for cmd in new_cmds{
-            info!("Created command buffer {:?}", cmd);
-            cmds.push(Arc::new(cmd));
-        }
-        // Now we get a newly queued element
-        cmds.last().unwrap().clone()
-                
-    }
-
-    /// This requires flags to be set on the parent command pool
-    fn reset_cmd(&self, cmd: &Arc<vk::CommandBuffer>) {
-        unsafe{self.device.device().reset_command_buffer(**cmd, self.settings.cmd_reset_flags().expect("No command buffer reset flags provided"))}.expect("Failed to reset command buffer");
-    }
-}
-
-impl SettingsStore{
-    pub fn new(level: vk::CommandBufferLevel, batch_size: u32) -> SettingsStore {
-        SettingsStore{ cmd_level: level, batch_size, reset_flags: None }
-    }
-    pub fn use_reset_flags(&mut self, flags: vk::CommandBufferResetFlags){
-        self.reset_flags = Some(flags);
-    }
-}
-
-impl Default for SettingsStore{
-    fn default() -> Self {
-        Self::new(vk::CommandBufferLevel::PRIMARY, 3)
-    }
-}
-
-impl CommandBufferSettingsStore for SettingsStore{
-    fn cmd_level(&self) -> vk::CommandBufferLevel {
-        self.cmd_level
-    }
-
-    fn cmd_batch_size(&self) -> u32 {
-        self.batch_size
-    }
-
-    fn cmd_reset_flags(&self) -> Option<vk::CommandBufferResetFlags> {
-        self.reset_flags
     }
 }

@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::init::device::DeviceStore;
+use crate::{init::device::DeviceStore, command::CommandBufferStore};
 
 pub mod submit;
-pub struct SubmitSet{
+pub struct SubmitSet<C:CommandBufferStore>{
     wait_semaphores: Vec<vk::SemaphoreSubmitInfo>,
-    cmds: Vec<Arc<vk::CommandBuffer>>,
+    cmds: Vec<Arc<C>>,
     live_cmds: Vec<vk::CommandBufferSubmitInfo>,
     signal_semaphores: Vec<vk::SemaphoreSubmitInfo>,
 }
