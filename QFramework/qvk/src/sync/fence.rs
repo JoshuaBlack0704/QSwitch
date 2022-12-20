@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, InternalDeviceStore};
 
 use super::Fence;
 
@@ -66,7 +66,7 @@ impl<D:DeviceStore> Drop for Fence<D>{
     }
 }
 
-impl<D:DeviceStore> UsesDeviceStore<D> for Fence<D>{
+impl<D:DeviceStore> InternalDeviceStore<D> for Fence<D>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

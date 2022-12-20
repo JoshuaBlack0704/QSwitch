@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::init::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, InternalDeviceStore};
 
 use super::Semaphore;
 
@@ -49,7 +49,7 @@ impl<D:DeviceStore> SemaphoreStore for Semaphore<D>{
     }
 }
 
-impl <D:DeviceStore> UsesDeviceStore<D> for Semaphore<D>{
+impl <D:DeviceStore> InternalDeviceStore<D> for Semaphore<D>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

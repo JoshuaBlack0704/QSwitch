@@ -2,11 +2,11 @@ use std::{sync::{Arc, Mutex}, marker::PhantomData};
 
 use ash::vk;
 
-use crate::init::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}};
+use crate::init::{device::{DeviceStore, InternalDeviceStore}, instance::{InstanceStore, InternalInstanceStore}};
 
 use self::buffer::BufferStore;
 
-use super::{memory::{MemoryStore, UsesMemoryStore}, partitionsystem::PartitionStore, Partition};
+use super::{memory::{MemoryStore, InternalMemoryStore}, partitionsystem::PartitionStore, Partition};
 
 pub mod buffer;
 pub struct Buffer<D: DeviceStore, M: MemoryStore, P: PartitionStore>{
@@ -21,7 +21,7 @@ pub struct Buffer<D: DeviceStore, M: MemoryStore, P: PartitionStore>{
 }
 
 pub mod buffersegment;
-pub struct BufferSegment<I:InstanceStore, D: DeviceStore + UsesInstanceStore<I>, M:MemoryStore, B: BufferStore + UsesMemoryStore<M> + UsesDeviceStore<D>, P:PartitionStore>{
+pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore>{
 
     buffer: Arc<B>,
     _partition_sys: Mutex<P>,

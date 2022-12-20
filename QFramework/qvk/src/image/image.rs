@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{memory::{partitionsystem, memory::MemoryStore, Memory, PartitionSystem}, init::device::{DeviceStore, UsesDeviceStore}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, queue::QueueStore}};
+use crate::{memory::{partitionsystem, memory::MemoryStore, Memory, PartitionSystem}, init::device::{DeviceStore, InternalDeviceStore}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, queue::QueueStore}};
 
 use super::Image;
 
@@ -28,7 +28,7 @@ pub trait ImageStore{
     fn extent(&self) -> vk::Extent3D;
 }
 
-pub trait UsesImageStore<I:ImageStore>{
+pub trait InternalImageStore<I:ImageStore>{
     fn image_provider(&self) -> &Arc<I>;
 }
 
@@ -290,7 +290,7 @@ impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
     }
 }
 
-impl<D:DeviceStore, M:MemoryStore> UsesDeviceStore<D> for Image<D,M>{
+impl<D:DeviceStore, M:MemoryStore> InternalDeviceStore<D> for Image<D,M>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

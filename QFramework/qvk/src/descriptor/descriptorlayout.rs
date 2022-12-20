@@ -4,7 +4,7 @@ use ash::vk::{self, DescriptorSetLayoutBinding};
 use log::{debug, info};
 
 
-use crate::init::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, InternalDeviceStore};
 
 use super::{DescriptorLayout, WriteHolder};
 
@@ -99,7 +99,7 @@ impl<D:DeviceStore> Drop for DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceStore> UsesDeviceStore<D> for DescriptorLayout<D>{
+impl<D:DeviceStore> InternalDeviceStore<D> for DescriptorLayout<D>{
     fn device_provider(&self) -> &std::sync::Arc<D> {
         &self.device
     }

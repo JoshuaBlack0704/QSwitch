@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::init::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, InternalDeviceStore};
 
 use super::{Memory, partitionsystem::{PartitionStore, self}, PartitionSystem, Partition};
 
@@ -21,7 +21,7 @@ pub trait MemoryStore{
     fn memory(&self) -> &vk::DeviceMemory;
 }
 
-pub trait UsesMemoryStore<M:MemoryStore>{
+pub trait InternalMemoryStore<M:MemoryStore>{
     fn memory_provider(&self) -> &Arc<M>;
 }
 
@@ -124,7 +124,7 @@ impl MemorySettingsStore for SettingsStore{
 
 }
 
-impl<D:DeviceStore, P:PartitionStore> UsesDeviceStore<D> for Memory<D,P>{
+impl<D:DeviceStore, P:PartitionStore> InternalDeviceStore<D> for Memory<D,P>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

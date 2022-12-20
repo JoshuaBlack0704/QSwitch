@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{info, debug};
 
-use crate::init::device::{DeviceStore, UsesDeviceStore};
+use crate::init::device::{DeviceStore, InternalDeviceStore};
 
 use super::CommandPool;
 
@@ -102,7 +102,7 @@ impl CommandPoolSettingsStore for SettingsStore{
 
 }
 
-impl<D: DeviceStore, S: CommandPoolSettingsStore> UsesDeviceStore<D> for CommandPool<D,S>{
+impl<D: DeviceStore, S: CommandPoolSettingsStore> InternalDeviceStore<D> for CommandPool<D,S>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }

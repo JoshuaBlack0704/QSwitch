@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{memory::{Partition, partitionsystem::{PartitionError, self, PartitionStore}, memory::{MemoryStore, UsesMemoryStore}, PartitionSystem}, init::device::{DeviceStore, UsesDeviceStore}};
+use crate::{memory::{Partition, partitionsystem::{PartitionError, self, PartitionStore}, memory::{MemoryStore, InternalMemoryStore}, PartitionSystem}, init::device::{DeviceStore, InternalDeviceStore}};
 
 use super::Buffer;
 
@@ -24,7 +24,7 @@ pub trait BufferStore{
     fn usage(&self) -> vk::BufferUsageFlags;
 }
 
-pub trait UsesBufferStore<B:BufferStore>{
+pub trait InternalBufferStore<B:BufferStore>{
     fn buffer_provider(&self) -> &Arc<B>;
 }
 
@@ -208,13 +208,13 @@ impl BufferSettingsStore for SettingsStore{
     }
 }
 
-impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> UsesDeviceStore<D> for Buffer<D,M,P>{
+impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalDeviceStore<D> for Buffer<D,M,P>{
     fn device_provider(&self) -> &Arc<D> {
         &self.device
     }
 }
 
-impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> UsesMemoryStore<M> for Buffer<D,M,P>{
+impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalMemoryStore<M> for Buffer<D,M,P>{
     fn memory_provider(&self) -> &Arc<M> {
         &self.memory
     }

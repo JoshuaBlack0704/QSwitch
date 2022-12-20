@@ -20,7 +20,7 @@ pub trait InstanceStore{
     fn entry(&self) -> &ash::Entry;
 }
 
-pub trait UsesInstanceStore<I:InstanceStore>{
+pub trait InternalInstanceStore<I:InstanceStore>{
     fn instance_provider(&self) -> &Arc<I>;
 }
 

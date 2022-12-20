@@ -5,21 +5,21 @@ use image::{self, EncodableLayout};
 use ash::vk;
 use log::debug;
 
-use crate::{memory::{buffer::{buffer::{BufferStore, UsesBufferStore, self}, buffersegment::BufferSegmentStore, Buffer, BufferSegment}, Memory, memory}, init::{instance::{InstanceStore, UsesInstanceStore}, device::{DeviceStore, UsesDeviceStore}}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, Queue, queue::QueueStore}};
+use crate::{memory::{buffer::{buffer::{BufferStore, InternalBufferStore, self}, buffersegment::BufferSegmentStore, Buffer, BufferSegment}, Memory, memory}, init::{instance::{InstanceStore, InternalInstanceStore}, device::{DeviceStore, InternalDeviceStore}}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, Queue, queue::QueueStore}};
 
-use super::{image::{ImageStore, UsesImageStore}, ImageResource};
+use super::{image::{ImageStore, InternalImageStore}, ImageResource};
 
 pub trait ImageSubresourceStore{
     fn subresource(&self) -> vk::ImageSubresourceLayers;
     fn offset(&self) -> vk::Offset3D;
     fn extent(&self) -> vk::Extent3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
-    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + UsesImageStore<I>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_image<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
+    fn blit_to_image<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
+    fn blit_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
 
 #[derive(Clone, Debug)]
@@ -32,7 +32,7 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + UsesDeviceStore<D>> ImageResource<I,D,Img>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageResource<I,D,Img>{
     pub fn new(image_provider: &Arc<Img>, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
         
         if miplevel > image_provider.mip_levels(){
@@ -105,7 +105,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + UsesDeviceStore<D>> ImageSubresourceStore for ImageResource<I,D,Img>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageSubresourceStore for ImageResource<I,D,Img>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }
@@ -122,7 +122,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         self.layout.lock().unwrap()
     }
 
-    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
         let buffer_offset = dst.get_partition().offset();
         let mut addressing = (0,0);
         if let Some(a) = buffer_addressing{
@@ -153,7 +153,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         Ok(())
     }
 
-    fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + UsesBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
         let settings = commandpool::SettingsStore::new(self.image.device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
         let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
@@ -171,7 +171,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         Ok(())
     }
 
-    fn copy_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + InternalImageStore<ImgExt>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -213,7 +213,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         Ok(())
     }
 
-    fn copy_to_image_internal<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_image_internal<ImgExt:ImageStore, IR:ImageSubresourceStore + InternalImageStore<ImgExt>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -249,7 +249,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         Ok(())
     }
 
-    fn blit_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
+    fn blit_to_image<ImgExt:ImageStore, IR:ImageSubresourceStore + InternalImageStore<ImgExt>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -295,7 +295,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
         Ok(())
     }
 
-    fn blit_to_image_internal<ImgExt:ImageStore, IR:ImageSubresourceStore + UsesImageStore<ImgExt>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
+    fn blit_to_image_internal<ImgExt:ImageStore, IR:ImageSubresourceStore + InternalImageStore<ImgExt>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -334,7 +334,7 @@ impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + Use
 
 }
 
-impl<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + UsesDeviceStore<D>> UsesImageStore<Img> for ImageResource<I,D,Img>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> InternalImageStore<Img> for ImageResource<I,D,Img>{
     fn image_provider(&self) -> &Arc<Img> {
         &self.image
     }

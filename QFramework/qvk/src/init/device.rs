@@ -5,7 +5,7 @@ use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 
-use super::{instance::{InstanceStore, UsesInstanceStore}, Device};
+use super::{instance::{InstanceStore, InternalInstanceStore}, Device};
 
 pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;
@@ -33,7 +33,7 @@ pub trait DeviceStore{
     fn host_memory_index(&self) -> u32;
 }
 
-pub trait UsesDeviceStore<D:DeviceStore>{
+pub trait InternalDeviceStore<D:DeviceStore>{
     fn device_provider(&self) -> &Arc<D>;
 }
 
@@ -478,7 +478,7 @@ impl<'a> DeviceSettingsStore for Settings<'a>{
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{self.acc_struct_features}
 }
 
-impl<I:InstanceStore> UsesInstanceStore<I> for Device<I>{
+impl<I:InstanceStore> InternalInstanceStore<I> for Device<I>{
     fn instance_provider(&self) -> &Arc<I> {
         &self.instance
     }

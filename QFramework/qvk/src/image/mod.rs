@@ -2,7 +2,7 @@ use std::{sync::{Arc, Mutex}, marker::PhantomData};
 
 use ash::vk;
 
-use crate::{init::{device::{DeviceStore, UsesDeviceStore}, instance::{InstanceStore, UsesInstanceStore}}, memory::{memory::MemoryStore, Partition}};
+use crate::{init::{device::{DeviceStore, InternalDeviceStore}, instance::{InstanceStore, InternalInstanceStore}}, memory::{memory::MemoryStore, Partition}};
 
 use self::image::ImageStore;
 
@@ -18,7 +18,7 @@ pub struct Image<D:DeviceStore, M:MemoryStore>{
 
 
 pub mod imageresource;
-pub struct ImageResource<I:InstanceStore, D:DeviceStore + UsesInstanceStore<I>, Img:ImageStore + UsesDeviceStore<D>>{
+pub struct ImageResource<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>>{
     image: Arc<Img>,
     resorces: vk::ImageSubresourceLayers,
     offset: vk::Offset3D,
