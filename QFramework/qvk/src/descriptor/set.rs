@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use ash::vk;
 use log::info;
+use crate::command::BindSetFactory;
 use crate::descriptor::{DescriptorLayoutStore, DescriptorPoolStore};
 
 use crate::init::DeviceStore;
@@ -21,5 +23,15 @@ impl<D:DeviceStore + Clone, L:DescriptorLayoutStore + Clone, P:DescriptorPoolSto
                 set,
             }
         )
+    }
+}
+
+impl<D:DeviceStore + Clone, L:DescriptorLayoutStore + Clone, P:DescriptorPoolStore + Clone> BindSetFactory for  Arc<Set<D,L,P>>{
+    fn set(&self) -> vk::DescriptorSet {
+        self.set
+    }
+
+    fn dynamic_offsets(&self) -> Option<Vec<u32>> {
+        todo!()
     }
 }

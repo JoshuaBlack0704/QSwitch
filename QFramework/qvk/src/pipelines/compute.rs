@@ -3,6 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
+use crate::command::BindPipelineFactory;
 use crate::init::DeviceStore;
 use crate::pipelines::PipelineLayoutStore;
 use crate::shader::ShaderStore;
@@ -38,6 +39,19 @@ impl<D:DeviceStore + Clone, L:PipelineLayoutStore + Clone> Compute<D,L>{
     }
 }
 
+impl<D:DeviceStore, L:PipelineLayoutStore> BindPipelineFactory for Arc<Compute<D,L>>{
+    fn layout(&self) -> vk::PipelineLayout {
+        self.layout.layout()
+    }
+
+    fn bind_point(&self) -> vk::PipelineBindPoint {
+        vk::PipelineBindPoint::COMPUTE
+    }
+
+    fn pipeline(&self) -> vk::Pipeline {
+        self.pipeline
+    }
+}
 
 impl<D:DeviceStore, L:PipelineLayoutStore> Drop for Compute<D,L>{
     fn drop(&mut self) {

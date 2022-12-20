@@ -39,7 +39,6 @@ pub trait BindPipelineFactory{
     fn pipeline(&self) -> vk::Pipeline;
 }
 pub trait BindSetFactory{
-    fn bind_point(&self) -> vk::PipelineBindPoint;
     fn set(&self) -> vk::DescriptorSet;
     fn dynamic_offsets(&self) -> Option<Vec<u32>>;
 }

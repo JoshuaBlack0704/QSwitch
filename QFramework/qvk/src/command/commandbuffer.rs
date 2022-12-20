@@ -55,7 +55,7 @@ impl<D:DeviceStore> CommandBufferStore for Arc<CommandBuffer<D>>{
         unsafe{
             if let Some(o) = set.dynamic_offsets(){
                 let sets = [set.set()];
-                self.device.device().cmd_bind_descriptor_sets(self.cmd, set.bind_point(), pipeline.layout(), set_index, &sets, &o);
+                self.device.device().cmd_bind_descriptor_sets(self.cmd, pipeline.bind_point(), pipeline.layout(), set_index, &sets, &o);
             }
         }
     }
