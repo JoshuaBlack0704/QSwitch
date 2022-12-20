@@ -3,12 +3,11 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, memory::{Memory, partitionsystem, PartitionSystem}, queue::SubmitSet};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet, Executor, ImageCopyFactory}, memory::{Memory, partitionsystem, PartitionSystem}, queue::{SubmitSet, QueueOps}};
 use crate::command::CommandBufferFactory;
 use crate::image::ImageStore;
 use crate::init::{DeviceStore, InternalDeviceStore};
 use crate::memory::MemoryStore;
-use crate::queue::QueueStore;
 
 use super::Image;
 
@@ -142,7 +141,7 @@ impl<D:DeviceStore, M:MemoryStore> Image<D,M>{
 impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
     fn transition<C:CommandBufferStore>(
         &self, 
-        cmd: &Arc<C>, 
+        cmd: &C, 
         new_layout: vk::ImageLayout, 
         src_stage: Option<vk::PipelineStageFlags2>,
         dst_stage: Option<vk::PipelineStageFlags2>,
@@ -213,28 +212,23 @@ impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
     }
 
     fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>) {
-        let old_layout = *self.layout().lock().unwrap();
+        let old_layout = *ImageStore::layout(self).lock().unwrap();
         if old_layout == new_layout{
             return;
         }
-        let settings = commandpool::SettingsStore::new(self.device.grahics_queue().unwrap().1);
-        let pool = CommandPool::new(&settings, &self.device).unwrap();
-        let mut settings = commandset::SettingsStore::default();
-        settings.batch_size = 1;
-        let bset = CommandSet::new(&settings, &self.device, &pool);
-        let cmd = bset.next_cmd();
+        let executor = Executor::new(&self.device, vk::QueueFlags::GRAPHICS);
+        let cmd = executor.next_cmd();
         cmd.begin(None).unwrap();
+        
         if let Some(range) = subresources{
             self.transition(&cmd, new_layout, None, None, None, None,Some(range));
         }
         else{
             self.transition(&cmd, new_layout, None, None, None, None, None);
         }
+        
         cmd.end().unwrap();
-        let submit = SubmitSet::new(&cmd);
-        let submit = [submit];
-        let queue = crate::queue::Queue::new(self.device_provider(), vk::QueueFlags::GRAPHICS).unwrap();
-        queue.wait_submit(&submit).unwrap();
+        executor.wait_submit_internal();
     }
 
     fn image(&self) -> &vk::Image {
@@ -258,6 +252,7 @@ impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
     }
 
 }
+
 
 impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
     fn drop(&mut self) {

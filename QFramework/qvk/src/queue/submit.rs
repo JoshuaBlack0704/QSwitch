@@ -9,8 +9,8 @@ use crate::sync::SemaphoreStore;
 use super::SubmitSet;
 
 
-impl<C:CommandBufferStore> SubmitSet<C>{
-    pub fn new(first_cmd: &Arc<C>) -> Self {
+impl<C:CommandBufferStore + Clone> SubmitSet<C>{
+    pub fn new(first_cmd: &C) -> Self {
         let info = vk::CommandBufferSubmitInfo::builder().device_mask(0).command_buffer(first_cmd.cmd());
         Self{
             wait_semaphores: vec![],
@@ -21,7 +21,7 @@ impl<C:CommandBufferStore> SubmitSet<C>{
     }
 }
 
-impl<C:CommandBufferStore> SubmitInfoStore<C> for SubmitSet<C>{
+impl<C:CommandBufferStore + Clone> SubmitInfoStore<C> for SubmitSet<C>{
     fn info(&self) -> vk::SubmitInfo2 {
       
         vk::SubmitInfo2::builder()
@@ -31,7 +31,7 @@ impl<C:CommandBufferStore> SubmitInfoStore<C> for SubmitSet<C>{
         .build()
     }
 
-    fn add_cmd(&mut self, cmd: &Arc<C>) {
+    fn add_cmd(&mut self, cmd: &C) {
         let info = vk::CommandBufferSubmitInfo::builder().device_mask(0).command_buffer(cmd.cmd());
         self.cmds.push(cmd.clone());
         self.live_cmds.push(info.build());

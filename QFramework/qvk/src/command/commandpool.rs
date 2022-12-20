@@ -4,9 +4,8 @@ use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{debug, info};
 use crate::command::CommandPoolStore;
 
-use crate::init::device::{};
 use crate::init::{DeviceStore, InternalDeviceStore};
-use super::CommandPool;
+use super::{CommandPool, CommandPoolOps};
 
 
 pub trait CommandPoolSettingsStore{
@@ -46,11 +45,7 @@ impl<D: DeviceStore, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
     }
 }
 
-impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for CommandPool<D,S>{
-    fn cmdpool(&self) -> &vk::CommandPool {
-        &self.command_pool
-    }
-
+impl<D:DeviceStore, S:CommandPoolSettingsStore> CommandPoolOps for CommandPool<D,S>{
     fn reset_cmdpool(&self) {
         match self.settings.reset_flags(){
             Some(f) => {
@@ -60,6 +55,12 @@ impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for CommandP
                 unsafe{self.device.device().reset_command_pool(self.command_pool, vk::CommandPoolResetFlags::empty())}.expect("Could not reset command pool");
             },
         }
+    }
+}
+
+impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for CommandPool<D,S>{
+    fn cmdpool(&self) -> &vk::CommandPool {
+        &self.command_pool
     }
 }
 

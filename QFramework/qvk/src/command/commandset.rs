@@ -26,8 +26,8 @@ pub struct SettingsStore{
     pub reset_flags: Option<vk::CommandBufferResetFlags>,
 }
 
-impl<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettingsStore + Clone> CommandSet<D,P,S>{
-    pub fn new(settings: &S, device_provider: &Arc<D>, cmdpool_provider: &Arc<P>) -> Arc<CommandSet<D,P,S>> {
+impl<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettingsStore + Clone, C:CommandBufferStore + Clone> CommandSet<D,P,S,C>{
+    pub fn new(settings: &S, device_provider: &Arc<D>, cmdpool_provider: &Arc<P>) -> Arc<Self> {
         Arc::new(
             CommandSet{ 
                 device: device_provider.clone(),
@@ -37,9 +37,12 @@ impl<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettingsStore + Clone> Co
             }
         )
     }
+    pub fn created_cmds(&self) -> Vec<C>{
+        self.cmds.lock().unwrap().clone()
+    }
 }
 
-impl<D:DeviceStore, P:CommandPoolStore, S:CommandSetSettingsStore> CommandBufferFactory<D> for CommandSet<D,P,S>{
+impl<D:DeviceStore, P:CommandPoolStore, S:CommandSetSettingsStore> CommandBufferFactory<D,Arc<CommandBuffer<D>>> for CommandSet<D,P,S,Arc<CommandBuffer<D>>>{
     fn next_cmd(&self) -> Arc<CommandBuffer<D>> {
         // First we need to see if there are any cmds available
         let mut cmds = self.cmds.lock().unwrap();

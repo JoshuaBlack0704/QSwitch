@@ -3,13 +3,12 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet}, init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, BufferCopyFactory, ImageCopyFactory}, init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet, QueueOps}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
 use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
-use crate::queue::QueueStore;
 
 use super::BufferSegment;
 
@@ -53,7 +52,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> BufferSegmentStore for BufferSegment<I,D,M,B,P>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
@@ -121,25 +120,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
         Ok(())
     }
 
-    fn copy_to_partition<Buf:BufferStore, BP:BufferSegmentStore + InternalBufferStore<Buf>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
-        if self.partition.size > dst.get_partition().size(){
-            return Err(BufferSegmentMemOpError::NoSpace);
-        }
-
-        let op = [vk::BufferCopy::builder()
-        .src_offset(self.partition.offset)
-        .dst_offset(dst.get_partition().offset)
-        .size(self.partition.size)
-        .build()];
-
-        unsafe{
-            let device = self.buffer.device_provider().device();
-            device.cmd_copy_buffer(cmd.cmd(), *self.buffer.buffer(), *dst.buffer_provider().buffer(), &op);
-        }
-        Ok(())
-    }
-
-    fn copy_to_partition_internal<Buf:BufferStore, BP:BufferSegmentStore + InternalBufferStore<Buf>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError> {
+    fn copy_to_segment_internal<Buf:BufferStore, BP:BufferCopyFactory + InternalBufferStore<Buf>>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError> {
         let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
         let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
@@ -147,7 +128,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
         let cmd = cmd_set.next_cmd();
         
         cmd.begin(None).unwrap();
-        self.copy_to_partition(&cmd, dst)?;
+        cmd.buffer_copy(self, dst);
         cmd.end().unwrap();
         
         let submit = SubmitSet::new(&cmd);
@@ -157,48 +138,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
         Ok(())
     }
 
-    fn copy_to_image<Img:ImageStore, IS:ImageSubresourceStore + InternalImageStore<Img>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
-        if dst.extent().width == 0{
-            return Ok(());
-        }
-        if dst.extent().height== 0{
-            return Ok(());
-        }
-        if dst.extent().depth == 0{
-            return Ok(());
-        }
-        
-        let buffer_offset = self.partition.offset();
-        let mut addressing = (0,0);
-        if let Some(a) = buffer_addressing{
-            addressing = a;
-        }
-
-        let subresource = dst.subresource();
-        let offset = dst.offset();
-        let extent = dst.extent();
-        let image = dst.image_provider().image();
-        let layout = dst.layout();
-        
-        let info = [vk::BufferImageCopy::builder()
-        .buffer_offset(buffer_offset)
-        .buffer_row_length(addressing.0)
-        .buffer_image_height(addressing.1)
-        .image_subresource(subresource)
-        .image_offset(offset)
-        .image_extent(extent)
-        .build()];
-
-        unsafe{
-            let device = self.buffer.device_provider().device();
-            debug!("Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}", self.partition.size, *self.buffer.buffer(), dst.subresource(), *image);
-            device.cmd_copy_buffer_to_image(cmd.cmd(), *self.buffer.buffer(), *image, *layout, &info);
-        }
-
-        Ok(())
-    }
-
-    fn copy_to_image_internal<Img:ImageStore, IS:ImageSubresourceStore + InternalImageStore<Img>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+    fn copy_to_image_internal<Img:ImageStore, IS: InternalImageStore<Img> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
         let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
         let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
         let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
@@ -206,7 +146,8 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
         let cmd = cmd_set.next_cmd();
         
         cmd.begin(None).unwrap();
-        self.copy_to_image(&cmd, dst, buffer_addressing)?;
+        cmd.buffer_image_copy(self, dst, buffer_addressing);
+        // self.copy_to_image(&cmd, dst, buffer_addressing)?;
         cmd.end().unwrap();
         
         let submit = SubmitSet::new(&cmd);
@@ -219,7 +160,18 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
 
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> InternalBufferStore<B> for BufferSegment<I,D,M,B,P>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> BufferCopyFactory for Arc<BufferSegment<I,D,M,B,P>>{
+    fn size(&self) -> u64 {
+        self.partition.size
+    }
+
+    fn offset(&self) -> u64 {
+        self.partition.offset
+    }
+}
+    
+
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> InternalBufferStore<B> for Arc<BufferSegment<I,D,M,B,P>>{
     fn buffer_provider(&self) -> &Arc<B> {
         &self.buffer
     }

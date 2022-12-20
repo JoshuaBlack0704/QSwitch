@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
 use ash::vk;
-use crate::command::CommandBufferStore;
+use crate::command::{CommandBufferStore, ImageCopyFactory, BufferCopyFactory};
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 
 use crate::init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore};
@@ -42,12 +42,9 @@ pub trait BufferSegmentStore{
     fn device_addr(&self) -> vk::DeviceSize;
     fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
     fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_partition<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_partition_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_segment_internal<B:BufferStore, BP:BufferCopyFactory + InternalBufferStore<B>>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image<I:ImageStore, IS:ImageSubresourceStore + InternalImageStore<I>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
-    ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image_internal<I:ImageStore, IS:ImageSubresourceStore + InternalImageStore<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    fn copy_to_image_internal<I:ImageStore, IS: InternalImageStore<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
 pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore>{
 

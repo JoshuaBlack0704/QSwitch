@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::Queue, sync::{self, Semaphore}};
+use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
 use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
 use crate::init::{DeviceStore, InternalDeviceStore};
 use crate::queue::QueueStore;

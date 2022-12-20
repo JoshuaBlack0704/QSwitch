@@ -6,7 +6,7 @@ use crate::{command::CommandBufferStore, init::{DeviceStore, InternalDeviceStore
 use crate::queue::{QueueStore, SubmitInfoStore};
 use crate::sync::FenceStore;
 
-use super::Queue;
+use super::{Queue, QueueOps};
 
 impl<D:DeviceStore> Queue<D>{
     pub fn new(device_provider: &Arc<D>, flags: vk::QueueFlags) -> Option<Arc<Self>>{
@@ -36,8 +36,8 @@ impl<D:DeviceStore> InternalDeviceStore<D> for Queue<D>{
     }
 }
 
-impl<D:DeviceStore> QueueStore for Queue<D>{
-    fn submit<C:CommandBufferStore, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
+impl<D:DeviceStore> QueueOps for Queue<D>{
+    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
         let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
         let device = self.device.device();
@@ -50,19 +50,21 @@ impl<D:DeviceStore> QueueStore for Queue<D>{
             device.queue_submit2(self.queue, &submits, _fence)
         }
     }
-
-    fn wait_submit<C:CommandBufferStore, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
+    fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
         let fence = sync::Fence::new(self.device_provider(), false);
         let res = self.submit(submits, Some(&fence));
         fence.wait(None);
         res
     }
+    fn wait_idle(&self) {
+        unsafe{self.device.device().queue_wait_idle(self.queue).unwrap()};
+    }
+}
+
+impl<D:DeviceStore> QueueStore for Queue<D>{
 
     fn queue(&self) -> &vk::Queue {
         &self.queue
     }
 
-    fn wait_idle(&self) {
-        unsafe{self.device.device().queue_wait_idle(self.queue).unwrap()};
-    }
 }

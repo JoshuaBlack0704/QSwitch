@@ -3,11 +3,10 @@ use std::{marker::PhantomData, sync::{Arc, Mutex}};
 use ash::vk;
 use std::sync::MutexGuard;
 
-use crate::{init::{instance::{InstanceStore, InternalInstanceStore}}, memory::Partition};
+use crate::{init::{instance::{InstanceStore, InternalInstanceStore}}, memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferStore;
 use crate::image::imageresource::ImageResourceMemOpError;
 use crate::init::{DeviceStore, InternalDeviceStore};
-use crate::memory::buffer::BufferSegmentStore;
 use crate::memory::buffer::{BufferStore, InternalBufferStore};
 use crate::memory::MemoryStore;
 
@@ -16,7 +15,7 @@ pub trait ImageStore{
     /// Returns the old layout
     fn transition<C:CommandBufferStore>(
         &self,
-        cmd: &Arc<C>,
+        cmd: &C,
         new_layout: vk::ImageLayout,
         src_stage: Option<vk::PipelineStageFlags2>,
         dst_stage: Option<vk::PipelineStageFlags2>,
@@ -51,13 +50,11 @@ pub trait ImageSubresourceStore{
     fn offset(&self) -> vk::Offset3D;
     fn extent(&self) -> vk::Extent3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
-    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_buffer_internal<B:BufferStore, BP:BufferCopyFactory + InternalBufferStore<B>>(&self, dst: &BP, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_image_internal<I:ImageStore, IR:ImageCopyFactory+ InternalImageStore<I>>(&self, dst: &IR) -> Result<(), ImageResourceMemOpError>;
+    fn blit_to_image_internal<I:ImageStore, IR:ImageCopyFactory + InternalImageStore<I>>(&self, dst: &IR, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
+
 pub struct ImageResource<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>>{
     image: Arc<Img>,
     resorces: vk::ImageSubresourceLayers,
