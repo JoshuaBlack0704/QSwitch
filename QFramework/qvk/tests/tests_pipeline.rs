@@ -1,13 +1,10 @@
-use std::mem::size_of;
-
 use ash::vk;
 use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, Device, instance, Instance}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::HLSL, command::{Executor, CommandBufferFactory, CommandBufferStore}};
 use qvk::init::DeviceStore;
+use std::mem::size_of;
 
-fn main(){
-    
-    pretty_env_logger::init();
-    
+#[test]
+fn compute_pipeline(){
     let settings = instance::Settings::default();
     let instance = Instance::new(&settings);
     
@@ -43,7 +40,7 @@ fn main(){
     let dset = Set::new(&device, &dlayout, &dpool);
     dset.update();
 
-    let code = HLSL::new("examples/resources/shaders/increment-set.hlsl", shaderc::ShaderKind::Compute, "main", None);
+    let code = HLSL::new("tests/resources/shaders/increment-set.hlsl", shaderc::ShaderKind::Compute, "main", None);
     let shader = qvk::shader::Shader::new(&device, &code, vk::ShaderStageFlags::COMPUTE, None);
 
     let mut settings = pipelines::layout::Settings::new(None);
@@ -62,7 +59,8 @@ fn main(){
     exe.wait_submit_internal();
 
     storage_access.copy_to_ram(&mut dst).unwrap();
+    for (index, num) in dst.iter().enumerate(){
+        assert_eq!(*num, src[index] + 1);
+    }
     println!("{:?}",dst);
-    
-    
 }

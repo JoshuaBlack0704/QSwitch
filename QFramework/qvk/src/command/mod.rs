@@ -64,6 +64,7 @@ pub trait CommandBufferStore{
     fn image_copy<I1: ImageStore, I2: ImageStore, IR1: ImageCopyFactory + InternalImageStore<I1>, IR2: ImageCopyFactory + InternalImageStore<I2>>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError>;
     fn image_blit<I1: ImageStore, I2: ImageStore, IR1: ImageCopyFactory + InternalImageStore<I1>, IR2: ImageCopyFactory + InternalImageStore<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError>;
     fn image_buffer_copy<B:BufferStore, BS: BufferCopyFactory + InternalBufferStore<B>, I:ImageStore, IR: ImageCopyFactory + InternalImageStore<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
+    fn dispatch(&self, x: u32, y: u32, z:u32);
 }
 #[derive(Debug)]
 pub enum CommandOpError{

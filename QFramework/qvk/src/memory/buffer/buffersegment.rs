@@ -3,7 +3,7 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceStore, InstanceStore, InternalInstanceStore, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}};
+use crate::{command::{CommandBufferStore,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceStore, InstanceStore, InternalInstanceStore, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, descriptor::{WriteStore, ApplyWriteFactory}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, InternalImageStore};
@@ -36,12 +36,19 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
 
 
         let p = p.unwrap();
+
+        let b_info = vk::DescriptorBufferInfo::builder()
+        .buffer(*buffer_provider.buffer())
+        .offset(p.offset)
+        .range(p.size)
+        .build();
         info!("Partitioned buffer {:?} at offset {:?} for {:?} bytes", *buffer_provider.buffer(), p.offset, p.size);
         Ok(
             Arc::new(BufferSegment{
             buffer: buffer_provider.clone(),
             _partition_sys: Mutex::new(PartitionSystem::new(p.size)),
             partition: p,
+            desc_buffer_info: [b_info],
             _device_addr: None,
             _instance: std::marker::PhantomData,
             _memory: std::marker::PhantomData,
@@ -183,5 +190,17 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
         .descriptor_type(binding_type)
         .descriptor_count(1)
         .build()
+    }
+}
+
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>> ApplyWriteFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
+    fn apply<W:WriteStore>(&self, write: &W) {
+
+        let info = vk::WriteDescriptorSet::builder()
+        .dst_array_element(0)
+        .buffer_info(&self.desc_buffer_info)
+        .build();
+
+        write.update(info);
     }
 }

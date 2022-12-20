@@ -57,6 +57,10 @@ impl<D:DeviceStore> CommandBufferStore for Arc<CommandBuffer<D>>{
                 let sets = [set.set()];
                 self.device.device().cmd_bind_descriptor_sets(self.cmd, pipeline.bind_point(), pipeline.layout(), set_index, &sets, &o);
             }
+            else{
+                let sets = [set.set()];
+                self.device.device().cmd_bind_descriptor_sets(self.cmd, pipeline.bind_point(), pipeline.layout(), set_index, &sets, &[]);
+            }
         }
     }
 
@@ -239,6 +243,12 @@ impl<D:DeviceStore> CommandBufferStore for Arc<CommandBuffer<D>>{
             device.cmd_copy_image_to_buffer(self.cmd, *image, *layout, *buffer, &info);
         }
         Ok(())
+    }
+
+    fn dispatch(&self, x: u32, y: u32, z:u32) {
+        unsafe{
+            self.device.device().cmd_dispatch(self.cmd, x, y, z);
+        }
     }
 
 }

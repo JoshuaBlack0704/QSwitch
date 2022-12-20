@@ -4,7 +4,7 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::{init::DeviceStore, SettingsStore};
-use crate::descriptor::DescriptorLayoutStore;
+use crate::descriptor::{DescriptorLayoutStore, WriteStore};
 use crate::pipelines::PipelineLayoutStore;
 
 use super::Layout;
@@ -60,7 +60,7 @@ impl Settings{
             pushes: vec![],
         }
     }
-    pub fn add_layout<L:DescriptorLayoutStore>(&mut self, layout: &L){
+    pub fn add_layout<W:WriteStore, L:DescriptorLayoutStore<W>>(&mut self, layout: &L){
         self.layouts.push(layout.layout());
     }
     pub fn add_push(&mut self, push: vk::PushConstantRange){

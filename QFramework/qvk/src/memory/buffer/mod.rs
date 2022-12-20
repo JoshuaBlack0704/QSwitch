@@ -51,6 +51,7 @@ pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore
     buffer: B,
     _partition_sys: Mutex<P>,
     partition: Partition,
+    desc_buffer_info: [vk::DescriptorBufferInfo;1],
     _device_addr: Option<vk::DeviceAddress>,
     _instance: PhantomData<I>,
     _memory: PhantomData<M>,

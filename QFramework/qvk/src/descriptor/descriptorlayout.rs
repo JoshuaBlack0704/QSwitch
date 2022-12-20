@@ -6,9 +6,9 @@ use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutStore};
 
 
 use crate::init::{DeviceStore, InternalDeviceStore};
-use super::{DescriptorLayout, WriteHolder};
+use super::{DescriptorLayout, WriteHolder, WriteStore};
 
-impl<D:DeviceStore + Clone> DescriptorLayout<D>{
+impl<D:DeviceStore + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
     pub fn new(device_provider: &D, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
         Arc::new(
             Self{
@@ -39,14 +39,14 @@ impl<D:DeviceStore + Clone> DescriptorLayout<D>{
             .dst_binding(bindings.len() as u32)
             .descriptor_type(binding.descriptor_type)
             .build();
-        let write = WriteHolder::new(write);
+        let write = WriteHolder::new(binding.descriptor_type, bindings.len() as u32, write);
         bindings.push(binding);
         writes.push(write.clone());
         write
     }
 }
 
-impl<D:DeviceStore> DescriptorLayoutStore for Arc<DescriptorLayout<D>>{
+impl<D:DeviceStore,W:WriteStore> DescriptorLayoutStore<W> for Arc<DescriptorLayout<D,W>>{
     fn layout(&self) -> vk::DescriptorSetLayout {
         let mut layout = self.layout.lock().unwrap();
         if let Some(l) = *layout{
@@ -68,7 +68,7 @@ impl<D:DeviceStore> DescriptorLayoutStore for Arc<DescriptorLayout<D>>{
         }
     }
 
-    fn writes(&self) -> MutexGuard<Vec<Arc<WriteHolder>>> {
+    fn writes(&self) -> MutexGuard<Vec<W>> {
         self.writes.lock().unwrap()
     }
 
@@ -77,7 +77,7 @@ impl<D:DeviceStore> DescriptorLayoutStore for Arc<DescriptorLayout<D>>{
     }
 }
 
-impl<D:DeviceStore> Drop for DescriptorLayout<D>{
+impl<D:DeviceStore,W:WriteStore> Drop for DescriptorLayout<D,W>{
     fn drop(&mut self) {
         if let Some(l) = *self.layout.lock().unwrap(){
             debug!("Destroyed descriptor set layout {:?}", l);
@@ -88,7 +88,7 @@ impl<D:DeviceStore> Drop for DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for Arc<DescriptorLayout<D>>{
+impl<D:DeviceStore,W:WriteStore> InternalDeviceStore<D> for Arc<DescriptorLayout<D,W>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
