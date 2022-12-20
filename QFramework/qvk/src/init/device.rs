@@ -6,7 +6,7 @@ use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use crate::init::{DeviceStore, InstanceStore, InternalInstanceStore, PhysicalDeviceData};
 
-use super::{Device, instance::{}};
+use super::Device;
 
 pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;

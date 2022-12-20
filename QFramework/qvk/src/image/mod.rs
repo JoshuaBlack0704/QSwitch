@@ -3,7 +3,7 @@ use std::{marker::PhantomData, sync::{Arc, Mutex}};
 use ash::vk;
 use std::sync::MutexGuard;
 
-use crate::{init::{instance::{}}, memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
+use crate::{memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferStore;
 use crate::image::imageresource::ImageResourceMemOpError;
 use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};

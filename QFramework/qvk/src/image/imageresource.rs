@@ -3,9 +3,8 @@ use std::sync::{Arc, MutexGuard};
 use image::{self, EncodableLayout};
 
 use ash::vk;
-use log::debug;
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, ImageCopyFactory, BufferCopyFactory, Executor}, init::{instance::{}}, memory::{buffer::{buffer::{self}, Buffer, BufferSegment}, Memory, memory}, queue::{Queue, SubmitSet, QueueOps}, image::ImageResource};
+use crate::{command::{CommandBufferStore, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, Memory, memory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};

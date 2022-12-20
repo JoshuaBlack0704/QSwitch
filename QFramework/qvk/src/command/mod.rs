@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
 
-use crate::{init::DeviceStore, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, ImageSubresourceStore, InternalImageStore}};
+use crate::{init::DeviceStore, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, InternalImageStore}};
 
 use self::{commandpool::CommandPoolSettingsStore, commandset::CommandSetSettingsStore};
 
@@ -78,7 +78,7 @@ pub struct CommandBuffer<D:DeviceStore>{
 
 pub mod executor;
 pub struct Executor<D:DeviceStore>{
-    device: D,
+    _device: D,
     command_pool: Arc<CommandPool<D,commandpool::SettingsStore>>,
     command_set: Arc<CommandSet<D, Arc<CommandPool<D,commandpool::SettingsStore>>, commandset::SettingsStore, Arc<CommandBuffer<D>>>>,
     queue: Arc<Queue<D>>,

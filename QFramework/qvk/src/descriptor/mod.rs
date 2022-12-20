@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
+
 use ash::vk;
 
 use crate::init::DeviceStore;
@@ -25,12 +26,14 @@ pub struct DescriptorLayout<D:DeviceStore>{
 }
 
 pub mod writeholder;
+#[allow(unused)]
 pub struct WriteHolder{
     write: Mutex<vk::WriteDescriptorSet>,
 }
  
 // Upon creation the descriptor set will make available a set of arc mutexed writes that can be given to other structs for updates
 pub mod set;
+#[allow(unused)]
 pub struct Set<D:DeviceStore,L:DescriptorLayoutStore,P:DescriptorPoolStore>{
     device: D,
     layout: L,
@@ -40,6 +43,7 @@ pub struct Set<D:DeviceStore,L:DescriptorLayoutStore,P:DescriptorPoolStore>{
 }
 
 pub mod pool;
+#[allow(unused)]
 pub trait DescriptorPoolStore{
     fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &L) -> vk::DescriptorSet;
     fn pool(&self) -> vk::DescriptorPool;

@@ -1,8 +1,8 @@
-use std::{marker::PhantomData, sync::{Arc, Mutex}};
+use std::{marker::PhantomData, sync::Mutex};
 
 use ash::vk;
-use crate::command::{CommandBufferStore, ImageCopyFactory, BufferCopyFactory};
-use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
+use crate::command::{ImageCopyFactory, BufferCopyFactory};
+use crate::image::{ImageStore, InternalImageStore};
 
 use crate::init::{DeviceStore, InternalInstanceStore, InstanceStore, InternalDeviceStore};
 use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};

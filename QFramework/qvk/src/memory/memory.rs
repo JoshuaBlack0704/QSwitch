@@ -5,7 +5,7 @@ use log::{debug, info};
 use crate::init::{DeviceStore, InternalDeviceStore};
 use crate::memory::{MemoryStore, PartitionStore};
 
-use super::{Memory, Partition, partitionsystem::{self}, PartitionSystem};
+use super::{Memory, Partition, partitionsystem, PartitionSystem};
 
 #[derive(Clone)]
 pub enum MemoryAllocateExtension{

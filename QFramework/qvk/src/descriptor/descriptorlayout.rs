@@ -1,11 +1,10 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use ash::vk::{self, DescriptorSetLayoutBinding};
+use ash::vk;
 use log::{debug, info};
 use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutStore};
 
 
-use crate::init::device::{};
 use crate::init::{DeviceStore, InternalDeviceStore};
 use super::{DescriptorLayout, WriteHolder};
 

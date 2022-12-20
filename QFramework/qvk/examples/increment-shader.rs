@@ -3,6 +3,7 @@ use qvk::{descriptor::{self, DescriptorLayout, Set}, init::{device, Device, inst
 use qvk::descriptor::DescriptorLayoutStore;
 use qvk::init::DeviceStore;
 
+#[allow(unused)]
 fn main(){
     
     pretty_env_logger::init();

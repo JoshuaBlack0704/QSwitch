@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ash::vk;
 
 use crate::init::DeviceStore;
@@ -14,6 +12,7 @@ pub struct Layout<D:DeviceStore>{
 }
 
 pub mod compute;
+#[allow(unused)]
 pub struct Compute<D:DeviceStore, L:PipelineLayoutStore>{
     device: D,
     layout: L,

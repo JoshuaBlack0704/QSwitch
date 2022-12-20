@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{command::CommandBufferStore, init::{DeviceStore, InternalDeviceStore}, sync::{self}};
+use crate::{command::CommandBufferStore, init::{DeviceStore, InternalDeviceStore}, sync};
 use crate::queue::{QueueStore, SubmitInfoStore};
 use crate::sync::FenceStore;
 

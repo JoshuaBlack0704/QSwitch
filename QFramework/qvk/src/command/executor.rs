@@ -19,7 +19,7 @@ impl<D:DeviceStore + Clone> Executor<D>{
 
         Arc::new(
             Self{
-                device: device_provider.clone(),
+                _device: device_provider.clone(),
                 command_pool: pool,
                 command_set: bset,
                 queue,
