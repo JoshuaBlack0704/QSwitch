@@ -21,8 +21,8 @@ pub struct SettingsStore{
     pub reset_flags: Option<vk::CommandPoolResetFlags>,
 }
 
-impl<D: DeviceStore, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
-    pub fn new(settings: &S, device_provider: &Arc<D>) -> Result<Arc<CommandPool<D,S>>, vk::Result>{
+impl<D: DeviceStore + Clone, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
+    pub fn new(settings: &S, device_provider: &D) -> Result<Arc<CommandPool<D,S>>, vk::Result>{
         
         let mut cmdpool_cinfo = CommandPoolCreateInfo::builder();
         cmdpool_cinfo = cmdpool_cinfo.queue_family_index(settings.queue_family_index());
@@ -45,7 +45,7 @@ impl<D: DeviceStore, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
     }
 }
 
-impl<D:DeviceStore, S:CommandPoolSettingsStore> CommandPoolOps for CommandPool<D,S>{
+impl<D:DeviceStore, S:CommandPoolSettingsStore> CommandPoolOps for Arc<CommandPool<D,S>>{
     fn reset_cmdpool(&self) {
         match self.settings.reset_flags(){
             Some(f) => {
@@ -58,7 +58,7 @@ impl<D:DeviceStore, S:CommandPoolSettingsStore> CommandPoolOps for CommandPool<D
     }
 }
 
-impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for CommandPool<D,S>{
+impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for Arc<CommandPool<D,S>>{
     fn cmdpool(&self) -> &vk::CommandPool {
         &self.command_pool
     }
@@ -101,7 +101,7 @@ impl CommandPoolSettingsStore for SettingsStore{
 }
 
 impl<D: DeviceStore, S: CommandPoolSettingsStore> InternalDeviceStore<D> for CommandPool<D,S>{
-    fn device_provider(&self) -> &Arc<D> {
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }

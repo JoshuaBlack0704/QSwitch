@@ -9,8 +9,8 @@ use crate::init::device::{};
 use crate::init::{DeviceStore, InternalDeviceStore};
 use super::{DescriptorLayout, WriteHolder};
 
-impl<D:DeviceStore> DescriptorLayout<D>{
-    pub fn new(device_provider: &Arc<D>, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
+impl<D:DeviceStore + Clone> DescriptorLayout<D>{
+    pub fn new(device_provider: &D, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
         Arc::new(
             Self{
                 device: device_provider.clone(),
@@ -22,7 +22,7 @@ impl<D:DeviceStore> DescriptorLayout<D>{
         )
     }
 
-    pub fn form_binding<BP: DescriptorLayoutBindingFactory>(self: &Arc<Self>, binding_provider: &Arc<BP>, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
+    pub fn form_binding<BP: DescriptorLayoutBindingFactory>(self: &Arc<Self>, binding_provider: &BP, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
         if let Some(_) = *self.layout.lock().unwrap(){
             //The layout will be created the first time it is used
             panic!("Cannot add descriptor layout binding after the first time you use the layout");
@@ -47,7 +47,7 @@ impl<D:DeviceStore> DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceStore> DescriptorLayoutStore for DescriptorLayout<D>{
+impl<D:DeviceStore> DescriptorLayoutStore for Arc<DescriptorLayout<D>>{
     fn layout(&self) -> vk::DescriptorSetLayout {
         let mut layout = self.layout.lock().unwrap();
         if let Some(l) = *layout{
@@ -89,8 +89,8 @@ impl<D:DeviceStore> Drop for DescriptorLayout<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for DescriptorLayout<D>{
-    fn device_provider(&self) -> &std::sync::Arc<D> {
+impl<D:DeviceStore> InternalDeviceStore<D> for Arc<DescriptorLayout<D>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }

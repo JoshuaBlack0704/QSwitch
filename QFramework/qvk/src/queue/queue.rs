@@ -8,8 +8,8 @@ use crate::sync::FenceStore;
 
 use super::{Queue, QueueOps};
 
-impl<D:DeviceStore> Queue<D>{
-    pub fn new(device_provider: &Arc<D>, flags: vk::QueueFlags) -> Option<Arc<Self>>{
+impl<D:DeviceStore + Clone> Queue<D>{
+    pub fn new(device_provider: &D, flags: vk::QueueFlags) -> Option<Arc<Self>>{
         let q = device_provider.get_queue(flags);
         match q{
             Some(q) => {
@@ -30,14 +30,14 @@ impl<D:DeviceStore> Queue<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for Queue<D>{
-    fn device_provider(&self) -> &Arc<D> {
+impl<D:DeviceStore> InternalDeviceStore<D> for Arc<Queue<D>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<D:DeviceStore> QueueOps for Queue<D>{
-    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> std::result::Result<(), ash::vk::Result> {
+impl<D:DeviceStore + Clone> QueueOps for Arc<Queue<D>>{
+    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&F>) -> std::result::Result<(), ash::vk::Result> {
         let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
         let device = self.device.device();
@@ -61,7 +61,7 @@ impl<D:DeviceStore> QueueOps for Queue<D>{
     }
 }
 
-impl<D:DeviceStore> QueueStore for Queue<D>{
+impl<D:DeviceStore> QueueStore for Arc<Queue<D>>{
 
     fn queue(&self) -> &vk::Queue {
         &self.queue

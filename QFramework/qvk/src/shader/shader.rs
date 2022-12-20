@@ -8,8 +8,8 @@ use crate::shader::{ShaderStore, SpirvStore};
 
 use super::Shader;
 
-impl<D:DeviceStore> Shader<D>{
-    pub fn new<Spv: SpirvStore>(device_provider: &Arc<D>, spriv_data: &Spv, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {
+impl<D:DeviceStore + Clone> Shader<D>{
+    pub fn new<Spv: SpirvStore>(device_provider: &D, spriv_data: &Spv, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {
         let mut info = vk::ShaderModuleCreateInfo::builder();
         if let Some(flags) = flags{
             info = info.flags(flags);
@@ -42,7 +42,7 @@ impl<D:DeviceStore> Drop for Shader<D>{
     }
 }
 
-impl<D:DeviceStore> ShaderStore for Shader<D>{
+impl<D:DeviceStore> ShaderStore for Arc<Shader<D>>{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo {
         vk::PipelineShaderStageCreateInfo::builder()
         .stage(self.stage)

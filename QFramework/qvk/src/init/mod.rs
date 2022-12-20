@@ -5,9 +5,17 @@ use ash::vk;
 use crate::queue::QueueStore;
 use crate::image::{ImageStore, ImageViewStore};
 
-use self::{instance::InstanceStore, swapchain::SwapchainSettingsStore};
+use self::swapchain::SwapchainSettingsStore;
 
 pub mod instance;
+pub trait InstanceStore{
+    fn instance(&self) -> &ash::Instance;
+    fn entry(&self) -> &ash::Entry;
+}
+
+pub trait InternalInstanceStore<I:InstanceStore>{
+    fn instance_provider(&self) -> &I;
+}
 pub struct Instance{
     entry: ash::Entry,
     instance: ash::Instance,
@@ -15,7 +23,7 @@ pub struct Instance{
 
 pub mod device;
 pub struct Device<I: InstanceStore>{
-    instance: Arc<I>,
+    instance: I,
     surface: Option<vk::SurfaceKHR>,
     surface_loader: ash::extensions::khr::Surface,
     physical_device: PhysicalDeviceData,
@@ -24,16 +32,16 @@ pub struct Device<I: InstanceStore>{
 }
 pub mod swapchain;
 pub struct Swapchain<I:InstanceStore, D: DeviceStore, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore>{
-    _instance: Arc<I>,
-    device: Arc<D>,
+    _instance: I,
+    device: D,
     _settings: S,
     create_info: vk::SwapchainCreateInfoKHR,
     surface_loader: ash::extensions::khr::Surface,
     swapchain_loader: ash::extensions::khr::Swapchain,
     swapchain: Mutex<vk::SwapchainKHR>,
-    images: Mutex<Vec<Arc<Img>>>,
-    views: Mutex<Vec<Arc<ImgV>>>,
-    present_queue: Arc<Q>,
+    images: Mutex<Vec<Img>>,
+    views: Mutex<Vec<ImgV>>,
+    present_queue: Q,
 }
 
 #[derive(Clone)]
@@ -62,5 +70,7 @@ pub trait DeviceStore{
 }
 
 pub trait InternalDeviceStore<D:DeviceStore>{
-    fn device_provider(&self) -> &Arc<D>;
+    fn device_provider(&self) -> &D;
 }
+
+

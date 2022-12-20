@@ -7,8 +7,8 @@ use crate::{init::DeviceStore, memory::buffer::InternalBufferStore};
 
 use super::{CommandBuffer, CommandBufferStore, BindPipelineFactory, BindSetFactory, CommandOpError};
 
-impl<D:DeviceStore> CommandBuffer<D>{
-    pub fn new(device_store: &Arc<D>, cmd: vk::CommandBuffer) -> Arc<CommandBuffer<D>> {
+impl<D:DeviceStore + Clone> CommandBuffer<D>{
+    pub fn new(device_store: &D, cmd: vk::CommandBuffer) -> Arc<CommandBuffer<D>> {
         Arc::new(
             Self{
                 device: device_store.clone(),

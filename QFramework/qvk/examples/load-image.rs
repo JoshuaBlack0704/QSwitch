@@ -56,8 +56,8 @@ fn main(){
                 }
             },
             Event::MainEventsCleared => {
-                
-                swapchain.present_image(&resource);
+                let queue = qvk::queue::Queue::new(&device, vk::QueueFlags::GRAPHICS).unwrap();                
+                swapchain.present_image(&resource, &queue);
             }
             _ => {}
         }

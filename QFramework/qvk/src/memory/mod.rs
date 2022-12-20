@@ -18,7 +18,7 @@ pub struct PartitionSystem{
 
 pub mod memory;
 pub struct Memory<D: DeviceStore, P: PartitionStore>{
-    device: Arc<D>,
+    device: D,
     partition_sys: Mutex<P>,
     memory: vk::DeviceMemory,
 }
@@ -37,5 +37,5 @@ pub trait MemoryStore{
 }
 
 pub trait InternalMemoryStore<M:MemoryStore>{
-    fn memory_provider(&self) -> &Arc<M>;
+    fn memory_provider(&self) -> &M;
 }

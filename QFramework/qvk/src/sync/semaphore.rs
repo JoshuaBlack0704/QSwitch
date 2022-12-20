@@ -8,8 +8,8 @@ use crate::sync::SemaphoreStore;
 
 use super::Semaphore;
 
-impl<D:DeviceStore> Semaphore<D>{
-    pub fn new(device_provider: &Arc<D>) -> Arc<Semaphore<D>>{
+impl<D:DeviceStore + Clone> Semaphore<D>{
+    pub fn new(device_provider: &D) -> Arc<Semaphore<D>>{
         let info = vk::SemaphoreCreateInfo::builder();
         let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).unwrap()};
         info!("Created semaphore {:?}", semaphore);
@@ -29,7 +29,7 @@ impl<D:DeviceStore> Drop for Semaphore<D>{
     }
 }
 
-impl<D:DeviceStore> SemaphoreStore for Semaphore<D>{
+impl<D:DeviceStore> SemaphoreStore for Arc<Semaphore<D>>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
@@ -45,8 +45,8 @@ impl<D:DeviceStore> SemaphoreStore for Semaphore<D>{
     }
 }
 
-impl <D:DeviceStore> InternalDeviceStore<D> for Semaphore<D>{
-    fn device_provider(&self) -> &Arc<D> {
+impl <D:DeviceStore> InternalDeviceStore<D> for Arc<Semaphore<D>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }

@@ -6,20 +6,20 @@ use crate::init::DeviceStore;
 
 pub mod semaphore;
 pub struct Semaphore<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     semaphore: vk::Semaphore,
 }
 
 pub mod timelinesemaphore;
 pub struct TimelineSemaphore<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     semaphore: vk::Semaphore,
     value: Mutex<(bool, u64)>,
 }
 
 pub mod fence;
 pub struct Fence<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     fence: vk::Fence,
 }
 

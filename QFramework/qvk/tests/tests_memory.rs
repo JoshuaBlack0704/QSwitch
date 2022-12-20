@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{init::{instance, Instance, device, Device, DeviceStore}, memory::{Memory, memory, buffer::{Buffer, BufferSegment, buffer, BufferSegmentStore}}, image::{image, Image, ImageResource, ImageSubresourceStore, ImageStore}};
+use qvk::{init::{instance, Instance, device, Device, DeviceStore}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
 
 #[test]
 fn buffer_image(){

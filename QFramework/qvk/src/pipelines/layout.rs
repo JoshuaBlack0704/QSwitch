@@ -15,8 +15,8 @@ pub struct Settings{
     pushes: Vec<vk::PushConstantRange>,
 }
 
-impl<'a, D:DeviceStore> Layout<D>{
-    pub fn new<S:SettingsStore<'a, vk::PipelineLayoutCreateInfoBuilder<'a>>>(device_provider: &Arc<D>, settings: &'a S) -> Arc<Layout<D>> {
+impl<'a, D:DeviceStore + Clone> Layout<D>{
+    pub fn new<S:SettingsStore<'a, vk::PipelineLayoutCreateInfoBuilder<'a>>>(device_provider: &D, settings: &'a S) -> Arc<Layout<D>> {
         let mut info = vk::PipelineLayoutCreateInfo::builder();
         info = settings.add_to_builder(info);
 
@@ -37,7 +37,7 @@ impl<'a, D:DeviceStore> Layout<D>{
     }
 }
 
-impl<D:DeviceStore> PipelineLayoutStore for Layout<D>{
+impl<D:DeviceStore> PipelineLayoutStore for Arc<Layout<D>>{
     fn layout(&self) -> vk::PipelineLayout {
         self.layout
     }
@@ -60,7 +60,7 @@ impl Settings{
             pushes: vec![],
         }
     }
-    pub fn add_layout<L:DescriptorLayoutStore>(&mut self, layout: &Arc<L>){
+    pub fn add_layout<L:DescriptorLayoutStore>(&mut self, layout: &L){
         self.layouts.push(layout.layout());
     }
     pub fn add_push(&mut self, push: vk::PushConstantRange){

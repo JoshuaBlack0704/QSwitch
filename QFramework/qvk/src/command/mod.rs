@@ -15,15 +15,15 @@ pub trait CommandPoolOps{
 }
 
 pub struct CommandPool<D: DeviceStore, S: CommandPoolSettingsStore>{
-    device: Arc<D>,
+    device: D,
     settings: S,
     command_pool: vk::CommandPool,
 }
 
 pub mod commandset;
 pub struct CommandSet<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettingsStore, C:CommandBufferStore>{
-    device: Arc<D>,
-    cmdpool: Arc<P>,
+    device: D,
+    cmdpool: P,
     settings: S,
     cmds: Mutex<Vec<C>>,
 }
@@ -71,15 +71,15 @@ pub enum CommandOpError{
     Vulkan(vk::Result)
 }
 pub struct CommandBuffer<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     cmd: vk::CommandBuffer,
 }
 
 pub mod executor;
 pub struct Executor<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     command_pool: Arc<CommandPool<D,commandpool::SettingsStore>>,
-    command_set: Arc<CommandSet<D, CommandPool<D,commandpool::SettingsStore>, commandset::SettingsStore, Arc<CommandBuffer<D>>>>,
+    command_set: Arc<CommandSet<D, Arc<CommandPool<D,commandpool::SettingsStore>>, commandset::SettingsStore, Arc<CommandBuffer<D>>>>,
     queue: Arc<Queue<D>>,
     
 }

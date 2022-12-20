@@ -3,10 +3,10 @@ use std::{marker::PhantomData, sync::{Arc, Mutex}};
 use ash::vk;
 use std::sync::MutexGuard;
 
-use crate::{init::{instance::{InstanceStore, InternalInstanceStore}}, memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
+use crate::{init::{instance::{}}, memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferStore;
 use crate::image::imageresource::ImageResourceMemOpError;
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
 use crate::memory::buffer::{BufferStore, InternalBufferStore};
 use crate::memory::MemoryStore;
 
@@ -32,11 +32,11 @@ pub trait ImageStore{
     fn extent(&self) -> vk::Extent3D;
 }
 pub trait InternalImageStore<I:ImageStore>{
-    fn image_provider(&self) -> &Arc<I>;
+    fn image_provider(&self) -> &I;
 }
 pub struct Image<D:DeviceStore, M:MemoryStore>{
-    device: Arc<D>,
-    memory: Option<Arc<M>>,
+    device: D,
+    memory: Option<M>,
     _partition: Option<Partition>,
     image: vk::Image,
     create_info: vk::ImageCreateInfo,
@@ -56,7 +56,7 @@ pub trait ImageSubresourceStore{
 }
 
 pub struct ImageResource<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>>{
-    image: Arc<Img>,
+    image: Img,
     resorces: vk::ImageSubresourceLayers,
     offset: vk::Offset3D,
     extent: vk::Extent3D,
@@ -70,8 +70,8 @@ pub trait ImageViewStore{
 
 }
 pub struct ImageView<D:DeviceStore, Img:ImageStore>{
-    _device: Arc<D>,
-    _image: Arc<Img>,
+    _device: D,
+    _image: Img,
     _view: vk::ImageView,
 }
 

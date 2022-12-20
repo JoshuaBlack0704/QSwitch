@@ -8,8 +8,8 @@ use crate::sync::FenceStore;
 
 use super::Fence;
 
-impl<D:DeviceStore> Fence<D>{
-    pub fn new(device_provider: &Arc<D>, signaled: bool) -> Arc<Fence<D>> {
+impl<D:DeviceStore + Clone> Fence<D>{
+    pub fn new(device_provider: &D, signaled: bool) -> Arc<Fence<D>> {
         let mut info = vk::FenceCreateInfo::builder();
         if signaled{
             info = info.flags(vk::FenceCreateFlags::SIGNALED);
@@ -27,7 +27,7 @@ impl<D:DeviceStore> Fence<D>{
     }
 }
 
-impl<D:DeviceStore> FenceStore for Fence<D>{
+impl<D:DeviceStore> FenceStore for Arc<Fence<D>>{
     fn fence(&self) -> &vk::Fence {
         &self.fence
     }
@@ -61,8 +61,8 @@ impl<D:DeviceStore> Drop for Fence<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for Fence<D>{
-    fn device_provider(&self) -> &Arc<D> {
+impl<D:DeviceStore> InternalDeviceStore<D> for Arc<Fence<D>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }

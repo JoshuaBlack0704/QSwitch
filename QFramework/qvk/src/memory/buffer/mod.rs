@@ -4,7 +4,7 @@ use ash::vk;
 use crate::command::{CommandBufferStore, ImageCopyFactory, BufferCopyFactory};
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 
-use crate::init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore};
+use crate::init::{DeviceStore, InternalInstanceStore, InstanceStore, InternalDeviceStore};
 use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
 use crate::memory::buffer::buffer::BufferAlignmentType;
 use crate::memory::buffer::buffersegment::BufferSegmentMemOpError;
@@ -23,12 +23,12 @@ pub trait BufferStore{
 }
 
 pub trait InternalBufferStore<B:BufferStore>{
-    fn buffer_provider(&self) -> &Arc<B>;
+    fn buffer_provider(&self) -> &B;
 }
 pub struct Buffer<D: DeviceStore, M: MemoryStore, P: PartitionStore>{
 
-    device: Arc<D>,
-    memory: Arc<M>,
+    device: D,
+    memory: M,
     memory_partition: Partition,
     partition_sys: Mutex<P>,
     buffer: vk::Buffer,
@@ -48,7 +48,7 @@ pub trait BufferSegmentStore{
 }
 pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore>{
 
-    buffer: Arc<B>,
+    buffer: B,
     _partition_sys: Mutex<P>,
     partition: Partition,
     _device_addr: Option<vk::DeviceAddress>,

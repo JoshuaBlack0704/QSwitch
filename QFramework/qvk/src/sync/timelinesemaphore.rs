@@ -8,8 +8,8 @@ use crate::sync::SemaphoreStore;
 
 use super::TimelineSemaphore;
 
-impl<D:DeviceStore> TimelineSemaphore<D>{
-    pub fn new(device_provider: &Arc<D>, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
+impl<D:DeviceStore + Clone> TimelineSemaphore<D>{
+    pub fn new(device_provider: &D, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
         let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
         .semaphore_type(vk::SemaphoreType::TIMELINE)
         .initial_value(starting_value);
@@ -52,7 +52,7 @@ impl<D:DeviceStore> TimelineSemaphore<D>{
     }
 }
 
-impl<D:DeviceStore> SemaphoreStore for TimelineSemaphore<D>{
+impl<D:DeviceStore> SemaphoreStore for Arc<TimelineSemaphore<D>>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }

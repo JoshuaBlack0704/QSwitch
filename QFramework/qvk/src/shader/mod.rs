@@ -13,7 +13,7 @@ pub trait ShaderStore{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo;
 }
 pub struct Shader<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     module: vk::ShaderModule,
     stage: vk::ShaderStageFlags,
     name: CString,

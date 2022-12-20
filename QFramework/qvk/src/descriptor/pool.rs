@@ -8,8 +8,8 @@ use crate::init::DeviceStore;
 
 use super::Pool;
 
-impl<D:DeviceStore> Pool<D>{
-    pub fn new<L:DescriptorLayoutStore>(device_provider: &Arc<D>, layout_set_count: &[(&Arc<L>, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
+impl<D:DeviceStore + Clone> Pool<D>{
+    pub fn new<L:DescriptorLayoutStore + Clone>(device_provider: &D, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
         let mut pool_sizes:HashMap<vk::DescriptorType, vk::DescriptorPoolSize> = HashMap::new();
         let mut max_sets = 0;
 
@@ -58,8 +58,8 @@ impl<D:DeviceStore> Pool<D>{
     }
 }
 
-impl<D:DeviceStore> DescriptorPoolStore for Pool<D>{
-    fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &Arc<L>) -> vk::DescriptorSet {
+impl<D:DeviceStore> DescriptorPoolStore for Arc<Pool<D>>{
+    fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &L) -> vk::DescriptorSet {
 
         let requests = [layout.layout()];
         

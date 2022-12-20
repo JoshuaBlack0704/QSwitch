@@ -6,8 +6,8 @@ use crate::{init::DeviceStore, queue::{Queue, QueueOps, SubmitSet, SubmitInfoSto
 
 use super::{Executor, commandpool, CommandPool, commandset, CommandSet, CommandBufferFactory, CommandBuffer, CommandBufferStore, CommandPoolOps};
 
-impl<D:DeviceStore> Executor<D>{
-    pub fn new(device_provider: &Arc<D>, queue_flags: vk::QueueFlags) -> Arc<Executor<D>> {
+impl<D:DeviceStore + Clone> Executor<D>{
+    pub fn new(device_provider: &D, queue_flags: vk::QueueFlags) -> Arc<Executor<D>> {
         let index = device_provider.get_queue(queue_flags).unwrap().1;
         let settings = commandpool::SettingsStore::new(index);
         let pool = CommandPool::new(&settings, device_provider).unwrap();
@@ -45,8 +45,8 @@ impl<D:DeviceStore> CommandPoolOps for Executor<D>{
     }
 }
 
-impl<D:DeviceStore> QueueOps for Executor<D>{
-    fn submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoStore<C>, F:crate::sync::FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result> {
+impl<D:DeviceStore + Clone> QueueOps for Executor<D>{
+    fn submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoStore<C>, F:crate::sync::FenceStore>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result> {
         self.queue.submit(submits, fence)
     }
 
@@ -59,7 +59,7 @@ impl<D:DeviceStore> QueueOps for Executor<D>{
     }
 }
 
-impl<D:DeviceStore> CommandBufferFactory<D,Arc<CommandBuffer<D>>> for Executor<D>{
+impl<D:DeviceStore + Clone> CommandBufferFactory<D,Arc<CommandBuffer<D>>> for Executor<D>{
     fn next_cmd(&self) -> Arc<CommandBuffer<D>> {
         self.command_set.next_cmd()
     }

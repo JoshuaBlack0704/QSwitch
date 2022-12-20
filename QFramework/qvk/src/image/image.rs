@@ -53,8 +53,8 @@ pub struct SettingsStore{
     
 }
 
-impl<D:DeviceStore, M:MemoryStore> Image<D,M>{
-    pub fn new<S:ImageSettingsStore>(device_provider: &Arc<D>, memory_provider: &Arc<M>, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
+impl<D:DeviceStore + Clone, M:MemoryStore + Clone> Image<D,M>{
+    pub fn new<S:ImageSettingsStore>(device_provider: &D, memory_provider: &M, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         let extensions = settings.extensions();
         if let Some(mut ext) = extensions{
@@ -103,23 +103,23 @@ impl<D:DeviceStore, M:MemoryStore> Image<D,M>{
             return Err(ImageCreateError::Vulkan(e));
         }
 
-        let image = Image{
+        let image = Arc::new(Image{
             device: device_provider.clone(),
             memory: Some(memory_provider.clone()),
             _partition: Some(memory_partition),
             image,
             create_info: info.clone(),
             current_layout: Arc::new(Mutex::new(info.initial_layout)),
-        };
+        });
 
         if let Some(layout) = settings.preload_layout(){
             image.internal_transistion(layout, None);
         }
 
-        Ok(Arc::new(image))
+        Ok(image)
     }
 
-    pub fn from_swapchain_image(device_provider: &Arc<D>, image: vk::Image, image_extent: vk::Extent2D) -> Arc<Image<D,Memory<D, PartitionSystem>>>{
+    pub fn from_swapchain_image(device_provider: &D, image: vk::Image, image_extent: vk::Extent2D) -> Arc<Image<D,Arc<Memory<D, PartitionSystem>>>>{
         let extent = vk::Extent3D::builder().width(image_extent.width).height(image_extent.height).depth(1).build();
         Arc::new(
             Image{
@@ -138,7 +138,7 @@ impl<D:DeviceStore, M:MemoryStore> Image<D,M>{
     }
 }
 
-impl<D:DeviceStore, M:MemoryStore> ImageStore for Image<D,M>{
+impl<D:DeviceStore + Clone, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
     fn transition<C:CommandBufferStore>(
         &self, 
         cmd: &C, 
@@ -265,8 +265,8 @@ impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
     }
 }
 
-impl<D:DeviceStore, M:MemoryStore> InternalDeviceStore<D> for Image<D,M>{
-    fn device_provider(&self) -> &Arc<D> {
+impl<D:DeviceStore, M:MemoryStore> InternalDeviceStore<D> for Arc<Image<D,M>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }

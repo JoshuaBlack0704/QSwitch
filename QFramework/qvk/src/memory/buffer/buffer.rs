@@ -45,8 +45,8 @@ pub struct SettingsStore{
     pub share: Option<Vec<u32>>,
 }
 
-impl<D:DeviceStore, M:MemoryStore> Buffer<D,M,PartitionSystem>{
-    pub fn new<S:BufferSettingsStore>(settings: &S, device_provider: &Arc<D>, memory_provider: &Arc<M>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
+impl<D:DeviceStore + Clone, M:MemoryStore + Clone> Buffer<D,M,PartitionSystem>{
+    pub fn new<S:BufferSettingsStore>(settings: &S, device_provider: &D, memory_provider: &M) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
         // First we need to create the buffer
         let mut info = vk::BufferCreateInfo::builder();
         let mut extensions = settings.extensions();
@@ -116,7 +116,7 @@ impl<D:DeviceStore, M:MemoryStore> Buffer<D,M,PartitionSystem>{
     }
 }
 
-impl<D:DeviceStore, M:MemoryStore, P:PartitionStore> BufferStore for Buffer<D,M,P>{
+impl<D:DeviceStore, M:MemoryStore, P:PartitionStore> BufferStore for Arc<Buffer<D,M,P>>{
 
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer
@@ -198,14 +198,14 @@ impl BufferSettingsStore for SettingsStore{
     }
 }
 
-impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalDeviceStore<D> for Buffer<D,M,P>{
-    fn device_provider(&self) -> &Arc<D> {
+impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalDeviceStore<D> for Arc<Buffer<D,M,P>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalMemoryStore<M> for Buffer<D,M,P>{
-    fn memory_provider(&self) -> &Arc<M> {
+impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalMemoryStore<M> for Arc<Buffer<D,M,P>>{
+    fn memory_provider(&self) -> &M {
         &self.memory
     }
 }

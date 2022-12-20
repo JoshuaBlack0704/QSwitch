@@ -5,13 +5,12 @@ use image::{self, EncodableLayout};
 use ash::vk;
 use log::debug;
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, ImageCopyFactory, BufferCopyFactory}, init::{instance::{InstanceStore, InternalInstanceStore}}, memory::{buffer::{buffer::{self}, Buffer, BufferSegment}, Memory, memory}, queue::{Queue, SubmitSet, QueueOps}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, ImageCopyFactory, BufferCopyFactory}, init::{instance::{}}, memory::{buffer::{buffer::{self}, Buffer, BufferSegment}, Memory, memory}, queue::{Queue, SubmitSet, QueueOps}, image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
 use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
 
-use super::ImageResource;
 
 #[derive(Clone, Debug)]
 pub enum ImageResourceCreateError{
@@ -23,8 +22,8 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageResource<I,D,Img>{
-    pub fn new(image_provider: &Arc<Img>, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
+impl<I:InstanceStore + Clone, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:ImageStore + InternalDeviceStore<D> + Clone> ImageResource<I,D,Img>{
+    pub fn new(image_provider: &Img, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
         
         if miplevel > image_provider.mip_levels(){
             return Err(ImageResourceCreateError::ResorcesDontExist);
@@ -78,7 +77,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore +
         let dev_mem = Memory::new(&settings, tgt.image.device_provider()).expect("Could not allocate memory");
         let image_settings = crate::image::image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
         let image = crate::image::Image::new(tgt.image.device_provider(), &dev_mem, &image_settings).unwrap();
-        let resource = crate::image::ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), ImageStore::extent(&*image)).unwrap();
+        let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
         
         let settings = memory::SettingsStore::new(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index());
         let host_mem = Memory::new(&settings, tgt.image.device_provider()).unwrap();
@@ -96,7 +95,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore +
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageSubresourceStore for ImageResource<I,D,Img>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:ImageStore + InternalDeviceStore<D>> ImageSubresourceStore for Arc<ImageResource<I,D,Img>>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }
@@ -209,29 +208,6 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore +
 
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageCopyFactory for ImageResource<I,D,Img>{
-    fn extent(&self) -> vk::Extent3D {
-        self.extent
-    }
-
-    fn subresource(&self) -> vk::ImageSubresourceLayers {
-        self.resorces
-    }
-
-    fn offset(&self) -> vk::Offset3D {
-        self.offset
-    }
-
-    fn layout(&self) -> MutexGuard<vk::ImageLayout> {
-        self.layout.lock().unwrap()
-    }
-}
-
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> InternalImageStore<Img> for ImageResource<I,D,Img>{
-    fn image_provider(&self) -> &Arc<Img> {
-        &self.image
-    }
-}
 impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageCopyFactory for Arc<ImageResource<I,D,Img>>{
     fn extent(&self) -> vk::Extent3D {
         self.extent
@@ -249,8 +225,9 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore +
         self.layout.lock().unwrap()
     }
 }
+
 impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> InternalImageStore<Img> for Arc<ImageResource<I,D,Img>>{
-    fn image_provider(&self) -> &Arc<Img> {
+    fn image_provider(&self) -> &Img {
         &self.image
     }
 }

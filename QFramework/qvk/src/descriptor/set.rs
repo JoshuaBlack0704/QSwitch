@@ -7,8 +7,8 @@ use crate::init::DeviceStore;
 
 use super::Set;
 
-impl<D:DeviceStore, L:DescriptorLayoutStore, P:DescriptorPoolStore> Set<D,L,P>{
-    pub fn new(device_provider: &Arc<D>, layout_provider: &Arc<L>, pool_provider: &Arc<P>) -> Arc<Set<D, L, P>> {
+impl<D:DeviceStore + Clone, L:DescriptorLayoutStore + Clone, P:DescriptorPoolStore + Clone> Set<D,L,P>{
+    pub fn new(device_provider: &D, layout_provider: &L, pool_provider: &P) -> Arc<Set<D, L, P>> {
         let set = pool_provider.allocate_set(layout_provider);
         info!("Created descriptor set {:?} using layout {:?} from pool {:?}", set, layout_provider.layout(), pool_provider.pool());
         let writes = layout_provider.writes().clone();

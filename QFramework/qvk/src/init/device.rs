@@ -4,9 +4,9 @@ use log::{debug, info};
 use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use crate::init::{DeviceStore, PhysicalDeviceData};
+use crate::init::{DeviceStore, InstanceStore, InternalInstanceStore, PhysicalDeviceData};
 
-use super::{Device, instance::{InstanceStore, InternalInstanceStore}};
+use super::{Device, instance::{}};
 
 pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;
@@ -38,8 +38,8 @@ pub struct Settings<'a>{
     
 }
 
-impl<I:InstanceStore> Device<I>{
-    pub fn new<S:DeviceSettingsStore>(settings: &S, instance_provider: &Arc<I>) -> Result<Arc<Device<I>>, DeviceCreateError> {
+impl<I:InstanceStore + Clone> Device<I>{
+    pub fn new<S:DeviceSettingsStore>(settings: &S, instance_provider: &I) -> Result<Arc<Device<I>>, DeviceCreateError> {
         let instance = instance_provider.instance();
         let entry = instance_provider.entry();
         let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
@@ -178,7 +178,7 @@ impl<I:InstanceStore> Device<I>{
     }
 }
 
-impl<I:InstanceStore> DeviceStore for Device<I>{
+impl<I:InstanceStore> DeviceStore for Arc<Device<I>>{
     fn device(&self) -> &ash::Device {
         &self.device
     }
@@ -450,8 +450,8 @@ impl<'a> DeviceSettingsStore for Settings<'a>{
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{self.acc_struct_features}
 }
 
-impl<I:InstanceStore> InternalInstanceStore<I> for Device<I>{
-    fn instance_provider(&self) -> &Arc<I> {
+impl<I:InstanceStore> InternalInstanceStore<I> for Arc<Device<I>>{
+    fn instance_provider(&self) -> &I {
         &self.instance
     }
 }

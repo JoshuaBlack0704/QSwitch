@@ -4,7 +4,7 @@ use ash::vk;
 use log::{debug, info};
 use raw_window_handle::RawDisplayHandle;
 
-use super::Instance;
+use super::{Instance, InstanceStore};
 
 pub trait InstanceSettingsStore{
     fn app_info(&self) -> vk::ApplicationInfo;
@@ -13,15 +13,6 @@ pub trait InstanceSettingsStore{
     fn use_window_extensions(&self) -> Option<Vec<*const i8>>;
     fn validation_enables(&self) -> Option<&[vk::ValidationFeatureEnableEXT]>;
     fn validation_disables(&self) -> Option<&[vk::ValidationFeatureDisableEXT]>;
-}
-
-pub trait InstanceStore{
-    fn instance(&self) -> &ash::Instance;
-    fn entry(&self) -> &ash::Entry;
-}
-
-pub trait InternalInstanceStore<I:InstanceStore>{
-    fn instance_provider(&self) -> &Arc<I>;
 }
 
 pub struct Settings{
@@ -86,7 +77,7 @@ impl Instance{
     }
 }
 
-impl InstanceStore for Instance{
+impl InstanceStore for Arc<Instance>{
     fn instance(&self) -> &ash::Instance {
         &self.instance
     }

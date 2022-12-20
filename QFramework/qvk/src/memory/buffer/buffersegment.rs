@@ -3,7 +3,7 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, BufferCopyFactory, ImageCopyFactory}, init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet, QueueOps}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, BufferCopyFactory, ImageCopyFactory}, init::{DeviceStore, InstanceStore, InternalInstanceStore, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet, QueueOps}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
@@ -19,8 +19,8 @@ pub enum BufferSegmentMemOpError{
 }
 
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>> BufferSegment<I,D,M,B,PartitionSystem>{
-    pub fn new(buffer_provider: &Arc<B>, size: u64, custom_alignment: Option<u64>) -> Result<Arc<Self>, PartitionError>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D> + Clone> BufferSegment<I,D,M,B,PartitionSystem>{
+    pub fn new(buffer_provider: &B, size: u64, custom_alignment: Option<u64>) -> Result<Arc<Self>, PartitionError>{
         
         let p;
         if let Some(a) = custom_alignment{
@@ -52,7 +52,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
@@ -172,12 +172,12 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
     
 
 impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> InternalBufferStore<B> for Arc<BufferSegment<I,D,M,B,P>>{
-    fn buffer_provider(&self) -> &Arc<B> {
+    fn buffer_provider(&self) -> &B {
         &self.buffer
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>> DescriptorLayoutBindingFactory for BufferSegment<I,D,M,B,PartitionSystem>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>> DescriptorLayoutBindingFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
     fn binding(&self) -> vk::DescriptorSetLayoutBinding {
         let binding_type ;
         let usage = self.buffer.usage();

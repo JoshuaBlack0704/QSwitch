@@ -17,7 +17,7 @@ pub trait DescriptorLayoutStore{
     fn bindings(&self) -> MutexGuard<Vec<vk::DescriptorSetLayoutBinding>>;
 }
 pub struct DescriptorLayout<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     bindings: Mutex<Vec<vk::DescriptorSetLayoutBinding>>,
     writes: Mutex<Vec<Arc<WriteHolder>>>,
     flags: Option<vk::DescriptorSetLayoutCreateFlags>,
@@ -32,20 +32,20 @@ pub struct WriteHolder{
 // Upon creation the descriptor set will make available a set of arc mutexed writes that can be given to other structs for updates
 pub mod set;
 pub struct Set<D:DeviceStore,L:DescriptorLayoutStore,P:DescriptorPoolStore>{
-    device: Arc<D>,
-    layout: Arc<L>,
-    _pool: Arc<P>,
+    device: D,
+    layout: L,
+    _pool: P,
     writes: Vec<Arc<WriteHolder>>,
     set: vk::DescriptorSet,
 }
 
 pub mod pool;
 pub trait DescriptorPoolStore{
-    fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &Arc<L>) -> vk::DescriptorSet;
+    fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &L) -> vk::DescriptorSet;
     fn pool(&self) -> vk::DescriptorPool;
 }
 pub struct Pool<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     pool: vk::DescriptorPool,
     
 }

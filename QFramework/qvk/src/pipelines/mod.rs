@@ -9,14 +9,14 @@ pub trait PipelineLayoutStore{
     fn layout(&self) -> vk::PipelineLayout;
 }
 pub struct Layout<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     layout: vk::PipelineLayout,
 }
 
 pub mod compute;
 pub struct Compute<D:DeviceStore, L:PipelineLayoutStore>{
-    device: Arc<D>,
-    layout: Arc<L>,
+    device: D,
+    layout: L,
     pipeline: vk::Pipeline,
 }
 

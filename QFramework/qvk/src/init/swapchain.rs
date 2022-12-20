@@ -1,15 +1,15 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
+use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem, MemoryStore}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
 use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
 use crate::queue::QueueStore;
 use crate::sync::{FenceStore, SemaphoreStore};
 
-use super::{instance::{InstanceStore, InternalInstanceStore}, Swapchain};
+use super::{instance, Swapchain};
 
 pub trait SwapchainSettingsStore{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
@@ -26,12 +26,14 @@ pub trait SwapchainSettingsStore{
     fn clipped(&self) -> bool;
 }
 
-pub trait SwapchainStore{
-    fn present<S:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Arc<S>]>);
-    fn wait_present<S:SemaphoreStore>(&self, next_image: u32, waits: Option<&[&Arc<S>]>);
-    fn aquire_next_image<F:FenceStore, S:SemaphoreStore>(&self, timeout: u64,fence: Option<&Arc<F>>, semaphore: Option<&Arc<S>>) -> u32;
+pub trait SwapchainStore<I:ImageStore>{
+    fn present<S:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&S]>);
+    fn wait_present<S:SemaphoreStore>(&self, next_image: u32, waits: Option<&[&S]>);
+    fn aquire_next_image<F:FenceStore, S:SemaphoreStore>(&self, timeout: u64,fence: Option<&F>, semaphore: Option<&S>) -> u32;
     fn resize(&self);
     fn extent(&self) -> vk::Extent3D;
+    fn images(&self) -> MutexGuard<Vec<I>>;
+    fn present_image<IR:ImageSubresourceStore + InternalImageStore<I>, Q:QueueOps>(&self, src: &IR, queue: &Q); 
 }
 
 #[derive(Clone)]
@@ -45,8 +47,9 @@ pub enum SwapchainCreateError{
     VulkanError(vk::Result),
 }
 
-type ImageType<D> = Image<D, Memory<D, PartitionSystem>>;
-type ImageViewType<D> = ImageView<D, ImageType<D>>;
+type ImageType<D> = Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>;
+type ImageViewType<D> = Arc<ImageView<D, ImageType<D>>>;
+type SwapchainType<I, D, S> = Swapchain<I,D,S,ImageType<D>,ImageViewType<D>,Arc<Queue<D>>>;
 
 #[derive(Clone)]
 pub struct SettingsStore{
@@ -64,8 +67,8 @@ pub struct SettingsStore{
     pub clipped: bool,
 }
 
-impl<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, S:SwapchainSettingsStore + Clone> Swapchain<I,D,S, ImageType<D>, ImageViewType<D>,Queue<D>>{
-    pub fn new(device_provider: &Arc<D>, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
+impl<I:InstanceStore + Clone, D: DeviceStore + InternalInstanceStore<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainType<I,D,S>{
+    pub fn new(device_provider: &D, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
         let instance_provider = device_provider.instance_provider();
         let surface = device_provider.surface();
         if let None = surface{
@@ -198,37 +201,17 @@ impl<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, S:SwapchainSett
         let imgs = unsafe{self.swapchain_loader.get_swapchain_images(swapchain).unwrap()};
         let mut images = Vec::with_capacity(imgs.len());
         for image in imgs.iter(){
-            let image = Image::<D,Memory<D,PartitionSystem>>::from_swapchain_image(&self.device, *image, image_extent);
+            let image = Image::<D,Arc<Memory<D,PartitionSystem>>>::from_swapchain_image(&self.device, *image, image_extent);
             image.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
             images.push(image);
         }
         *img_lock = images;
     }
 
-    pub fn present_image<Img:ImageStore, IR: ImageSubresourceStore + InternalImageStore<Img>>(&self, src: &Arc<IR>){
-        // let semaphore:S
-        let images = self.images.lock().unwrap();
-        
-        let aquire = Semaphore::new(self.device_provider());
-        let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
-        let dst = &images[dst_index as usize];
-
-        src.image_provider().internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
-        dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
-
-        let dst_res = ImageResource::new(&dst, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), dst.extent()).unwrap();
-        src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR).unwrap();
-
-        dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
-
-        let waits = [&aquire];
-        self.present(dst_index, Some(&waits));
-        self.present_queue.wait_idle();
-    }
 }
 
-impl<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, S:SwapchainSettingsStore + Clone> SwapchainStore for Swapchain<I,D,S,ImageType<D>,ImageViewType<D>,Queue<D>>{
-    fn present<Sem:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
+impl<I:InstanceStore + Clone, D: DeviceStore + InternalInstanceStore<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
+    fn present<Sem:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Sem]>) {
 
         
         let mut info = vk::PresentInfoKHR::builder();
@@ -259,7 +242,7 @@ impl<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, S:SwapchainSett
         *swapchain_lock = new_swapchain;
     }
 
-    fn aquire_next_image<F:FenceStore, Sem:SemaphoreStore>(&self, timeout: u64, fence: Option<&Arc<F>>, semaphore: Option<&Arc<Sem>>) -> u32{
+    fn aquire_next_image<F:FenceStore, Sem:SemaphoreStore>(&self, timeout: u64, fence: Option<&F>, semaphore: Option<&Sem>) -> u32{
         let mut present_fence = vk::Fence::null();
         let mut present_semaphore = vk::Semaphore::null();
 
@@ -296,7 +279,7 @@ impl<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, S:SwapchainSett
         
     }
 
-    fn wait_present<Sem:SemaphoreStore>(&self, next_image: u32, waits: Option<&[&Arc<Sem>]>) {
+    fn wait_present<Sem:SemaphoreStore>(&self, next_image: u32, waits: Option<&[&Sem]>) {
         self.present(next_image, waits);
         self.present_queue.wait_idle();
         
@@ -304,6 +287,31 @@ impl<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, S:SwapchainSett
 
     fn extent(&self) -> vk::Extent3D {
         self.images.lock().unwrap()[0].extent()
+    }
+
+    fn images(&self) -> MutexGuard<Vec<ImageType<D>>> {
+        self.images.lock().unwrap()
+    }
+
+    fn present_image<IR:ImageSubresourceStore + InternalImageStore<ImageType<D>>, Q:QueueOps>(&self, src: &IR, queue: &Q) {
+        // let semaphore:S
+        let images = self.images();
+        
+        let aquire = Semaphore::new(self.device_provider());
+        let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
+        let dst = &images[dst_index as usize];
+
+        src.image_provider().internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
+        dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
+
+        let dst_res = ImageResource::new(dst, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), dst.extent()).unwrap();
+        src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR).unwrap();
+
+        dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
+
+        let waits = [&aquire];
+        self.present(dst_index, Some(&waits));
+        queue.wait_idle();
     }
 }
 
@@ -416,14 +424,14 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 }
 
-impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> InternalDeviceStore<D> for Swapchain<I,D,S,Img,ImgV,Q>{
-    fn device_provider(&self) -> &Arc<D> {
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> InternalDeviceStore<D> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+    fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> InternalInstanceStore<I> for Swapchain<I,D,S,Img,ImgV,Q>{
-    fn instance_provider(&self) -> &Arc<I> {
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> InternalInstanceStore<I> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+    fn instance_provider(&self) -> &I {
         &self._instance
     }
 }

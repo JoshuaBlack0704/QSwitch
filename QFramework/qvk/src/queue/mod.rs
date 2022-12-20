@@ -26,13 +26,13 @@ pub trait QueueStore{
     fn queue(&self) -> &vk::Queue;
 }
 pub trait QueueOps{
-    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
+    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result>;
     ///Will create an internal fence to wait on the operation
     fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result>;
     fn wait_idle(&self);
 }
 pub struct Queue<D:DeviceStore>{
-    device: Arc<D>,
+    device: D,
     _queue_family: u32,
     queue: vk::Queue,
     
