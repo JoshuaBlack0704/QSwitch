@@ -2,20 +2,17 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use log::info;
+use crate::command::{CommandBufferFactory, CommandPoolStore};
 
 use crate::init::device::DeviceStore;
 
-use super::{commandpool::CommandPoolStore, CommandSet, CommandBuffer, CommandBufferStore};
+use super::{CommandBuffer, CommandBufferStore, CommandSet};
 
 
 pub trait CommandSetSettingsStore{
     fn cmd_level(&self) -> vk::CommandBufferLevel;
     fn cmd_batch_size(&self) -> u32;
     fn cmd_reset_flags(&self) -> Option<vk::CommandBufferResetFlags>;
-}
-pub trait CommandBufferFactory<D:DeviceStore>{
-    fn next_cmd(&self) -> Arc<CommandBuffer<D>>;
-    fn reset_cmd(&self, cmd: &Arc<CommandBuffer<D>>);
 }
 
 pub enum CopyOpError{

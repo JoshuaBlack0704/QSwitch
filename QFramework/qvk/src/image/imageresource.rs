@@ -1,11 +1,12 @@
-use std::sync::{MutexGuard, Arc};
+use std::sync::{Arc, MutexGuard};
 
 use image::{self, EncodableLayout};
 
 use ash::vk;
 use log::debug;
 
-use crate::{memory::{buffer::{buffer::{BufferStore, InternalBufferStore, self}, buffersegment::BufferSegmentStore, Buffer, BufferSegment}, Memory, memory}, init::{instance::{InstanceStore, InternalInstanceStore}, device::{DeviceStore, InternalDeviceStore}}, command::{commandpool, CommandPool, commandset::{self, CommandBufferFactory}, CommandSet, CommandBufferStore}, queue::{SubmitSet, Queue, queue::QueueStore}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, init::{device::{DeviceStore, InternalDeviceStore}, instance::{InstanceStore, InternalInstanceStore}}, memory::{buffer::{buffer::{self, BufferStore, InternalBufferStore}, Buffer, BufferSegment, buffersegment::BufferSegmentStore}, Memory, memory}, queue::{Queue, queue::QueueStore, SubmitSet}};
+use crate::command::CommandBufferFactory;
 
 use super::{image::{ImageStore, InternalImageStore}, ImageResource};
 

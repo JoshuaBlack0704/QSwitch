@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
-use log::{info, debug};
+use log::{debug, info};
+use crate::command::CommandPoolStore;
 
 use crate::init::device::{DeviceStore, InternalDeviceStore};
 
@@ -12,10 +13,6 @@ pub trait CommandPoolSettingsStore{
     fn queue_family_index(&self) -> u32;
     fn reset_flags(&self) -> Option<vk::CommandPoolResetFlags>;
     fn create_flags(&self) -> Option<CommandPoolCreateFlags>;
-}
-pub trait CommandPoolStore{
-    fn cmdpool(&self) -> &vk::CommandPool;
-    fn reset_cmdpool(&self);
 }
 
 #[derive(Clone)]
