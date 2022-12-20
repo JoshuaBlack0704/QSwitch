@@ -12,7 +12,7 @@ fn compute_pipeline(){
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     let device = Device::new(&settings, &instance).expect("Could not create device");
 
-    let settings = memory::SettingsStore::new(1024 * 1024 * 100, device.host_memory_index());
+    let settings = memory::SettingsStore::new(1024 * 1024 * 10, device.host_memory_index());
     let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
 
     let src = [0u32;100];
