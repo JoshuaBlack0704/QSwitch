@@ -1,20 +1,12 @@
-use std::{sync::Arc, ffi::CString};
+use std::{ffi::CString, sync::Arc};
 
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::init::device::DeviceStore;
+use crate::init::DeviceStore;
+use crate::shader::{ShaderStore, SpirvStore};
 
 use super::Shader;
-
-pub trait SpirvStore{
-    fn code(&self) -> &[u32];
-    fn entry_name(&self) -> &str;
-}
-
-pub trait ShaderStore{
-    fn stage(&self) -> vk::PipelineShaderStageCreateInfo;
-}
 
 impl<D:DeviceStore> Shader<D>{
     pub fn new<Spv: SpirvStore>(device_provider: &Arc<D>, spriv_data: &Spv, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {

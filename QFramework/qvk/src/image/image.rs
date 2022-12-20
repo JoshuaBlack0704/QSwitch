@@ -3,35 +3,14 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, init::device::{DeviceStore, InternalDeviceStore}, memory::{Memory, memory::MemoryStore, partitionsystem, PartitionSystem}, queue::{queue::QueueStore, SubmitSet}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, memory::{Memory, partitionsystem, PartitionSystem}, queue::SubmitSet};
 use crate::command::CommandBufferFactory;
+use crate::image::ImageStore;
+use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::memory::MemoryStore;
+use crate::queue::QueueStore;
 
 use super::Image;
-
-pub trait ImageStore{
-    /// Returns the old layout
-    fn transition<C:CommandBufferStore>(
-        &self, 
-        cmd: &Arc<C>, 
-        new_layout: vk::ImageLayout, 
-        src_stage: Option<vk::PipelineStageFlags2>,
-        dst_stage: Option<vk::PipelineStageFlags2>,
-        src_access: Option<vk::AccessFlags2>,
-        dst_access: Option<vk::AccessFlags2>,
-        subresources: Option<vk::ImageSubresourceRange>,
-);
-    /// Creates and uses an internal command pool and buffer
-    fn internal_transistion(&self, new_layout: vk::ImageLayout, subresources: Option<vk::ImageSubresourceRange>);
-    fn image(&self) -> &vk::Image;
-    fn layout(&self) -> Arc<Mutex<vk::ImageLayout>>;
-    fn mip_levels(&self) -> u32;
-    fn array_layers(&self) -> u32;
-    fn extent(&self) -> vk::Extent3D;
-}
-
-pub trait InternalImageStore<I:ImageStore>{
-    fn image_provider(&self) -> &Arc<I>;
-}
 
 pub trait ImageSettingsStore{
     fn extensions(&self) -> Option<Vec<ImageCreateExtensions>>;

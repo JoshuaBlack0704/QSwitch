@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use crate::init::device::DeviceStore;
+use crate::init::DeviceStore;
 
 use self::{commandpool::CommandPoolSettingsStore, commandset::CommandSetSettingsStore};
 

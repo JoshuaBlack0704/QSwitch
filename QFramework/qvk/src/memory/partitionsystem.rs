@@ -1,12 +1,7 @@
-use std::{sync::Arc, collections::VecDeque};
+use std::{collections::VecDeque, sync::Arc};
+use crate::memory::PartitionStore;
 
-use super::{PartitionSystem, Partition};
-
-/// (start_addr, size, tracker)
-pub trait PartitionStore{
-    /// The alignment fn takes and offset and returns if the offset is aligned
-    fn partition<F:Fn(u64) -> bool>(&mut self, size: u64, alignment_fn: F) -> Result<Partition, PartitionError>;    
-}
+use super::{Partition, PartitionSystem};
 
 #[derive(Debug)]
 pub enum PartitionError{

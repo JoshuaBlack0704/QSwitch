@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::{init::device::DeviceStore, SettingsStore, descriptor::descriptorlayout::DescriptorLayoutStore};
+use crate::{init::DeviceStore, SettingsStore};
+use crate::descriptor::DescriptorLayoutStore;
+use crate::pipelines::PipelineLayoutStore;
 
 use super::Layout;
-
-pub trait PipelineLayoutStore{
-    fn layout(&self) -> vk::PipelineLayout;
-}
 
 pub struct Settings{
     flags: Option<vk::PipelineLayoutCreateFlags>,

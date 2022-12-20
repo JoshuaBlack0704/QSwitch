@@ -1,11 +1,15 @@
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::{sync::{semaphore::SemaphoreStore, fence::FenceStore, Semaphore, self}, image::{Image, ImageView, image::{ImageStore, InternalImageStore}, imageresource::ImageSubresourceStore, ImageResource, imageview::ImageViewStore}, memory::{Memory, PartitionSystem}, queue::{Queue, queue::QueueStore}};
+use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::Queue, sync::{self, Semaphore}};
+use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
+use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::queue::QueueStore;
+use crate::sync::{FenceStore, SemaphoreStore};
 
-use super::{instance::{InstanceStore, InternalInstanceStore}, device::{DeviceStore, InternalDeviceStore}, Swapchain};
+use super::{instance::{InstanceStore, InternalInstanceStore}, Swapchain};
 
 pub trait SwapchainSettingsStore{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;

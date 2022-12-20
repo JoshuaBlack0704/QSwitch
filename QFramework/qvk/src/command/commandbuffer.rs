@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{init::device::DeviceStore, pipelines::Compute};
+use crate::{pipelines::Compute};
+use crate::init::DeviceStore;
 
 use super::{CommandBuffer, CommandBufferStore, BindPipelineFactory, BindSetFactory};
 

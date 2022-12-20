@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::init::device::DeviceStore;
+use crate::init::DeviceStore;
+use crate::sync::SemaphoreStore;
 
-use super::{TimelineSemaphore, semaphore::SemaphoreStore};
+use super::TimelineSemaphore;
 
 impl<D:DeviceStore> TimelineSemaphore<D>{
     pub fn new(device_provider: &Arc<D>, starting_value: u64) -> Arc<TimelineSemaphore<D>> {

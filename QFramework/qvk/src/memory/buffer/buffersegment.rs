@@ -3,23 +3,15 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, descriptor::descriptorlayout::DescriptorLayoutBindingStore, image::{image::{ImageStore, InternalImageStore}, imageresource::ImageSubresourceStore}, init::{device::{DeviceStore, InternalDeviceStore}, instance::{InstanceStore, InternalInstanceStore}}, memory::{buffer::buffer::BufferAlignmentType, memory::{InternalMemoryStore, MemoryStore}, Partition, PartitionSystem, partitionsystem::{PartitionError, PartitionStore}}, queue::{Queue, queue::QueueStore, SubmitSet}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet}, init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet}};
 use crate::command::CommandBufferFactory;
+use crate::descriptor::DescriptorLayoutBindingFactory;
+use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
+use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
+use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
+use crate::queue::QueueStore;
 
-use super::{buffer::{BufferStore, InternalBufferStore}, BufferSegment};
-
-pub trait BufferSegmentStore{
-    fn get_partition(&self) -> &Partition;
-    fn device_addr(&self) -> vk::DeviceSize;
-    fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_partition<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_partition_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
-    ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image<I:ImageStore, IS:ImageSubresourceStore + InternalImageStore<I>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
-    ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image_internal<I:ImageStore, IS:ImageSubresourceStore + InternalImageStore<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
-}
+use super::BufferSegment;
 
 #[derive(Clone, Debug)]
 pub enum BufferSegmentMemOpError{
@@ -233,7 +225,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>> DescriptorLayoutBindingStore for BufferSegment<I,D,M,B,PartitionSystem>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>> DescriptorLayoutBindingFactory for BufferSegment<I,D,M,B,PartitionSystem>{
     fn binding(&self) -> vk::DescriptorSetLayoutBinding {
         let binding_type ;
         let usage = self.buffer.usage();

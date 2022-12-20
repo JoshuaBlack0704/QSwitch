@@ -1,14 +1,30 @@
-use std::{sync::{Arc, Mutex}, marker::PhantomData};
+use std::{marker::PhantomData, sync::{Arc, Mutex}};
 
 use ash::vk;
+use crate::command::CommandBufferStore;
+use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 
-use crate::init::{device::{DeviceStore, InternalDeviceStore}, instance::{InstanceStore, InternalInstanceStore}};
+use crate::init::{DeviceStore, instance::{InstanceStore, InternalInstanceStore}, InternalDeviceStore};
+use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
+use crate::memory::buffer::buffer::BufferAlignmentType;
+use crate::memory::buffer::buffersegment::BufferSegmentMemOpError;
+use crate::memory::partitionsystem::PartitionError;
 
-use self::buffer::BufferStore;
-
-use super::{memory::{MemoryStore, InternalMemoryStore}, partitionsystem::PartitionStore, Partition};
+use super::Partition;
 
 pub mod buffer;
+pub trait BufferStore{
+    fn buffer(&self) -> &vk::Buffer;
+    ///Gets the Allocation partition this buffer is stored at
+    fn home_partition(&self) -> &Partition;
+    ///Partitions this buffer
+    fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> ;
+    fn usage(&self) -> vk::BufferUsageFlags;
+}
+
+pub trait InternalBufferStore<B:BufferStore>{
+    fn buffer_provider(&self) -> &Arc<B>;
+}
 pub struct Buffer<D: DeviceStore, M: MemoryStore, P: PartitionStore>{
 
     device: Arc<D>,
@@ -21,6 +37,18 @@ pub struct Buffer<D: DeviceStore, M: MemoryStore, P: PartitionStore>{
 }
 
 pub mod buffersegment;
+pub trait BufferSegmentStore{
+    fn get_partition(&self) -> &Partition;
+    fn device_addr(&self) -> vk::DeviceSize;
+    fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_partition<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_partition_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>) -> Result<(), BufferSegmentMemOpError>;
+    ///Addressing is (bufferRowLength, bufferImageHeight)
+    fn copy_to_image<I:ImageStore, IS:ImageSubresourceStore + InternalImageStore<I>,C: CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    ///Addressing is (bufferRowLength, bufferImageHeight)
+    fn copy_to_image_internal<I:ImageStore, IS:ImageSubresourceStore + InternalImageStore<I>>(&self,dst: &Arc<IS>, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+}
 pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore>{
 
     buffer: Arc<B>,
@@ -31,3 +59,7 @@ pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore
     _memory: PhantomData<M>,
     _device: PhantomData<D>
 }
+
+
+
+

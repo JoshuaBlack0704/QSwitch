@@ -1,10 +1,7 @@
-use crate::init::device::DeviceStore;
+use crate::image::{ImageStore, ImageViewStore};
+use crate::init::DeviceStore;
 
-use super::{ImageView, image::ImageStore};
-
-pub trait ImageViewStore{
-    
-}
+use super::ImageView;
 
 impl<D:DeviceStore, I:ImageStore> ImageViewStore for ImageView<D,I>{
     

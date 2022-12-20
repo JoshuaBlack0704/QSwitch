@@ -2,17 +2,11 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{sync::{fence::FenceStore, self}, init::device::{DeviceStore, InternalDeviceStore}, command::CommandBufferStore};
+use crate::{command::CommandBufferStore, init::{DeviceStore, InternalDeviceStore}, sync::{self}};
+use crate::queue::{QueueStore, SubmitInfoStore};
+use crate::sync::FenceStore;
 
-use super::{Queue, submit::SubmitInfoStore};
-
-pub trait QueueStore{
-    fn submit<C:CommandBufferStore, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&Arc<F>>) -> Result<(), vk::Result>;
-    ///Will create an internal fence to wait on the operation
-    fn wait_submit<C:CommandBufferStore, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result>;
-    fn queue(&self) -> &vk::Queue;
-    fn wait_idle(&self);
-}
+use super::Queue;
 
 impl<D:DeviceStore> Queue<D>{
     pub fn new(device_provider: &Arc<D>, flags: vk::QueueFlags) -> Option<Arc<Self>>{

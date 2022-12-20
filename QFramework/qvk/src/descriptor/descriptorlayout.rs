@@ -2,22 +2,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk::{self, DescriptorSetLayoutBinding};
 use log::{debug, info};
+use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutStore};
 
 
-use crate::init::device::{DeviceStore, InternalDeviceStore};
-
+use crate::init::device::{};
+use crate::init::{DeviceStore, InternalDeviceStore};
 use super::{DescriptorLayout, WriteHolder};
-
-pub trait DescriptorLayoutBindingStore{
-    fn binding(&self) -> DescriptorSetLayoutBinding;
-    
-}
-
-pub trait DescriptorLayoutStore{
-    fn layout(&self) -> vk::DescriptorSetLayout;
-    fn writes(&self) -> MutexGuard<Vec<Arc<WriteHolder>>>;
-    fn bindings(&self) -> MutexGuard<Vec<vk::DescriptorSetLayoutBinding>>;
-}
 
 impl<D:DeviceStore> DescriptorLayout<D>{
     pub fn new(device_provider: &Arc<D>, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
@@ -32,7 +22,7 @@ impl<D:DeviceStore> DescriptorLayout<D>{
         )
     }
 
-    pub fn form_binding<BP:DescriptorLayoutBindingStore>(self: &Arc<Self>, binding_provider: &Arc<BP>, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
+    pub fn form_binding<BP: DescriptorLayoutBindingFactory>(self: &Arc<Self>, binding_provider: &Arc<BP>, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
         if let Some(_) = *self.layout.lock().unwrap(){
             //The layout will be created the first time it is used
             panic!("Cannot add descriptor layout binding after the first time you use the layout");

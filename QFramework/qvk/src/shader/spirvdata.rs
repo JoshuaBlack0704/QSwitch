@@ -1,9 +1,10 @@
 
 use std::fs;
 
-use shaderc::{self, Compiler, CompileOptions, ShaderKind};
+use shaderc::{self, CompileOptions, Compiler, ShaderKind};
+use crate::shader::SpirvStore;
 
-use super::{HLSL, shader::SpirvStore};
+use super::HLSL;
 
 impl HLSL {
     pub fn new<'a>(file: &str, shader_kind: ShaderKind, entry_name: &str, options: Option<CompileOptions<'a>>) -> HLSL {

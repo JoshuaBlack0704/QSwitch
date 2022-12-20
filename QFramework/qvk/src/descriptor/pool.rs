@@ -1,16 +1,12 @@
-use std::{sync::Arc, collections::HashMap};
+use std::{collections::HashMap, sync::Arc};
 
 use ash::vk;
-use log::{debug,info};
+use log::{debug, info};
+use crate::descriptor::{DescriptorLayoutStore, DescriptorPoolStore};
 
-use crate::init::device::DeviceStore;
+use crate::init::DeviceStore;
 
-use super::{Pool, descriptorlayout::DescriptorLayoutStore};
-
-pub trait DescriptorPoolStore{
-    fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &Arc<L>) -> vk::DescriptorSet;
-    fn pool(&self) -> vk::DescriptorPool;
-}
+use super::Pool;
 
 impl<D:DeviceStore> Pool<D>{
     pub fn new<L:DescriptorLayoutStore>(device_provider: &Arc<D>, layout_set_count: &[(&Arc<L>, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {

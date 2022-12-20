@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
 use log::info;
+use crate::descriptor::{DescriptorLayoutStore, DescriptorPoolStore};
 
-use crate::init::device::DeviceStore;
+use crate::init::DeviceStore;
 
-use super::{descriptorlayout::DescriptorLayoutStore, pool::DescriptorPoolStore, Set};
+use super::Set;
 
 impl<D:DeviceStore, L:DescriptorLayoutStore, P:DescriptorPoolStore> Set<D,L,P>{
     pub fn new(device_provider: &Arc<D>, layout_provider: &Arc<L>, pool_provider: &Arc<P>) -> Arc<Set<D, L, P>> {

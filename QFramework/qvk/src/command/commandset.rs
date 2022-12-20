@@ -4,7 +4,7 @@ use ash::vk;
 use log::info;
 use crate::command::{CommandBufferFactory, CommandPoolStore};
 
-use crate::init::device::DeviceStore;
+use crate::init::DeviceStore;
 
 use super::{CommandBuffer, CommandBufferStore, CommandSet};
 

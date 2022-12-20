@@ -1,14 +1,21 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
 
-use crate::init::device::DeviceStore;
-
-use self::{descriptorlayout::DescriptorLayoutStore, pool::DescriptorPoolStore};
+use crate::init::DeviceStore;
 
 
 // Layouts will simply be built by specifying bindings using method level generics and T::fn() syntax
 pub mod descriptorlayout;
+pub trait DescriptorLayoutBindingFactory {
+    fn binding(&self) -> vk::DescriptorSetLayoutBinding;
+
+}
+pub trait DescriptorLayoutStore{
+    fn layout(&self) -> vk::DescriptorSetLayout;
+    fn writes(&self) -> MutexGuard<Vec<Arc<WriteHolder>>>;
+    fn bindings(&self) -> MutexGuard<Vec<vk::DescriptorSetLayoutBinding>>;
+}
 pub struct DescriptorLayout<D:DeviceStore>{
     device: Arc<D>,
     bindings: Mutex<Vec<vk::DescriptorSetLayoutBinding>>,
@@ -33,8 +40,18 @@ pub struct Set<D:DeviceStore,L:DescriptorLayoutStore,P:DescriptorPoolStore>{
 }
 
 pub mod pool;
+pub trait DescriptorPoolStore{
+    fn allocate_set<L:DescriptorLayoutStore>(&self, layout: &Arc<L>) -> vk::DescriptorSet;
+    fn pool(&self) -> vk::DescriptorPool;
+}
 pub struct Pool<D:DeviceStore>{
     device: Arc<D>,
     pool: vk::DescriptorPool,
     
 }
+
+
+
+
+
+

@@ -1,16 +1,12 @@
 use std::sync::Arc;
 
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::init::device::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::sync::SemaphoreStore;
 
 use super::Semaphore;
-
-pub trait SemaphoreStore{
-    fn semaphore(&self) -> &vk::Semaphore;
-    fn submit_info(&self, stage: vk::PipelineStageFlags2) -> vk::SemaphoreSubmitInfo;
-}
 
 impl<D:DeviceStore> Semaphore<D>{
     pub fn new(device_provider: &Arc<D>) -> Arc<Semaphore<D>>{

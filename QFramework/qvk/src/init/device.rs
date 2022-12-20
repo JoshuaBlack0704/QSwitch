@@ -1,11 +1,12 @@
-use std::{sync::Arc, cmp::Ordering, io};
-use ash::vk::{PhysicalDevice, self, SurfaceKHR, DeviceSize};
+use std::{cmp::Ordering, io, sync::Arc};
+use ash::vk::{self, DeviceSize, PhysicalDevice, SurfaceKHR};
 use log::{debug, info};
 use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use crate::init::{DeviceStore, PhysicalDeviceData};
 
-use super::{instance::{InstanceStore, InternalInstanceStore}, Device};
+use super::{Device, instance::{InstanceStore, InternalInstanceStore}};
 
 pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;
@@ -17,35 +18,6 @@ pub trait DeviceSettingsStore{
     fn use_raytracing_features(&self) -> Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>{None}
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{None}
     fn use_device_extensions(&self) -> Option<&[*const i8]>;
-}
-
-pub trait DeviceStore{
-    fn device(&self) -> &ash::Device;
-    fn surface(&self) -> &Option<SurfaceKHR>;
-    fn physical_device(&self) -> &PhysicalDeviceData;
-    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)>;
-    fn grahics_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn compute_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn transfer_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn present_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32;
-    fn device_memory_index(&self) -> u32;
-    fn host_memory_index(&self) -> u32;
-}
-
-pub trait InternalDeviceStore<D:DeviceStore>{
-    fn device_provider(&self) -> &Arc<D>;
-}
-
-#[derive(Clone)]
-pub struct PhysicalDeviceData{
-    pub physical_device: PhysicalDevice,
-    pub properties: vk::PhysicalDeviceProperties,
-    pub queue_properties: Vec<vk::QueueFamilyProperties>,
-    pub raytracing_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
-    pub acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
-    pub mem_props: vk::PhysicalDeviceMemoryProperties,
-    pub mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT
 }
 
 #[derive(Debug)]

@@ -3,15 +3,10 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::device::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::sync::FenceStore;
 
 use super::Fence;
-
-pub trait FenceStore{
-    fn fence(&self) -> &vk::Fence;
-    fn wait(&self, timeout: Option<u64>);
-    fn reset(&self);
-}
 
 impl<D:DeviceStore> Fence<D>{
     pub fn new(device_provider: &Arc<D>, signaled: bool) -> Arc<Fence<D>> {

@@ -1,5 +1,7 @@
 use ash::vk;
-use qvk::{init::{instance, device::{self, DeviceStore}, Instance, Device}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment}}, descriptor::{DescriptorLayout, descriptorlayout::DescriptorLayoutStore, self, Set}, shader::HLSL, pipelines};
+use qvk::{descriptor::{self, DescriptorLayout, Set}, init::{device::{self}, Device, instance, Instance}, memory::{buffer::{buffer, Buffer, BufferSegment}, memory, Memory}, pipelines, shader::HLSL};
+use qvk::descriptor::DescriptorLayoutStore;
+use qvk::init::DeviceStore;
 
 fn main(){
     

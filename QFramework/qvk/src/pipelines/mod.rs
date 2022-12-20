@@ -2,16 +2,12 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::init::device::DeviceStore;
-
-use self::layout::PipelineLayoutStore;
-
-pub trait BindPipelineFactory{
-    ///Should bind the pipeline to the command buffer
-    fn bind(&self, cmd: &Arc<vk::CommandBuffer>);
-}
+use crate::init::DeviceStore;
 
 pub mod layout;
+pub trait PipelineLayoutStore{
+    fn layout(&self) -> vk::PipelineLayout;
+}
 pub struct Layout<D:DeviceStore>{
     device: Arc<D>,
     layout: vk::PipelineLayout,
@@ -27,3 +23,5 @@ pub struct Compute<D:DeviceStore, L:PipelineLayoutStore>{
 pub mod graphics;
 
 pub mod raytracing;
+
+

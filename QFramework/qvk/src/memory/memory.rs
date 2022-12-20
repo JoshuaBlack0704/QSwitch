@@ -1,10 +1,11 @@
 use std::sync::{Arc, Mutex};
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::init::device::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::memory::{MemoryStore, PartitionStore};
 
-use super::{Memory, partitionsystem::{PartitionStore, self}, PartitionSystem, Partition};
+use super::{Memory, Partition, partitionsystem::{self}, PartitionSystem};
 
 #[derive(Clone)]
 pub enum MemoryAllocateExtension{
@@ -15,14 +16,6 @@ pub trait MemorySettingsStore{
     fn size(&self) -> vk::DeviceSize;
     fn memory_type_index(&self) -> u32;
     fn extensions(&self) -> Option<Vec<MemoryAllocateExtension>>;
-}
-pub trait MemoryStore{
-    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
-    fn memory(&self) -> &vk::DeviceMemory;
-}
-
-pub trait InternalMemoryStore<M:MemoryStore>{
-    fn memory_provider(&self) -> &Arc<M>;
 }
 
 #[derive(Clone)]

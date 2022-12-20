@@ -2,17 +2,11 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{sync::semaphore::SemaphoreStore, command::CommandBufferStore};
+use crate::command::CommandBufferStore;
+use crate::queue::SubmitInfoStore;
+use crate::sync::SemaphoreStore;
 
 use super::SubmitSet;
-
-pub trait SubmitInfoStore<C:CommandBufferStore>{
-    fn info(&self) -> vk::SubmitInfo2;
-    fn add_cmd(&mut self, cmd: &Arc<C>);
-    fn add_wait<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
-    fn add_signal<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
-}
-
 
 
 impl<C:CommandBufferStore> SubmitSet<C>{

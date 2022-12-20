@@ -5,23 +5,14 @@ use image::{self, EncodableLayout};
 use ash::vk;
 use log::debug;
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, init::{device::{DeviceStore, InternalDeviceStore}, instance::{InstanceStore, InternalInstanceStore}}, memory::{buffer::{buffer::{self, BufferStore, InternalBufferStore}, Buffer, BufferSegment, buffersegment::BufferSegmentStore}, Memory, memory}, queue::{Queue, queue::QueueStore, SubmitSet}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset::{self}, CommandSet}, init::{instance::{InstanceStore, InternalInstanceStore}}, memory::{buffer::{buffer::{self}, Buffer, BufferSegment}, Memory, memory}, queue::{Queue, SubmitSet}};
 use crate::command::CommandBufferFactory;
+use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
+use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
+use crate::queue::QueueStore;
 
-use super::{image::{ImageStore, InternalImageStore}, ImageResource};
-
-pub trait ImageSubresourceStore{
-    fn subresource(&self) -> vk::ImageSubresourceLayers;
-    fn offset(&self) -> vk::Offset3D;
-    fn extent(&self) -> vk::Extent3D;
-    fn layout(&self) -> MutexGuard<vk::ImageLayout>;
-    fn copy_to_buffer<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_buffer_internal<B:BufferStore, BP:BufferSegmentStore + InternalBufferStore<B>>(&self, dst: &Arc<BP>, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>, C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn copy_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>>(&self, dst: &Arc<IR>) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>,C:CommandBufferStore>(&self, cmd: &Arc<C>, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
-    fn blit_to_image_internal<I:ImageStore, IR:ImageSubresourceStore + InternalImageStore<I>>(&self, dst: &Arc<IR>, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
-}
+use super::ImageResource;
 
 #[derive(Clone, Debug)]
 pub enum ImageResourceCreateError{

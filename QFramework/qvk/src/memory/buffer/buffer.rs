@@ -1,9 +1,11 @@
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use log::{info, debug};
+use log::{debug, info};
 
-use crate::{memory::{Partition, partitionsystem::{PartitionError, self, PartitionStore}, memory::{MemoryStore, InternalMemoryStore}, PartitionSystem}, init::device::{DeviceStore, InternalDeviceStore}};
+use crate::{init::{DeviceStore, InternalDeviceStore}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
+use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
+use crate::memory::buffer::BufferStore;
 
 use super::Buffer;
 
@@ -14,18 +16,6 @@ pub trait BufferSettingsStore{
     fn extensions(&self) -> Option<Vec<BufferCreateExtension>>;
     fn usage(&self) -> vk::BufferUsageFlags;
     fn share(&self) -> Option<Vec<u32>>;
-}
-pub trait BufferStore{
-    fn buffer(&self) -> &vk::Buffer;
-    ///Gets the Allocation partition this buffer is stored at
-    fn home_partition(&self) -> &Partition;
-    ///Partitions this buffer
-    fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> ;
-    fn usage(&self) -> vk::BufferUsageFlags;
-}
-
-pub trait InternalBufferStore<B:BufferStore>{
-    fn buffer_provider(&self) -> &Arc<B>;
 }
 
 #[derive(Clone)]
