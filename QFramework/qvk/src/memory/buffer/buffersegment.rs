@@ -3,7 +3,7 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, BufferCopyFactory, ImageCopyFactory}, init::{DeviceStore, InstanceStore, InternalInstanceStore, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet, QueueOps}};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceStore, InstanceStore, InternalInstanceStore, InternalDeviceStore}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, queue::{Queue, SubmitSet, QueueOps}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
@@ -52,7 +52,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
+impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D> + Clone, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
@@ -121,39 +121,27 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, M:Memory
     }
 
     fn copy_to_segment_internal<Buf:BufferStore, BP:BufferCopyFactory + InternalBufferStore<Buf>>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError> {
-        let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
-        let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
-        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandSet::new(&settings, self.buffer.device_provider(), &pool);
-        let cmd = cmd_set.next_cmd();
+        let exe = Executor::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER);
         
+        let cmd = exe.next_cmd();
         cmd.begin(None).unwrap();
-        cmd.buffer_copy(self, dst);
+        cmd.buffer_copy(self, dst).unwrap();
         cmd.end().unwrap();
         
-        let submit = SubmitSet::new(&cmd);
-        let submit = [submit];
-        let queue = Queue::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
-        queue.wait_submit(&submit).expect("Could not execute transfer");
+        exe.wait_submit_internal();
         Ok(())
     }
 
-    fn copy_to_image_internal<Img:ImageStore, IS: InternalImageStore<Img> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
-        let settings = commandpool::SettingsStore::new(self.buffer_provider().device_provider().transfer_queue().unwrap().1);
-        let pool = CommandPool::new(&settings, self.buffer.device_provider()).unwrap();
-        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandSet::new(&settings, self.buffer.device_provider(), &pool);
-        let cmd = cmd_set.next_cmd();
+    fn copy_to_image_internal<Img:ImageStore, IS: InternalImageStore<Img> + ImageCopyFactory>(&self, dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+        let exe = Executor::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER);
         
+        let cmd = exe.next_cmd();
         cmd.begin(None).unwrap();
-        cmd.buffer_image_copy(self, dst, buffer_addressing);
+        cmd.buffer_image_copy(self, dst, buffer_addressing).unwrap();
         // self.copy_to_image(&cmd, dst, buffer_addressing)?;
         cmd.end().unwrap();
         
-        let submit = SubmitSet::new(&cmd);
-        let submit = [submit];
-        let queue = Queue::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
-        queue.wait_submit(&submit).expect("Could not execute transfer");
+        exe.wait_submit_internal();
         Ok(())
     }
 

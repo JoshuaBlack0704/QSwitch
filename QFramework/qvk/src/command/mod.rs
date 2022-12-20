@@ -66,6 +66,7 @@ pub trait CommandBufferStore{
     fn image_blit<I1: ImageStore, I2: ImageStore, IR1: ImageCopyFactory + InternalImageStore<I1>, IR2: ImageCopyFactory + InternalImageStore<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError>;
     fn image_buffer_copy<B:BufferStore, BS: BufferCopyFactory + InternalBufferStore<B>, I:ImageStore, IR: ImageCopyFactory + InternalImageStore<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
 }
+#[derive(Debug)]
 pub enum CommandOpError{
     MemOpNoSpace,
     Vulkan(vk::Result)

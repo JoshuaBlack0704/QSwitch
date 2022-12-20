@@ -5,7 +5,7 @@ use image::{self, EncodableLayout};
 use ash::vk;
 use log::debug;
 
-use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, ImageCopyFactory, BufferCopyFactory}, init::{instance::{}}, memory::{buffer::{buffer::{self}, Buffer, BufferSegment}, Memory, memory}, queue::{Queue, SubmitSet, QueueOps}, image::ImageResource};
+use crate::{command::{CommandBufferStore, commandpool, CommandPool, commandset, CommandSet, ImageCopyFactory, BufferCopyFactory, Executor}, init::{instance::{}}, memory::{buffer::{buffer::{self}, Buffer, BufferSegment}, Memory, memory}, queue::{Queue, SubmitSet, QueueOps}, image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
@@ -113,21 +113,15 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:Imag
     }
 
     fn copy_to_buffer_internal<B:BufferStore, BP:BufferCopyFactory + InternalBufferStore<B>>(&self, dst: &BP, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
-        let settings = commandpool::SettingsStore::new(self.image.device_provider().transfer_queue().unwrap().1);
-        let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
-        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandSet::new(&settings, self.image.device_provider(), &pool);
-        let cmd = cmd_set.next_cmd();
         
+        let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
+        
+        let cmd = exe.next_cmd();
         cmd.begin(None).unwrap();
-        cmd.image_buffer_copy(self, dst, None);
-        // self.copy_to_buffer(&cmd, dst, buffer_addressing)?;
+        cmd.image_buffer_copy(self, dst, buffer_addressing).unwrap();
         cmd.end().unwrap();
         
-        let submit = SubmitSet::new(&cmd);
-        let submit = [submit];
-        let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
-        queue.wait_submit(&submit).expect("Could not execute transfer");
+        exe.wait_submit_internal();
         Ok(())
     }
 
@@ -150,21 +144,15 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:Imag
         if dst.extent().depth == 0{
             return Ok(());
         }
-        let settings = commandpool::SettingsStore::new(self.image.device_provider().transfer_queue().unwrap().1);
-        let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
-        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandSet::new(&settings, self.image.device_provider(), &pool);
-        let cmd = cmd_set.next_cmd();
         
+        let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
+        
+        let cmd = exe.next_cmd();
         cmd.begin(None).unwrap();
-        cmd.image_copy(self, dst);
-        // self.copy_to_image(&cmd, dst)?;
+        cmd.image_copy(self, dst).unwrap();
         cmd.end().unwrap();
         
-        let submit = SubmitSet::new(&cmd);
-        let submit = [submit];
-        let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::TRANSFER).unwrap();
-        queue.wait_submit(&submit).expect("Could not execute transfer");
+        exe.wait_submit_internal();
         Ok(())
     }
 
@@ -187,21 +175,15 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:Imag
         if dst.extent().depth == 0{
             return Ok(());
         }
-        let settings = commandpool::SettingsStore::new(self.image.device_provider().grahics_queue().unwrap().1);
-        let pool = CommandPool::new(&settings, self.image.device_provider()).unwrap();
-        let mut settings = commandset::SettingsStore::default(); settings.batch_size = 1;
-        let cmd_set = CommandSet::new(&settings, self.image.device_provider(), &pool);
-        let cmd = cmd_set.next_cmd();
+
+        let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
         
+        let cmd = exe.next_cmd();
         cmd.begin(None).unwrap();
-        cmd.image_blit(self, dst, scale_filter);
-        // self.blit_to_image(&cmd, dst, scale_filter)?;
+        cmd.image_blit(self, dst, scale_filter).unwrap();
         cmd.end().unwrap();
         
-        let submit = SubmitSet::new(&cmd);
-        let submit = [submit];
-        let queue = Queue::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS).unwrap();
-        queue.wait_submit(&submit).expect("Could not execute transfer");
+        exe.wait_submit_internal();
         Ok(())
     }
 
