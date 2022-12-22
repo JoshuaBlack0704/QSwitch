@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, DeviceSupplier};
 use crate::memory::{MemoryStore, PartitionStore};
 
 use super::{Memory, Partition, partitionsystem, PartitionSystem};
@@ -117,7 +117,7 @@ impl MemorySettingsStore for SettingsStore{
 
 }
 
-impl<D:DeviceStore, P:PartitionStore> InternalDeviceStore<D> for Memory<D,P>{
+impl<D:DeviceStore, P:PartitionStore> DeviceSupplier<D> for Memory<D,P>{
     fn device_provider(&self) -> &D {
         &self.device
     }

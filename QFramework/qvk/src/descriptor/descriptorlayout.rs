@@ -5,7 +5,7 @@ use log::{debug, info};
 use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutStore};
 
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, DeviceSupplier};
 use super::{DescriptorLayout, WriteHolder, WriteStore};
 
 impl<D:DeviceStore + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
@@ -88,7 +88,7 @@ impl<D:DeviceStore,W:WriteStore> Drop for DescriptorLayout<D,W>{
     }
 }
 
-impl<D:DeviceStore,W:WriteStore> InternalDeviceStore<D> for Arc<DescriptorLayout<D,W>>{
+impl<D:DeviceStore,W:WriteStore> DeviceSupplier<D> for Arc<DescriptorLayout<D,W>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

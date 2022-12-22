@@ -4,7 +4,7 @@ use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{debug, info};
 use crate::command::CommandPoolStore;
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, DeviceSupplier};
 use super::{CommandPool, CommandPoolOps};
 
 
@@ -100,7 +100,7 @@ impl CommandPoolSettingsStore for SettingsStore{
 
 }
 
-impl<D: DeviceStore, S: CommandPoolSettingsStore> InternalDeviceStore<D> for CommandPool<D,S>{
+impl<D: DeviceStore, S: CommandPoolSettingsStore> DeviceSupplier<D> for CommandPool<D,S>{
     fn device_provider(&self) -> &D {
         &self.device
     }

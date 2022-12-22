@@ -1,17 +1,17 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{init::{instance, Instance, device, Device, DeviceStore}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
+use qvk::{init::{instance, device, DeviceStore, InstanceFactory, DeviceFactory}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
 
 #[test]
 fn buffer_image(){
     
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
-    let settings = device::Settings::default();
-    let device = Device::new(&settings, &instance).expect("Could not create device");
+    let settings = device::Settings::new_simple(instance.clone());
+    let device = settings.create_device().expect("Could not create device");
     
     let image_extent = vk::Extent3D::builder().width(100).height(100).depth(1).build();
 
@@ -49,10 +49,10 @@ fn buffer_image(){
 fn buffer_ram(){
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
-    let settings = device::Settings::default();
-    let device = Device::new(&settings, &instance).expect("Could not create device");
+    let settings = device::Settings::new_simple(instance.clone());
+    let device = settings.create_device().expect("Could not create device");
 
     let settings = memory::SettingsStore::new(1024, device.host_memory_index());
     let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
@@ -77,10 +77,10 @@ fn buffer_ram(){
 fn buffer_buffer(){
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
-    let settings = device::Settings::default();
-    let device = Device::new(&settings, &instance).expect("Could not create device");
+    let settings = device::Settings::new_simple(instance.clone());
+    let device = settings.create_device().expect("Could not create device");
 
     let settings = memory::SettingsStore::new(1024, device.host_memory_index());
     let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
@@ -114,10 +114,10 @@ fn image_image(){
     
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
-    let settings = device::Settings::default();
-    let device = Device::new(&settings, &instance).expect("Could not create device");
+    let settings = device::Settings::new_simple(instance.clone());
+    let device = settings.create_device().expect("Could not create device");
     
     let image_extent = vk::Extent3D::builder().width(100).height(100).depth(1).build();
 

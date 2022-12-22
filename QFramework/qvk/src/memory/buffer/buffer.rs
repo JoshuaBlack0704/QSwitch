@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{init::{DeviceStore, InternalDeviceStore}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
+use crate::{init::{DeviceStore, DeviceSupplier}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
 use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
 use crate::memory::buffer::BufferStore;
 
@@ -198,7 +198,7 @@ impl BufferSettingsStore for SettingsStore{
     }
 }
 
-impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> InternalDeviceStore<D> for Arc<Buffer<D,M,P>>{
+impl<D:DeviceStore, P:PartitionStore, M:MemoryStore> DeviceSupplier<D> for Arc<Buffer<D,M,P>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

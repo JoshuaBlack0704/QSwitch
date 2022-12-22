@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{image::{Image, ImageResource}, init::{device, Device, instance, Instance, swapchain::{self, SwapchainStore}, Swapchain}, memory::{memory, Memory}};
+use qvk::{image::{Image, ImageResource}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{memory, Memory}};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event::{Event, WindowEvent}, event_loop::EventLoop, window::WindowBuilder};
 use qvk::image::ImageStore;
@@ -14,14 +14,14 @@ fn main(){
     
     let mut settings = instance::Settings::default();
     settings.use_window_extensions(window.raw_display_handle());
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
-    let mut settings = device::Settings::default();
+    let mut settings = device::Settings::new_simple(instance.clone());
     settings.add_window(&window);
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     settings.add_extension(ash::extensions::khr::Swapchain::name().as_ptr());
     settings.choose_device(true);
-    let device = Device::new(&settings, &instance).expect("Could not create device");
+    let device = settings.create_device().expect("Could not create device");
 
     let settings = swapchain::SettingsStore::default();
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");

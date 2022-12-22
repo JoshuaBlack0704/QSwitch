@@ -5,15 +5,19 @@ use ash::vk;
 use crate::queue::QueueStore;
 use crate::image::{ImageStore, ImageViewStore};
 
+use self::device::DeviceCreateError;
 use self::swapchain::SwapchainSettingsStore;
 
 pub mod instance;
+pub trait InstanceFactory<I>{
+    fn create_instance(&self) -> I;
+}
 pub trait InstanceStore{
     fn instance(&self) -> &ash::Instance;
     fn entry(&self) -> &ash::Entry;
 }
 
-pub trait InternalInstanceStore<I:InstanceStore>{
+pub trait InstanceSupplier<I:InstanceStore>{
     fn instance_provider(&self) -> &I;
 }
 pub struct Instance{
@@ -22,6 +26,27 @@ pub struct Instance{
 }
 
 pub mod device;
+pub trait DeviceFactory<D:DeviceStore>{
+    fn create_device(&self) -> Result<D, DeviceCreateError>;
+}
+pub trait DeviceStore{
+    fn device(&self) -> &ash::Device;
+    fn surface(&self) -> &Option<vk::SurfaceKHR>;
+    fn physical_device(&self) -> &PhysicalDeviceData;
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)>;
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn present_queue(&self) -> Option<(vk::Queue, u32)>;
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32;
+    fn device_memory_index(&self) -> u32;
+    fn host_memory_index(&self) -> u32;
+}
+
+pub trait DeviceSupplier<D:DeviceStore>{
+    fn device_provider(&self) -> &D;
+}
+
 pub struct Device<I: InstanceStore>{
     instance: I,
     surface: Option<vk::SurfaceKHR>,
@@ -53,24 +78,6 @@ pub struct PhysicalDeviceData{
     pub acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
     pub mem_props: vk::PhysicalDeviceMemoryProperties,
     pub mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT
-}
-
-pub trait DeviceStore{
-    fn device(&self) -> &ash::Device;
-    fn surface(&self) -> &Option<vk::SurfaceKHR>;
-    fn physical_device(&self) -> &PhysicalDeviceData;
-    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)>;
-    fn grahics_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn compute_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn transfer_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn present_queue(&self) -> Option<(vk::Queue, u32)>;
-    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32;
-    fn device_memory_index(&self) -> u32;
-    fn host_memory_index(&self) -> u32;
-}
-
-pub trait InternalDeviceStore<D:DeviceStore>{
-    fn device_provider(&self) -> &D;
 }
 
 

@@ -5,7 +5,7 @@ use log::{debug, info};
 
 use crate::command::{CommandBufferFactory, CommandBufferStore, Executor};
 use crate::image::ImageStore;
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, DeviceSupplier};
 use crate::memory::{MemoryStore, partitionsystem,  Memory, PartitionSystem};
 
 use super::Image;
@@ -264,7 +264,7 @@ impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
     }
 }
 
-impl<D:DeviceStore, M:MemoryStore> InternalDeviceStore<D> for Arc<Image<D,M>>{
+impl<D:DeviceStore, M:MemoryStore> DeviceSupplier<D> for Arc<Image<D,M>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

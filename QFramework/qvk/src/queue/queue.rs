@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{command::CommandBufferStore, init::{DeviceStore, InternalDeviceStore}, sync};
+use crate::{command::CommandBufferStore, init::{DeviceStore, DeviceSupplier}, sync};
 use crate::queue::{QueueStore, SubmitInfoStore};
 use crate::sync::FenceStore;
 
@@ -30,7 +30,7 @@ impl<D:DeviceStore + Clone> Queue<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for Arc<Queue<D>>{
+impl<D:DeviceStore> DeviceSupplier<D> for Arc<Queue<D>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

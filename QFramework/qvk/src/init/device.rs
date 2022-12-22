@@ -4,28 +4,16 @@ use log::{debug, info};
 use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use crate::init::{DeviceStore, InstanceStore, InternalInstanceStore, PhysicalDeviceData};
+use crate::init::{DeviceStore, InstanceStore, InstanceSupplier, PhysicalDeviceData};
 
-use super::Device;
-
-pub trait DeviceSettingsStore{
-    fn choose_device(&self) -> bool;
-    fn surface_support(&self) -> Option<&winit::window::Window>;
-    fn use_features(&self) -> Option<vk::PhysicalDeviceFeatures>{None}
-    fn use_features11(&self) -> Option<vk::PhysicalDeviceVulkan11Features>{None}
-    fn use_features12(&self) -> Option<vk::PhysicalDeviceVulkan12Features>{None}
-    fn use_features13(&self) -> Option<vk::PhysicalDeviceVulkan13Features>{None}
-    fn use_raytracing_features(&self) -> Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>{None}
-    fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{None}
-    fn use_device_extensions(&self) -> Option<&[*const i8]>;
-}
+use super::{Device, DeviceFactory};
 
 #[derive(Debug)]
 pub enum DeviceCreateError{
     Unavailable,
 }
 
-pub struct Settings<'a>{
+pub struct Settings<'a,I:InstanceStore>{
     pub choose_device:  bool,
     pub surface_support:  Option<&'a winit::window::Window>,
     pub features: Option<vk::PhysicalDeviceFeatures>,
@@ -35,110 +23,11 @@ pub struct Settings<'a>{
     pub raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
     pub acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
     pub device_extensions: Option<Vec<*const i8>>,
+    pub instance: I,
     
 }
 
-impl<I:InstanceStore + Clone> Device<I>{
-    pub fn new<S:DeviceSettingsStore>(settings: &S, instance_provider: &I) -> Result<Arc<Device<I>>, DeviceCreateError> {
-        let instance = instance_provider.instance();
-        let entry = instance_provider.entry();
-        let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
-        
-        let mut surface = None;
-        if let Some(window) = settings.surface_support(){
-            let display = window.raw_display_handle();
-            let window = window.raw_window_handle();                
-            surface = Some(unsafe{
-                ash_window::create_surface(entry, instance, display, window, None).expect("Could not create requested surface")
-            });
-            info!("Surface support request satisfyied with surface {:?}", surface.unwrap())
-        }
-        
-        // We need to enumerate and sort all physical devices based on memory size
-        let physical_devices = Self::get_physical_devices(instance);
-        let physical_device;
-        if settings.choose_device(){
-            println!("Please choose a device:");
-            for (index, dev) in physical_devices.iter().enumerate(){
-                println!("    {}: {}\n", index, dev.get_name());
-            }
-            println!("Please enter the number of the device you wish to use ");
-            let io = io::stdin();
-            let mut user_input = String::new();
-            io.read_line(&mut user_input).unwrap();
-            let dev_index:u64 = user_input.trim().parse().expect("Did not understand input");
-            physical_device = physical_devices.get(dev_index as usize).expect("Not a valid index").clone();
-        }
-        else{
-            physical_device = physical_devices.get(0).unwrap().clone();
-            println!("Using device {}", physical_device.get_name());
-        }
-        
-        // Now that we have chosen our device we can pull its queues
-        let priorities = [1.0;1];
-        let q_cinfos = Self::get_queue_infos(&physical_device, &priorities);
-        let q_families = q_cinfos.iter().map(|i| i.queue_family_index as usize).collect();
-        
-        let mut device_builder = vk::DeviceCreateInfo::builder();
-        device_builder = device_builder.queue_create_infos(&q_cinfos);
-        
-        let mut feature_builder = vk::PhysicalDeviceFeatures2::builder();
-        let features: Option<vk::PhysicalDeviceFeatures> = settings.use_features();
-        let mut features11: Option<vk::PhysicalDeviceVulkan11Features> = settings.use_features11();
-        let mut features12: Option<vk::PhysicalDeviceVulkan12Features> = settings.use_features12();
-        let mut features13: Option<vk::PhysicalDeviceVulkan13Features> = settings.use_features13();
-        let mut raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR> = settings.use_raytracing_features();
-        let mut acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR> = settings.use_acc_struct_features();
-        
-        if let Some(f) = features{
-            debug!("Using device features");
-            feature_builder = feature_builder.features(f);
-        }
-        if let Some(f) = &mut features11{
-            debug!("Using device features11");
-            feature_builder = feature_builder.push_next(f);
-        }
-        if let Some(f) = &mut features12{
-            debug!("Using device features12");
-            feature_builder = feature_builder.push_next(f);
-        }
-        if let Some(f) = &mut features13{
-            debug!("Using device features13");
-            feature_builder = feature_builder.push_next(f);
-        }
-        if let Some(f) = &mut raytracing_features{
-            debug!("Using device ray tracing features");
-            feature_builder = feature_builder.push_next(f);
-        }
-        if let Some(f) = &mut acc_struct_features{
-            debug!("Using device acceleration structure features");
-            feature_builder = feature_builder.push_next(f);
-        }
-        
-        if let Some(ext) = settings.use_device_extensions(){
-            device_builder = device_builder.enabled_extension_names(ext);
-        }
-        
-        device_builder = device_builder.push_next(&mut feature_builder);
-        
-        let device = unsafe{instance.create_device(physical_device.physical_device, &device_builder, None)};
-        
-        match device{
-            Ok(d) => {
-                info!("Created logical device {:?}", d.handle());
-                Ok(Arc::new(Device{ 
-                    instance: instance_provider.clone(),
-                    surface,
-                    surface_loader,
-                    physical_device,
-                    device: d,
-                    created_queue_families:  q_families}))
-            },
-            Err(_) => Err(DeviceCreateError::Unavailable),
-        }
-        
-    }
-    
+impl<I:InstanceStore> Device<I>{
     fn get_physical_devices(instance: &ash::Instance) -> Vec<PhysicalDeviceData>{
         // First we pull all of our devices
         let physical_devices = unsafe{instance.enumerate_physical_devices().expect("Could not get physical devices")};
@@ -351,10 +240,10 @@ impl MemTH{
 }
 
 
-impl<'a> Settings<'a>{
+impl<'a,I:InstanceStore> Settings<'a,I>{
     pub fn new(
         choose_device:  bool,
-        surface_support:  Option<&winit::window::Window>,
+        surface_support:  Option<&'a winit::window::Window>,
         features: Option<vk::PhysicalDeviceFeatures>,
         features11: Option<vk::PhysicalDeviceVulkan11Features>,
         features12: Option<vk::PhysicalDeviceVulkan12Features>,
@@ -362,7 +251,8 @@ impl<'a> Settings<'a>{
         raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
         acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
         device_extensions: Option<Vec<*const i8>>,
-    ) -> Settings {
+        instance: I,
+    ) -> Settings<'a,I> {
         Settings{ 
             choose_device,
             surface_support,
@@ -372,7 +262,8 @@ impl<'a> Settings<'a>{
             features13,
             raytracing_features,
             acc_struct_features,
-            device_extensions }
+            device_extensions,
+            instance, }
     }
     
     pub fn add_window(&mut self, window: &'a winit::window::Window){
@@ -401,12 +292,9 @@ impl<'a> Settings<'a>{
     pub fn add_extension(&mut self, name: *const i8){
         self.device_extensions.get_or_insert(vec![]).push(name);
     }
-    
-}
 
-impl Default for Settings<'_>{
-    fn default() -> Self {
-        let mut settings = Self::new(false, None, None, None, None, None, None, None, None);
+    pub fn new_simple(instance: I) -> Settings<'a,I> {
+        let mut settings = Self::new(false, None, None, None, None, None, None, None, None, instance);
         settings.add_extension(ash::extensions::khr::Synchronization2::name().as_ptr());
         let features12 = vk::PhysicalDeviceVulkan12Features::builder()
         .buffer_device_address(true)
@@ -419,10 +307,7 @@ impl Default for Settings<'_>{
         settings.features13(features13);
         settings
     }
-}
-
-impl<'a> DeviceSettingsStore for Settings<'a>{
-    fn choose_device(&self) -> bool {
+    fn will_choose_device(&self) -> bool {
         self.choose_device
     }
 
@@ -448,9 +333,111 @@ impl<'a> DeviceSettingsStore for Settings<'a>{
     fn use_raytracing_features(&self) -> Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>{self.raytracing_features}
 
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{self.acc_struct_features}
+    
 }
 
-impl<I:InstanceStore> InternalInstanceStore<I> for Arc<Device<I>>{
+impl<I:InstanceStore + Clone> DeviceFactory<Arc<Device<I>>> for Settings<'_, I>{
+    fn create_device(&self) -> Result<Arc<Device<I>>, DeviceCreateError> {
+        let instance = self.instance.instance();
+        let entry = self.instance.entry();
+        let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
+        
+        let mut surface = None;
+        if let Some(window) = self.surface_support(){
+            let display = window.raw_display_handle();
+            let window = window.raw_window_handle();                
+            surface = Some(unsafe{
+                ash_window::create_surface(entry, instance, display, window, None).expect("Could not create requested surface")
+            });
+            info!("Surface support request satisfyied with surface {:?}", surface.unwrap())
+        }
+        
+        // We need to enumerate and sort all physical devices based on memory size
+        let physical_devices = Device::<I>::get_physical_devices(instance);
+        let physical_device;
+        if self.will_choose_device(){
+            println!("Please choose a device:");
+            for (index, dev) in physical_devices.iter().enumerate(){
+                println!("    {}: {}\n", index, dev.get_name());
+            }
+            println!("Please enter the number of the device you wish to use ");
+            let io = io::stdin();
+            let mut user_input = String::new();
+            io.read_line(&mut user_input).unwrap();
+            let dev_index:u64 = user_input.trim().parse().expect("Did not understand input");
+            physical_device = physical_devices.get(dev_index as usize).expect("Not a valid index").clone();
+        }
+        else{
+            physical_device = physical_devices.get(0).unwrap().clone();
+            println!("Using device {}", physical_device.get_name());
+        }
+        
+        // Now that we have chosen our device we can pull its queues
+        let priorities = [1.0;1];
+        let q_cinfos = Device::<I>::get_queue_infos(&physical_device, &priorities);
+        let q_families = q_cinfos.iter().map(|i| i.queue_family_index as usize).collect();
+        
+        let mut device_builder = vk::DeviceCreateInfo::builder();
+        device_builder = device_builder.queue_create_infos(&q_cinfos);
+        
+        let mut feature_builder = vk::PhysicalDeviceFeatures2::builder();
+        let features: Option<vk::PhysicalDeviceFeatures> = self.use_features();
+        let mut features11: Option<vk::PhysicalDeviceVulkan11Features> = self.use_features11();
+        let mut features12: Option<vk::PhysicalDeviceVulkan12Features> = self.use_features12();
+        let mut features13: Option<vk::PhysicalDeviceVulkan13Features> = self.use_features13();
+        let mut raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR> = self.use_raytracing_features();
+        let mut acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR> = self.use_acc_struct_features();
+        
+        if let Some(f) = features{
+            debug!("Using device features");
+            feature_builder = feature_builder.features(f);
+        }
+        if let Some(f) = &mut features11{
+            debug!("Using device features11");
+            feature_builder = feature_builder.push_next(f);
+        }
+        if let Some(f) = &mut features12{
+            debug!("Using device features12");
+            feature_builder = feature_builder.push_next(f);
+        }
+        if let Some(f) = &mut features13{
+            debug!("Using device features13");
+            feature_builder = feature_builder.push_next(f);
+        }
+        if let Some(f) = &mut raytracing_features{
+            debug!("Using device ray tracing features");
+            feature_builder = feature_builder.push_next(f);
+        }
+        if let Some(f) = &mut acc_struct_features{
+            debug!("Using device acceleration structure features");
+            feature_builder = feature_builder.push_next(f);
+        }
+        
+        if let Some(ext) = self.use_device_extensions(){
+            device_builder = device_builder.enabled_extension_names(ext);
+        }
+        
+        device_builder = device_builder.push_next(&mut feature_builder);
+        
+        let device = unsafe{instance.create_device(physical_device.physical_device, &device_builder, None)};
+        
+        match device{
+            Ok(d) => {
+                info!("Created logical device {:?}", d.handle());
+                Ok(Arc::new(Device{ 
+                    instance: self.instance.clone(),
+                    surface,
+                    surface_loader,
+                    physical_device,
+                    device: d,
+                    created_queue_families:  q_families}))
+            },
+            Err(_) => Err(DeviceCreateError::Unavailable),
+        }
+    }
+}
+
+impl<I:InstanceStore> InstanceSupplier<I> for Arc<Device<I>>{
     fn instance_provider(&self) -> &I {
         &self.instance
     }

@@ -5,7 +5,7 @@ use log::{debug, info};
 
 use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
 use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
-use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
+use crate::init::{DeviceStore, InstanceStore, DeviceSupplier, InstanceSupplier};
 use crate::queue::QueueStore;
 use crate::sync::{FenceStore, SemaphoreStore};
 
@@ -67,7 +67,7 @@ pub struct SettingsStore{
     pub clipped: bool,
 }
 
-impl<I:InstanceStore + Clone, D: DeviceStore + InternalInstanceStore<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainType<I,D,S>{
+impl<I:InstanceStore + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainType<I,D,S>{
     pub fn new(device_provider: &D, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
         let instance_provider = device_provider.instance_provider();
         let surface = device_provider.surface();
@@ -210,7 +210,7 @@ impl<I:InstanceStore + Clone, D: DeviceStore + InternalInstanceStore<I> + Clone,
 
 }
 
-impl<I:InstanceStore + Clone, D: DeviceStore + InternalInstanceStore<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
+impl<I:InstanceStore + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
     fn present<Sem:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Sem]>) {
 
         
@@ -424,13 +424,13 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 }
 
-impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> InternalDeviceStore<D> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> DeviceSupplier<D> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> InternalInstanceStore<I> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+impl<I:InstanceStore, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> InstanceSupplier<I> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
     fn instance_provider(&self) -> &I {
         &self._instance
     }

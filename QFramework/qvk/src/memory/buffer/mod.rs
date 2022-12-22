@@ -4,7 +4,7 @@ use ash::vk;
 use crate::command::{ImageCopyFactory, BufferCopyFactory};
 use crate::image::{ImageStore, InternalImageStore};
 
-use crate::init::{DeviceStore, InternalInstanceStore, InstanceStore, InternalDeviceStore};
+use crate::init::{DeviceStore, InstanceSupplier, InstanceStore, DeviceSupplier};
 use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
 use crate::memory::buffer::buffer::BufferAlignmentType;
 use crate::memory::buffer::buffersegment::BufferSegmentMemOpError;
@@ -46,7 +46,7 @@ pub trait BufferSegmentStore{
     ///Addressing is (bufferRowLength, bufferImageHeight)
     fn copy_to_image_internal<I:ImageStore, IS: InternalImageStore<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
-pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InternalInstanceStore<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + InternalDeviceStore<D>, P:PartitionStore>{
+pub struct BufferSegment<I:InstanceStore, D: DeviceStore + InstanceSupplier<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>, P:PartitionStore>{
 
     buffer: B,
     _partition_sys: Mutex<P>,

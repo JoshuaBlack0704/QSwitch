@@ -4,16 +4,7 @@ use ash::vk;
 use log::{debug, info};
 use raw_window_handle::RawDisplayHandle;
 
-use super::{Instance, InstanceStore};
-
-pub trait InstanceSettingsStore{
-    fn app_info(&self) -> vk::ApplicationInfo;
-    fn use_validation_layers(&self) -> bool;
-    fn use_debug(&self) -> bool;
-    fn use_window_extensions(&self) -> Option<Vec<*const i8>>;
-    fn validation_enables(&self) -> Option<&[vk::ValidationFeatureEnableEXT]>;
-    fn validation_disables(&self) -> Option<&[vk::ValidationFeatureDisableEXT]>;
-}
+use super::{Instance, InstanceStore, InstanceFactory};
 
 pub struct Settings{
     pub app_name: CString,
@@ -28,37 +19,37 @@ pub struct Settings{
     pub window_extensions: Option<Vec<*const i8>>,
 }
 
-impl Instance{
-    pub fn new<S: InstanceSettingsStore>(settings: &S) -> Arc<Instance> {
+impl InstanceFactory<Arc<Instance>> for Settings{
+    fn create_instance(&self) -> Arc<Instance> {
         // The beginning of our new vulkan system
         let entry = ash::Entry::linked();
-        let app_info = settings.app_info();
+        let app_info = self.app_info();
         
         let mut validation_features = vk::ValidationFeaturesEXT::builder();
         let mut layer_names = vec![];
         let mut extension_names = vec![]; 
         
-        if settings.use_validation_layers(){
+        if self.use_validation_layers(){
             let name = unsafe{CStr::from_bytes_with_nul_unchecked(b"VK_LAYER_KHRONOS_validation\0")};
             layer_names.push(name.as_ptr());
             info!("Validation layers requested");
             
-            if let Some(enables) = settings.validation_enables(){
+            if let Some(enables) = self.validation_enables(){
                 debug!("Non standard validation enableds requested");
                 validation_features = validation_features.enabled_validation_features(enables);
             }
-            if let Some(disables) = settings.validation_disables(){
+            if let Some(disables) = self.validation_disables(){
                 debug!("Non standard validation disables requested");
                 validation_features = validation_features.disabled_validation_features(disables);
             }
         }
         
-        if settings.use_debug(){
+        if self.use_debug(){
             extension_names.push(ash::extensions::ext::DebugUtils::name().as_ptr());
             debug!("Debug system requested");
         }
         
-        if let Some(names) = settings.use_window_extensions(){
+        if let Some(names) = self.window_extensions(){
             extension_names.extend_from_slice(&names);
             debug!("Window extensions requested");
         }
@@ -126,6 +117,41 @@ impl Settings{
     pub fn use_window_extensions(&mut self, display: RawDisplayHandle){
         self.window_extensions = Some(ash_window::enumerate_required_extensions(display).unwrap().to_vec());
     }
+    fn app_info(&self) -> vk::ApplicationInfo {
+        vk::ApplicationInfo::builder()
+        .api_version(self.api_version)
+        .application_name(&self.app_name)
+        .engine_name(&self.engine_name)
+        .application_version(self.app_version)
+        .engine_version(self.engine_version)
+        .build()
+    }
+
+    fn use_validation_layers(&self) -> bool {
+        self.use_validation
+    }
+
+    fn use_debug(&self) -> bool {
+        self.use_debug
+    }
+
+    fn window_extensions(&self) -> Option<Vec<*const i8>> {
+        self.window_extensions.clone()
+    }
+
+    fn validation_enables(&self) -> Option<&[vk::ValidationFeatureEnableEXT]> {
+        if let Some(enables) = &self.validation_enables{
+            return Some(enables);
+        }
+        None
+    }
+
+    fn validation_disables(&self) -> Option<&[vk::ValidationFeatureDisableEXT]> {
+        if let Some(disables) = &self.validation_disables{
+            return Some(disables);
+        }
+        None
+    }
 }
 
 #[cfg(debug_assertions)]
@@ -150,40 +176,3 @@ impl Default for Settings{
     }
 }
 
-impl InstanceSettingsStore for Settings{
-    fn app_info(&self) -> vk::ApplicationInfo {
-        vk::ApplicationInfo::builder()
-        .api_version(self.api_version)
-        .application_name(&self.app_name)
-        .engine_name(&self.engine_name)
-        .application_version(self.app_version)
-        .engine_version(self.engine_version)
-        .build()
-    }
-
-    fn use_validation_layers(&self) -> bool {
-        self.use_validation
-    }
-
-    fn use_debug(&self) -> bool {
-        self.use_debug
-    }
-
-    fn use_window_extensions(&self) -> Option<Vec<*const i8>> {
-        self.window_extensions.clone()
-    }
-
-    fn validation_enables(&self) -> Option<&[vk::ValidationFeatureEnableEXT]> {
-        if let Some(enables) = &self.validation_enables{
-            return Some(enables);
-        }
-        None
-    }
-
-    fn validation_disables(&self) -> Option<&[vk::ValidationFeatureDisableEXT]> {
-        if let Some(disables) = &self.validation_disables{
-            return Some(disables);
-        }
-        None
-    }
-}

@@ -1,16 +1,16 @@
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, Device, instance, Instance}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::HLSL, command::{Executor, CommandBufferFactory, CommandBufferStore}};
+use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::HLSL, command::{Executor, CommandBufferFactory, CommandBufferStore}};
 use qvk::init::DeviceStore;
 use std::mem::size_of;
 
 #[test]
 fn compute_pipeline(){
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
-    let mut settings = device::Settings::default();
+    let mut settings = device::Settings::new_simple(instance.clone());
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
-    let device = Device::new(&settings, &instance).expect("Could not create device");
+    let device = settings.create_device().expect("Could not create device");
 
     let settings = memory::SettingsStore::new(1024 * 1024 * 10, device.host_memory_index());
     let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");

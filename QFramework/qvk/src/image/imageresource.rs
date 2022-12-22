@@ -7,7 +7,7 @@ use ash::vk;
 use crate::{command::{CommandBufferStore, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, Memory, memory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
-use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
+use crate::init::{DeviceStore, InstanceStore, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
 
 
@@ -21,7 +21,7 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceStore + Clone, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:ImageStore + InternalDeviceStore<D> + Clone> ImageResource<I,D,Img>{
+impl<I:InstanceStore + Clone, D:DeviceStore + InstanceSupplier<I> + Clone, Img:ImageStore + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
     pub fn new(image_provider: &Img, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
         
         if miplevel > image_provider.mip_levels(){
@@ -94,7 +94,7 @@ impl<I:InstanceStore + Clone, D:DeviceStore + InternalInstanceStore<I> + Clone, 
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:ImageStore + InternalDeviceStore<D>> ImageSubresourceStore for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceStore, D:DeviceStore + InstanceSupplier<I> + Clone, Img:ImageStore + DeviceSupplier<D>> ImageSubresourceStore for Arc<ImageResource<I,D,Img>>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }
@@ -189,7 +189,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I> + Clone, Img:Imag
 
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> ImageCopyFactory for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceStore, D:DeviceStore + InstanceSupplier<I>, Img:ImageStore + DeviceSupplier<D>> ImageCopyFactory for Arc<ImageResource<I,D,Img>>{
     fn extent(&self) -> vk::Extent3D {
         self.extent
     }
@@ -207,7 +207,7 @@ impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore +
     }
 }
 
-impl<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>> InternalImageStore<Img> for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceStore, D:DeviceStore + InstanceSupplier<I>, Img:ImageStore + DeviceSupplier<D>> InternalImageStore<Img> for Arc<ImageResource<I,D,Img>>{
     fn image_provider(&self) -> &Img {
         &self.image
     }
