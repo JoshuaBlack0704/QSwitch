@@ -20,6 +20,7 @@ fn main(){
     settings.add_window(&window);
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     settings.add_extension(ash::extensions::khr::Swapchain::name().as_ptr());
+    settings.choose_device(true);
     let device = Device::new(&settings, &instance).expect("Could not create device");
 
     let settings = swapchain::SettingsStore::default();
