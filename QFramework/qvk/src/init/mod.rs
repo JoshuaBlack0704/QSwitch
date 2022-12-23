@@ -8,13 +8,15 @@ use crate::image::{ImageStore, ImageViewStore};
 use self::swapchain::SwapchainSettingsStore;
 
 pub mod instance;
-pub trait InstanceStore{
+pub trait InstanceFactory<I:InstanceSource>{
+    fn create_instance(&self) -> I;
+}
+pub trait InstanceSource{
     fn instance(&self) -> &ash::Instance;
     fn entry(&self) -> &ash::Entry;
 }
-
-pub trait InternalInstanceStore<I:InstanceStore>{
-    fn instance_provider(&self) -> &I;
+pub trait InstanceSupplier<I:InstanceSource>{
+    fn instance_supplier(&self) -> &I;
 }
 pub struct Instance{
     entry: ash::Entry,
@@ -22,7 +24,7 @@ pub struct Instance{
 }
 
 pub mod device;
-pub struct Device<I: InstanceStore>{
+pub struct Device<I: InstanceSource>{
     instance: I,
     surface: Option<vk::SurfaceKHR>,
     surface_loader: ash::extensions::khr::Surface,
@@ -31,7 +33,7 @@ pub struct Device<I: InstanceStore>{
     created_queue_families: Vec<usize>,
 }
 pub mod swapchain;
-pub struct Swapchain<I:InstanceStore, D: DeviceStore, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore>{
+pub struct Swapchain<I:InstanceSource, D: DeviceStore, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore>{
     _instance: I,
     device: D,
     _settings: S,

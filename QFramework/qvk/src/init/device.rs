@@ -4,7 +4,7 @@ use log::{debug, info};
 use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use crate::init::{DeviceStore, InstanceStore, InternalInstanceStore, PhysicalDeviceData};
+use crate::init::{DeviceStore, InstanceSource, InstanceSupplier, PhysicalDeviceData};
 
 use super::Device;
 
@@ -38,7 +38,7 @@ pub struct Settings<'a>{
     
 }
 
-impl<I:InstanceStore + Clone> Device<I>{
+impl<I:InstanceSource + Clone> Device<I>{
     pub fn new<S:DeviceSettingsStore>(settings: &S, instance_provider: &I) -> Result<Arc<Device<I>>, DeviceCreateError> {
         let instance = instance_provider.instance();
         let entry = instance_provider.entry();
@@ -178,7 +178,7 @@ impl<I:InstanceStore + Clone> Device<I>{
     }
 }
 
-impl<I:InstanceStore> DeviceStore for Arc<Device<I>>{
+impl<I:InstanceSource> DeviceStore for Arc<Device<I>>{
     fn device(&self) -> &ash::Device {
         &self.device
     }
@@ -248,7 +248,7 @@ impl<I:InstanceStore> DeviceStore for Arc<Device<I>>{
 
 }
 
-impl<I:InstanceStore> Drop for Device<I>{
+impl<I:InstanceSource> Drop for Device<I>{
     fn drop(&mut self) {
         unsafe{
             self.device.device_wait_idle().unwrap();
@@ -450,8 +450,8 @@ impl<'a> DeviceSettingsStore for Settings<'a>{
     fn use_acc_struct_features(&self) -> Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>{self.acc_struct_features}
 }
 
-impl<I:InstanceStore> InternalInstanceStore<I> for Arc<Device<I>>{
-    fn instance_provider(&self) -> &I {
+impl<I:InstanceSource> InstanceSupplier<I> for Arc<Device<I>>{
+    fn instance_supplier(&self) -> &I {
         &self.instance
     }
 }

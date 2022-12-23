@@ -1,14 +1,14 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{init::{instance, Instance, device, Device, DeviceStore}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
+use qvk::{init::{instance, device, Device, DeviceStore, InstanceFactory}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
 
 #[test]
 fn buffer_image(){
     
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
     let settings = device::Settings::default();
     let device = Device::new(&settings, &instance).expect("Could not create device");
@@ -49,7 +49,7 @@ fn buffer_image(){
 fn buffer_ram(){
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
     let settings = device::Settings::default();
     let device = Device::new(&settings, &instance).expect("Could not create device");
@@ -77,7 +77,7 @@ fn buffer_ram(){
 fn buffer_buffer(){
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
     let settings = device::Settings::default();
     let device = Device::new(&settings, &instance).expect("Could not create device");
@@ -114,7 +114,7 @@ fn image_image(){
     
     
     let settings = instance::Settings::default();
-    let instance = Instance::new(&settings);
+    let instance = settings.create_instance();
     
     let settings = device::Settings::default();
     let device = Device::new(&settings, &instance).expect("Could not create device");

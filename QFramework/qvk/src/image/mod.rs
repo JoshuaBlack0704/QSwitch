@@ -6,7 +6,7 @@ use std::sync::MutexGuard;
 use crate::{memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferStore;
 use crate::image::imageresource::ImageResourceMemOpError;
-use crate::init::{DeviceStore, InstanceStore, InternalDeviceStore, InternalInstanceStore};
+use crate::init::{DeviceStore, InstanceSource, InternalDeviceStore, InstanceSupplier};
 use crate::memory::buffer::{BufferStore, InternalBufferStore};
 use crate::memory::MemoryStore;
 
@@ -55,7 +55,7 @@ pub trait ImageSubresourceStore{
     fn blit_to_image_internal<I:ImageStore, IR:ImageCopyFactory + InternalImageStore<I>>(&self, dst: &IR, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
 
-pub struct ImageResource<I:InstanceStore, D:DeviceStore + InternalInstanceStore<I>, Img:ImageStore + InternalDeviceStore<D>>{
+pub struct ImageResource<I:InstanceSource, D:DeviceStore + InstanceSupplier<I>, Img:ImageStore + InternalDeviceStore<D>>{
     image: Img,
     resorces: vk::ImageSubresourceLayers,
     offset: vk::Offset3D,
