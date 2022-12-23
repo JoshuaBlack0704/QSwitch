@@ -3,12 +3,12 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceSource, DeviceSupplier};
 use crate::sync::FenceStore;
 
 use super::Fence;
 
-impl<D:DeviceStore + Clone> Fence<D>{
+impl<D:DeviceSource + Clone> Fence<D>{
     pub fn new(device_provider: &D, signaled: bool) -> Arc<Fence<D>> {
         let mut info = vk::FenceCreateInfo::builder();
         if signaled{
@@ -27,7 +27,7 @@ impl<D:DeviceStore + Clone> Fence<D>{
     }
 }
 
-impl<D:DeviceStore> FenceStore for Arc<Fence<D>>{
+impl<D:DeviceSource> FenceStore for Arc<Fence<D>>{
     fn fence(&self) -> &vk::Fence {
         &self.fence
     }
@@ -52,7 +52,7 @@ impl<D:DeviceStore> FenceStore for Arc<Fence<D>>{
     }
 }
 
-impl<D:DeviceStore> Drop for Fence<D>{
+impl<D:DeviceSource> Drop for Fence<D>{
     fn drop(&mut self) {
         debug!{"Destroyed fence {:?}", self.fence};
         unsafe{
@@ -61,7 +61,7 @@ impl<D:DeviceStore> Drop for Fence<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for Arc<Fence<D>>{
+impl<D:DeviceSource> DeviceSupplier<D> for Arc<Fence<D>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

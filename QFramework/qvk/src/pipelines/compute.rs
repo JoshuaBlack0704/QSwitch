@@ -4,13 +4,13 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::command::BindPipelineFactory;
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 use crate::pipelines::PipelineLayoutStore;
 use crate::shader::ShaderStore;
 
 use super::Compute;
 
-impl<D:DeviceStore + Clone, L:PipelineLayoutStore + Clone> Compute<D,L>{
+impl<D:DeviceSource + Clone, L:PipelineLayoutStore + Clone> Compute<D,L>{
     pub fn new<Shd:ShaderStore>(device_provider: &D, shader: &Shd, layout_provider: &L, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
         let mut info = vk::ComputePipelineCreateInfo::builder();
         if let Some(flags) = flags{
@@ -39,7 +39,7 @@ impl<D:DeviceStore + Clone, L:PipelineLayoutStore + Clone> Compute<D,L>{
     }
 }
 
-impl<D:DeviceStore, L:PipelineLayoutStore> BindPipelineFactory for Arc<Compute<D,L>>{
+impl<D:DeviceSource, L:PipelineLayoutStore> BindPipelineFactory for Arc<Compute<D,L>>{
     fn layout(&self) -> vk::PipelineLayout {
         self.layout.layout()
     }
@@ -53,7 +53,7 @@ impl<D:DeviceStore, L:PipelineLayoutStore> BindPipelineFactory for Arc<Compute<D
     }
 }
 
-impl<D:DeviceStore, L:PipelineLayoutStore> Drop for Compute<D,L>{
+impl<D:DeviceSource, L:PipelineLayoutStore> Drop for Compute<D,L>{
     fn drop(&mut self) {
         debug!("Destroyed compute pipeline {:?}", self.pipeline);
         unsafe{

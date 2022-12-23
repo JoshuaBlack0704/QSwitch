@@ -6,7 +6,7 @@ use std::sync::MutexGuard;
 use crate::{memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferStore;
 use crate::image::imageresource::ImageResourceMemOpError;
-use crate::init::{DeviceStore, InstanceSource, InternalDeviceStore, InstanceSupplier};
+use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferStore, InternalBufferStore};
 use crate::memory::MemoryStore;
 
@@ -34,7 +34,7 @@ pub trait ImageStore{
 pub trait InternalImageStore<I:ImageStore>{
     fn image_provider(&self) -> &I;
 }
-pub struct Image<D:DeviceStore, M:MemoryStore>{
+pub struct Image<D:DeviceSource, M:MemoryStore>{
     device: D,
     memory: Option<M>,
     _partition: Option<Partition>,
@@ -55,7 +55,7 @@ pub trait ImageSubresourceStore{
     fn blit_to_image_internal<I:ImageStore, IR:ImageCopyFactory + InternalImageStore<I>>(&self, dst: &IR, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
 
-pub struct ImageResource<I:InstanceSource, D:DeviceStore + InstanceSupplier<I>, Img:ImageStore + InternalDeviceStore<D>>{
+pub struct ImageResource<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageStore + DeviceSupplier<D>>{
     image: Img,
     resorces: vk::ImageSubresourceLayers,
     offset: vk::Offset3D,
@@ -69,7 +69,7 @@ pub mod imageview;
 pub trait ImageViewStore{
 
 }
-pub struct ImageView<D:DeviceStore, Img:ImageStore>{
+pub struct ImageView<D:DeviceSource, Img:ImageStore>{
     _device: D,
     _image: Img,
     _view: vk::ImageView,

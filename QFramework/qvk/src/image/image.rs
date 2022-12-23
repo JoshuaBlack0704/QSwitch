@@ -5,7 +5,7 @@ use log::{debug, info};
 
 use crate::command::{CommandBufferFactory, CommandBufferStore, Executor};
 use crate::image::ImageStore;
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceSource, DeviceSupplier};
 use crate::memory::{MemoryStore, partitionsystem,  Memory, PartitionSystem};
 
 use super::Image;
@@ -52,7 +52,7 @@ pub struct SettingsStore{
     
 }
 
-impl<D:DeviceStore + Clone, M:MemoryStore + Clone> Image<D,M>{
+impl<D:DeviceSource + Clone, M:MemoryStore + Clone> Image<D,M>{
     pub fn new<S:ImageSettingsStore>(device_provider: &D, memory_provider: &M, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         let extensions = settings.extensions();
@@ -137,7 +137,7 @@ impl<D:DeviceStore + Clone, M:MemoryStore + Clone> Image<D,M>{
     }
 }
 
-impl<D:DeviceStore + Clone, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
+impl<D:DeviceSource + Clone, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
     fn transition<C:CommandBufferStore>(
         &self, 
         cmd: &C, 
@@ -253,7 +253,7 @@ impl<D:DeviceStore + Clone, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
 }
 
 
-impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
+impl<D:DeviceSource, M:MemoryStore> Drop for Image<D,M>{
     fn drop(&mut self) {
         debug!("Destroyed image {:?}", self.image);
         if let Some(_) = self.memory{
@@ -264,7 +264,7 @@ impl<D:DeviceStore, M:MemoryStore> Drop for Image<D,M>{
     }
 }
 
-impl<D:DeviceStore, M:MemoryStore> InternalDeviceStore<D> for Arc<Image<D,M>>{
+impl<D:DeviceSource, M:MemoryStore> DeviceSupplier<D> for Arc<Image<D,M>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

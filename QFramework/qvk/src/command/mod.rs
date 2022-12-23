@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
 
-use crate::{init::DeviceStore, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, InternalImageStore}};
+use crate::{init::DeviceSource, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, InternalImageStore}};
 
 use self::{commandpool::CommandPoolSettingsStore, commandset::CommandSetSettingsStore};
 
@@ -14,14 +14,14 @@ pub trait CommandPoolOps{
     fn reset_cmdpool(&self);
 }
 
-pub struct CommandPool<D: DeviceStore, S: CommandPoolSettingsStore>{
+pub struct CommandPool<D: DeviceSource, S: CommandPoolSettingsStore>{
     device: D,
     settings: S,
     command_pool: vk::CommandPool,
 }
 
 pub mod commandset;
-pub struct CommandSet<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettingsStore, C:CommandBufferStore>{
+pub struct CommandSet<D: DeviceSource, P: CommandPoolStore, S: CommandSetSettingsStore, C:CommandBufferStore>{
     device: D,
     cmdpool: P,
     settings: S,
@@ -29,7 +29,7 @@ pub struct CommandSet<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettings
 }
 
 pub mod commandbuffer;
-pub trait CommandBufferFactory<D:DeviceStore,C:CommandBufferStore>{
+pub trait CommandBufferFactory<D:DeviceSource,C:CommandBufferStore>{
     fn next_cmd(&self) -> Arc<CommandBuffer<D>>;
     fn reset_cmd(&self, cmd: &C);
 }
@@ -71,13 +71,13 @@ pub enum CommandOpError{
     MemOpNoSpace,
     Vulkan(vk::Result)
 }
-pub struct CommandBuffer<D:DeviceStore>{
+pub struct CommandBuffer<D:DeviceSource>{
     device: D,
     cmd: vk::CommandBuffer,
 }
 
 pub mod executor;
-pub struct Executor<D:DeviceStore>{
+pub struct Executor<D:DeviceSource>{
     _device: D,
     command_pool: Arc<CommandPool<D,commandpool::SettingsStore>>,
     command_set: Arc<CommandSet<D, Arc<CommandPool<D,commandpool::SettingsStore>>, commandset::SettingsStore, Arc<CommandBuffer<D>>>>,

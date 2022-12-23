@@ -3,12 +3,12 @@ use std::{ffi::CString, sync::Arc};
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 use crate::shader::{ShaderStore, SpirvStore};
 
 use super::Shader;
 
-impl<D:DeviceStore + Clone> Shader<D>{
+impl<D:DeviceSource + Clone> Shader<D>{
     pub fn new<Spv: SpirvStore>(device_provider: &D, spriv_data: &Spv, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {
         let mut info = vk::ShaderModuleCreateInfo::builder();
         if let Some(flags) = flags{
@@ -33,7 +33,7 @@ impl<D:DeviceStore + Clone> Shader<D>{
     }
 }
 
-impl<D:DeviceStore> Drop for Shader<D>{
+impl<D:DeviceSource> Drop for Shader<D>{
     fn drop(&mut self) {
         debug!("Destroyed shader module {:?}", self.module);
         unsafe{
@@ -42,7 +42,7 @@ impl<D:DeviceStore> Drop for Shader<D>{
     }
 }
 
-impl<D:DeviceStore> ShaderStore for Arc<Shader<D>>{
+impl<D:DeviceSource> ShaderStore for Arc<Shader<D>>{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo {
         vk::PipelineShaderStageCreateInfo::builder()
         .stage(self.stage)

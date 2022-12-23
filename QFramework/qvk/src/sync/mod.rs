@@ -2,23 +2,23 @@ use std::sync::Mutex;
 
 use ash::vk;
 
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 
 pub mod semaphore;
-pub struct Semaphore<D:DeviceStore>{
+pub struct Semaphore<D:DeviceSource>{
     device: D,
     semaphore: vk::Semaphore,
 }
 
 pub mod timelinesemaphore;
-pub struct TimelineSemaphore<D:DeviceStore>{
+pub struct TimelineSemaphore<D:DeviceSource>{
     device: D,
     semaphore: vk::Semaphore,
     value: Mutex<(bool, u64)>,
 }
 
 pub mod fence;
-pub struct Fence<D:DeviceStore>{
+pub struct Fence<D:DeviceSource>{
     device: D,
     fence: vk::Fence,
 }

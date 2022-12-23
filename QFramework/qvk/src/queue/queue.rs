@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{command::CommandBufferStore, init::{DeviceStore, InternalDeviceStore}, sync};
+use crate::{command::CommandBufferStore, init::{DeviceSource, DeviceSupplier}, sync};
 use crate::queue::{QueueStore, SubmitInfoStore};
 use crate::sync::FenceStore;
 
 use super::{Queue, QueueOps};
 
-impl<D:DeviceStore + Clone> Queue<D>{
+impl<D:DeviceSource + Clone> Queue<D>{
     pub fn new(device_provider: &D, flags: vk::QueueFlags) -> Option<Arc<Self>>{
         let q = device_provider.get_queue(flags);
         match q{
@@ -30,13 +30,13 @@ impl<D:DeviceStore + Clone> Queue<D>{
     }
 }
 
-impl<D:DeviceStore> InternalDeviceStore<D> for Arc<Queue<D>>{
+impl<D:DeviceSource> DeviceSupplier<D> for Arc<Queue<D>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<D:DeviceStore + Clone> QueueOps for Arc<Queue<D>>{
+impl<D:DeviceSource + Clone> QueueOps for Arc<Queue<D>>{
     fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceStore>(&self, submits: &[S], fence: Option<&F>) -> std::result::Result<(), ash::vk::Result> {
         let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
@@ -61,7 +61,7 @@ impl<D:DeviceStore + Clone> QueueOps for Arc<Queue<D>>{
     }
 }
 
-impl<D:DeviceStore> QueueStore for Arc<Queue<D>>{
+impl<D:DeviceSource> QueueStore for Arc<Queue<D>>{
 
     fn queue(&self) -> &vk::Queue {
         &self.queue

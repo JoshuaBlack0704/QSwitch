@@ -3,11 +3,11 @@ use std::sync::Arc;
 use ash::vk;
 use log::debug;
 
-use crate::{init::DeviceStore, memory::buffer::InternalBufferStore};
+use crate::{init::DeviceSource, memory::buffer::InternalBufferStore};
 
 use super::{CommandBuffer, CommandBufferStore, BindPipelineFactory, BindSetFactory, CommandOpError};
 
-impl<D:DeviceStore + Clone> CommandBuffer<D>{
+impl<D:DeviceSource + Clone> CommandBuffer<D>{
     pub fn new(device_store: &D, cmd: vk::CommandBuffer) -> Arc<CommandBuffer<D>> {
         Arc::new(
             Self{
@@ -18,7 +18,7 @@ impl<D:DeviceStore + Clone> CommandBuffer<D>{
     }
 }
 
-impl<D:DeviceStore> CommandBufferStore for Arc<CommandBuffer<D>>{
+impl<D:DeviceSource> CommandBufferStore for Arc<CommandBuffer<D>>{
     fn cmd(&self) -> vk::CommandBuffer {
         self.cmd
     }

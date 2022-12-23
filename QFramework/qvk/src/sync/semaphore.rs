@@ -3,12 +3,12 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceSource, DeviceSupplier};
 use crate::sync::SemaphoreStore;
 
 use super::Semaphore;
 
-impl<D:DeviceStore + Clone> Semaphore<D>{
+impl<D:DeviceSource + Clone> Semaphore<D>{
     pub fn new(device_provider: &D) -> Arc<Semaphore<D>>{
         let info = vk::SemaphoreCreateInfo::builder();
         let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).unwrap()};
@@ -20,7 +20,7 @@ impl<D:DeviceStore + Clone> Semaphore<D>{
     }
 }
 
-impl<D:DeviceStore> Drop for Semaphore<D>{
+impl<D:DeviceSource> Drop for Semaphore<D>{
     fn drop(&mut self) {
         debug!("Destroyed semaphore {:?}", self.semaphore);
         unsafe{
@@ -29,7 +29,7 @@ impl<D:DeviceStore> Drop for Semaphore<D>{
     }
 }
 
-impl<D:DeviceStore> SemaphoreStore for Arc<Semaphore<D>>{
+impl<D:DeviceSource> SemaphoreStore for Arc<Semaphore<D>>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
@@ -45,7 +45,7 @@ impl<D:DeviceStore> SemaphoreStore for Arc<Semaphore<D>>{
     }
 }
 
-impl <D:DeviceStore> InternalDeviceStore<D> for Arc<Semaphore<D>>{
+impl <D:DeviceSource> DeviceSupplier<D> for Arc<Semaphore<D>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

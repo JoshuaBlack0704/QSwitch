@@ -5,7 +5,7 @@ use log::{debug, info};
 
 use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
 use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
-use crate::init::{DeviceStore, InstanceSource, InternalDeviceStore, InstanceSupplier};
+use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::queue::QueueStore;
 use crate::sync::{FenceStore, SemaphoreStore};
 
@@ -67,9 +67,9 @@ pub struct SettingsStore{
     pub clipped: bool,
 }
 
-impl<I:InstanceSource + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainType<I,D,S>{
+impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainType<I,D,S>{
     pub fn new(device_provider: &D, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
-        let instance_provider = device_provider.instance_supplier();
+        let instance_provider = device_provider.instance_source();
         let surface = device_provider.surface();
         if let None = surface{
             return Err(SwapchainCreateError::NoSurface);
@@ -210,7 +210,7 @@ impl<I:InstanceSource + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:S
 
 }
 
-impl<I:InstanceSource + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
+impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
     fn present<Sem:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Sem]>) {
 
         
@@ -315,7 +315,7 @@ impl<I:InstanceSource + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:S
     }
 }
 
-impl<I:InstanceSource, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore> Drop for Swapchain<I,D,S,Img,ImgV,Q>{
+impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore> Drop for Swapchain<I,D,S,Img,ImgV,Q>{
     fn drop(&mut self) {
         let lock = self.swapchain.lock().unwrap();
         let swapchain = *lock;
@@ -424,14 +424,14 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 }
 
-impl<I:InstanceSource, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> InternalDeviceStore<D> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore,Q: QueueStore> DeviceSupplier<D> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<I:InstanceSource, D: DeviceStore, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> InstanceSupplier<I> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
-    fn instance_supplier(&self) -> &I {
+impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q: QueueStore> InstanceSupplier<I> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+    fn instance_source(&self) -> &I {
         &self._instance
     }
 }

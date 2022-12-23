@@ -4,11 +4,11 @@ use ash::vk;
 use log::{debug, info};
 use crate::descriptor::{DescriptorLayoutStore, DescriptorPoolStore};
 
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 
 use super::{Pool, WriteStore};
 
-impl<D:DeviceStore + Clone> Pool<D>{
+impl<D:DeviceSource + Clone> Pool<D>{
     pub fn new<W:WriteStore, L:DescriptorLayoutStore<W> + Clone>(device_provider: &D, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
         let mut pool_sizes:HashMap<vk::DescriptorType, vk::DescriptorPoolSize> = HashMap::new();
         let mut max_sets = 0;
@@ -58,7 +58,7 @@ impl<D:DeviceStore + Clone> Pool<D>{
     }
 }
 
-impl<D:DeviceStore> DescriptorPoolStore for Arc<Pool<D>>{
+impl<D:DeviceSource> DescriptorPoolStore for Arc<Pool<D>>{
     fn allocate_set<W:WriteStore, L:DescriptorLayoutStore<W>>(&self, layout: &L) -> vk::DescriptorSet {
 
         let requests = [layout.layout()];
@@ -79,7 +79,7 @@ impl<D:DeviceStore> DescriptorPoolStore for Arc<Pool<D>>{
     }
 }
 
-impl<D:DeviceStore> Drop for Pool<D>{
+impl<D:DeviceSource> Drop for Pool<D>{
     fn drop(&mut self) {
         debug!("Destroyed descriptor pool {:?}", self.pool);
         unsafe{

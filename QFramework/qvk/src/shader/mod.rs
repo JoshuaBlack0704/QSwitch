@@ -2,7 +2,7 @@ use std::ffi::CString;
 
 use ash::vk;
 
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 
 pub mod shader;
 pub trait SpirvStore{
@@ -12,7 +12,7 @@ pub trait SpirvStore{
 pub trait ShaderStore{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo;
 }
-pub struct Shader<D:DeviceStore>{
+pub struct Shader<D:DeviceSource>{
     device: D,
     module: vk::ShaderModule,
     stage: vk::ShaderStageFlags,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::{init::DeviceStore, SettingsStore};
+use crate::{init::DeviceSource, SettingsStore};
 use crate::descriptor::{DescriptorLayoutStore, WriteStore};
 use crate::pipelines::PipelineLayoutStore;
 
@@ -15,7 +15,7 @@ pub struct Settings{
     pushes: Vec<vk::PushConstantRange>,
 }
 
-impl<'a, D:DeviceStore + Clone> Layout<D>{
+impl<'a, D:DeviceSource + Clone> Layout<D>{
     pub fn new<S:SettingsStore<'a, vk::PipelineLayoutCreateInfoBuilder<'a>>>(device_provider: &D, settings: &'a S) -> Arc<Layout<D>> {
         let mut info = vk::PipelineLayoutCreateInfo::builder();
         info = settings.add_to_builder(info);
@@ -37,13 +37,13 @@ impl<'a, D:DeviceStore + Clone> Layout<D>{
     }
 }
 
-impl<D:DeviceStore> PipelineLayoutStore for Arc<Layout<D>>{
+impl<D:DeviceSource> PipelineLayoutStore for Arc<Layout<D>>{
     fn layout(&self) -> vk::PipelineLayout {
         self.layout
     }
 }
 
-impl<D:DeviceStore> Drop for Layout<D>{
+impl<D:DeviceSource> Drop for Layout<D>{
     fn drop(&mut self) {
         debug!("Destroyed pipeline layout {:?}", self.layout);
         unsafe{

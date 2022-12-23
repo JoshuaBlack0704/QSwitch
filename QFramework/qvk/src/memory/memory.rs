@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceSource, DeviceSupplier};
 use crate::memory::{MemoryStore, PartitionStore};
 
 use super::{Memory, Partition, partitionsystem, PartitionSystem};
@@ -25,7 +25,7 @@ pub struct SettingsStore{
     pub extensions: Option<Vec<MemoryAllocateExtension>>,
 }
 
-impl<D: DeviceStore + Clone> Memory<D,PartitionSystem>{
+impl<D: DeviceSource + Clone> Memory<D,PartitionSystem>{
     pub fn new<S:MemorySettingsStore>(settings: &S, device_provider: &D) -> Result<Arc<Memory<D,PartitionSystem>>, vk::Result>{
         // We need to create the initial memory from our settings
         
@@ -60,7 +60,7 @@ impl<D: DeviceStore + Clone> Memory<D,PartitionSystem>{
         }
     }
 }
-impl<D: DeviceStore, P: PartitionStore> MemoryStore for Arc<Memory<D,P>>{
+impl<D: DeviceSource, P: PartitionStore> MemoryStore for Arc<Memory<D,P>>{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError> {
         self.partition_sys.lock().unwrap().partition(size, move |offset| {
             if let Some(alignment) = alignment{
@@ -78,7 +78,7 @@ impl<D: DeviceStore, P: PartitionStore> MemoryStore for Arc<Memory<D,P>>{
 
 }
 
-impl<D: DeviceStore, P: PartitionStore> Drop for Memory<D,P>{
+impl<D: DeviceSource, P: PartitionStore> Drop for Memory<D,P>{
     fn drop(&mut self) {
         debug!("Destroyed device memory {:?}", self.memory);
         unsafe{
@@ -117,7 +117,7 @@ impl MemorySettingsStore for SettingsStore{
 
 }
 
-impl<D:DeviceStore, P:PartitionStore> InternalDeviceStore<D> for Memory<D,P>{
+impl<D:DeviceSource, P:PartitionStore> DeviceSupplier<D> for Memory<D,P>{
     fn device_provider(&self) -> &D {
         &self.device
     }

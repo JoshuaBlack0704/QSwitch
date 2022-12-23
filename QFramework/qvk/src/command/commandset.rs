@@ -4,7 +4,7 @@ use ash::vk;
 use log::info;
 use crate::command::{CommandBufferFactory, CommandPoolStore};
 
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 
 use super::{CommandBuffer, CommandBufferStore, CommandSet};
 
@@ -26,7 +26,7 @@ pub struct SettingsStore{
     pub reset_flags: Option<vk::CommandBufferResetFlags>,
 }
 
-impl<D: DeviceStore + Clone, P: CommandPoolStore + Clone, S: CommandSetSettingsStore + Clone, C:CommandBufferStore + Clone> CommandSet<D,P,S,C>{
+impl<D: DeviceSource + Clone, P: CommandPoolStore + Clone, S: CommandSetSettingsStore + Clone, C:CommandBufferStore + Clone> CommandSet<D,P,S,C>{
     pub fn new(settings: &S, device_provider: &D, cmdpool_provider: &P) -> Arc<Self> {
         Arc::new(
             CommandSet{ 
@@ -42,7 +42,7 @@ impl<D: DeviceStore + Clone, P: CommandPoolStore + Clone, S: CommandSetSettingsS
     }
 }
 
-impl<D:DeviceStore + Clone, P:CommandPoolStore, S:CommandSetSettingsStore> CommandBufferFactory<D,Arc<CommandBuffer<D>>> for Arc<CommandSet<D,P,S,Arc<CommandBuffer<D>>>>{
+impl<D:DeviceSource + Clone, P:CommandPoolStore, S:CommandSetSettingsStore> CommandBufferFactory<D,Arc<CommandBuffer<D>>> for Arc<CommandSet<D,P,S,Arc<CommandBuffer<D>>>>{
     fn next_cmd(&self) -> Arc<CommandBuffer<D>> {
         // First we need to see if there are any cmds available
         let mut cmds = self.cmds.lock().unwrap();

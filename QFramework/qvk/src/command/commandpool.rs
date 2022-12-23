@@ -4,7 +4,7 @@ use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
 use log::{debug, info};
 use crate::command::CommandPoolStore;
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceSource, DeviceSupplier};
 use super::{CommandPool, CommandPoolOps};
 
 
@@ -21,7 +21,7 @@ pub struct SettingsStore{
     pub reset_flags: Option<vk::CommandPoolResetFlags>,
 }
 
-impl<D: DeviceStore + Clone, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
+impl<D: DeviceSource + Clone, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
     pub fn new(settings: &S, device_provider: &D) -> Result<Arc<CommandPool<D,S>>, vk::Result>{
         
         let mut cmdpool_cinfo = CommandPoolCreateInfo::builder();
@@ -45,7 +45,7 @@ impl<D: DeviceStore + Clone, S: CommandPoolSettingsStore + Clone> CommandPool<D,
     }
 }
 
-impl<D:DeviceStore, S:CommandPoolSettingsStore> CommandPoolOps for Arc<CommandPool<D,S>>{
+impl<D:DeviceSource, S:CommandPoolSettingsStore> CommandPoolOps for Arc<CommandPool<D,S>>{
     fn reset_cmdpool(&self) {
         match self.settings.reset_flags(){
             Some(f) => {
@@ -58,13 +58,13 @@ impl<D:DeviceStore, S:CommandPoolSettingsStore> CommandPoolOps for Arc<CommandPo
     }
 }
 
-impl <D: DeviceStore, S: CommandPoolSettingsStore> CommandPoolStore for Arc<CommandPool<D,S>>{
+impl <D: DeviceSource, S: CommandPoolSettingsStore> CommandPoolStore for Arc<CommandPool<D,S>>{
     fn cmdpool(&self) -> &vk::CommandPool {
         &self.command_pool
     }
 }
 
-impl<D: DeviceStore, S: CommandPoolSettingsStore> Drop for CommandPool<D,S>{
+impl<D: DeviceSource, S: CommandPoolSettingsStore> Drop for CommandPool<D,S>{
     fn drop(&mut self) {
         debug!("Destroyed command pool {:?}", self.command_pool);
         unsafe{
@@ -100,7 +100,7 @@ impl CommandPoolSettingsStore for SettingsStore{
 
 }
 
-impl<D: DeviceStore, S: CommandPoolSettingsStore> InternalDeviceStore<D> for CommandPool<D,S>{
+impl<D: DeviceSource, S: CommandPoolSettingsStore> DeviceSupplier<D> for CommandPool<D,S>{
     fn device_provider(&self) -> &D {
         &self.device
     }

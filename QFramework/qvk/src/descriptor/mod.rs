@@ -3,7 +3,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use ash::vk;
 
-use crate::init::DeviceStore;
+use crate::init::DeviceSource;
 
 
 // Layouts will simply be built by specifying bindings using method level generics and T::fn() syntax
@@ -17,7 +17,7 @@ pub trait DescriptorLayoutStore<W:WriteStore>{
     fn writes(&self) -> MutexGuard<Vec<W>>;
     fn bindings(&self) -> MutexGuard<Vec<vk::DescriptorSetLayoutBinding>>;
 }
-pub struct DescriptorLayout<D:DeviceStore,W:WriteStore>{
+pub struct DescriptorLayout<D:DeviceSource,W:WriteStore>{
     device: D,
     bindings: Mutex<Vec<vk::DescriptorSetLayoutBinding>>,
     writes: Mutex<Vec<W>>,
@@ -49,7 +49,7 @@ pub struct WriteHolder{
 pub mod set;
 
 #[allow(unused)]
-pub struct Set<D:DeviceStore, L:DescriptorLayoutStore<W>,P:DescriptorPoolStore, W:WriteStore>{
+pub struct Set<D:DeviceSource, L:DescriptorLayoutStore<W>,P:DescriptorPoolStore, W:WriteStore>{
     device: D,
     layout: L,
     _pool: P,
@@ -63,7 +63,7 @@ pub trait DescriptorPoolStore{
     fn allocate_set<W:WriteStore, L:DescriptorLayoutStore<W>>(&self, layout: &L) -> vk::DescriptorSet;
     fn pool(&self) -> vk::DescriptorPool;
 }
-pub struct Pool<D:DeviceStore>{
+pub struct Pool<D:DeviceSource>{
     device: D,
     pool: vk::DescriptorPool,
     

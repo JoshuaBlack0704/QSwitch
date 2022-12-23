@@ -5,10 +5,10 @@ use log::{debug, info};
 use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutStore};
 
 
-use crate::init::{DeviceStore, InternalDeviceStore};
+use crate::init::{DeviceSource, DeviceSupplier};
 use super::{DescriptorLayout, WriteHolder, WriteStore};
 
-impl<D:DeviceStore + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
+impl<D:DeviceSource + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
     pub fn new(device_provider: &D, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
         Arc::new(
             Self{
@@ -46,7 +46,7 @@ impl<D:DeviceStore + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
     }
 }
 
-impl<D:DeviceStore,W:WriteStore> DescriptorLayoutStore<W> for Arc<DescriptorLayout<D,W>>{
+impl<D:DeviceSource,W:WriteStore> DescriptorLayoutStore<W> for Arc<DescriptorLayout<D,W>>{
     fn layout(&self) -> vk::DescriptorSetLayout {
         let mut layout = self.layout.lock().unwrap();
         if let Some(l) = *layout{
@@ -77,7 +77,7 @@ impl<D:DeviceStore,W:WriteStore> DescriptorLayoutStore<W> for Arc<DescriptorLayo
     }
 }
 
-impl<D:DeviceStore,W:WriteStore> Drop for DescriptorLayout<D,W>{
+impl<D:DeviceSource,W:WriteStore> Drop for DescriptorLayout<D,W>{
     fn drop(&mut self) {
         if let Some(l) = *self.layout.lock().unwrap(){
             debug!("Destroyed descriptor set layout {:?}", l);
@@ -88,7 +88,7 @@ impl<D:DeviceStore,W:WriteStore> Drop for DescriptorLayout<D,W>{
     }
 }
 
-impl<D:DeviceStore,W:WriteStore> InternalDeviceStore<D> for Arc<DescriptorLayout<D,W>>{
+impl<D:DeviceSource,W:WriteStore> DeviceSupplier<D> for Arc<DescriptorLayout<D,W>>{
     fn device_provider(&self) -> &D {
         &self.device
     }

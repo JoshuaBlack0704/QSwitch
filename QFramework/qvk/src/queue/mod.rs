@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{command::CommandBufferStore, init::DeviceStore};
+use crate::{command::CommandBufferStore, init::DeviceSource};
 use crate::sync::FenceStore;
 use crate::sync::SemaphoreStore;
 
@@ -31,7 +31,7 @@ pub trait QueueOps{
     fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result>;
     fn wait_idle(&self);
 }
-pub struct Queue<D:DeviceStore>{
+pub struct Queue<D:DeviceSource>{
     device: D,
     _queue_family: u32,
     queue: vk::Queue,
