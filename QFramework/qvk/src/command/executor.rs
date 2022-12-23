@@ -4,16 +4,13 @@ use ash::vk;
 
 use crate::{init::DeviceStore, queue::{Queue, QueueOps, SubmitSet, SubmitInfoStore}};
 
-use super::{Executor, commandpool, CommandPool, commandset, CommandSet, CommandBufferFactory, CommandBuffer, CommandBufferStore, CommandPoolOps};
+use super::{Executor, CommandBufferFactory, CommandBuffer, CommandBufferStore, CommandPoolOps, CommandPoolFactory, CommandSetFactory};
 
 impl<D:DeviceStore + Clone> Executor<D>{
     pub fn new(device_provider: &D, queue_flags: vk::QueueFlags) -> Arc<Executor<D>> {
         let index = device_provider.get_queue(queue_flags).unwrap().1;
-        let settings = commandpool::SettingsStore::new(index);
-        let pool = CommandPool::new(&settings, device_provider).unwrap();
-        let mut settings = commandset::SettingsStore::default();
-        settings.batch_size = 1;
-        let bset = CommandSet::new(&settings, device_provider, &pool);
+        let pool = device_provider.create_commandpool(index, None, None).unwrap();
+        let bset = pool.create_command_set(vk::CommandBufferLevel::PRIMARY, None);
 
         let queue = Queue::new(device_provider, queue_flags).unwrap();
 
@@ -59,7 +56,7 @@ impl<D:DeviceStore + Clone> QueueOps for Executor<D>{
     }
 }
 
-impl<D:DeviceStore + Clone> CommandBufferFactory<D,Arc<CommandBuffer<D>>> for Executor<D>{
+impl<D:DeviceStore + Clone> CommandBufferFactory<Arc<CommandBuffer<D>>> for Executor<D>{
     fn next_cmd(&self) -> Arc<CommandBuffer<D>> {
         self.command_set.next_cmd()
     }

@@ -1,23 +1,15 @@
 use std::sync::Arc;
 
 use ash::vk;
-use log::{debug, info};
+use log::debug;
 
 use crate::init::{DeviceStore, DeviceSupplier};
 use crate::sync::SemaphoreStore;
 
 use super::Semaphore;
 
+
 impl<D:DeviceStore + Clone> Semaphore<D>{
-    pub fn new(device_provider: &D) -> Arc<Semaphore<D>>{
-        let info = vk::SemaphoreCreateInfo::builder();
-        let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).unwrap()};
-        info!("Created semaphore {:?}", semaphore);
-        Arc::new(Semaphore{
-            device: device_provider.clone(),
-            semaphore,
-        })
-    }
 }
 
 impl<D:DeviceStore> Drop for Semaphore<D>{

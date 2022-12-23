@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use ash::vk;
-use log::{debug, info};
+use log::debug;
 
 use crate::init::DeviceStore;
 use crate::sync::SemaphoreStore;
@@ -10,24 +10,6 @@ use super::TimelineSemaphore;
 
 #[allow(unused)]
 impl<D:DeviceStore + Clone> TimelineSemaphore<D>{
-    pub fn new(device_provider: &D, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
-        let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
-        .semaphore_type(vk::SemaphoreType::TIMELINE)
-        .initial_value(starting_value);
-        let info = vk::SemaphoreCreateInfo::builder()
-        .push_next(&mut timeline_ext);
-
-        let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).expect("Could not create semaphore")};
-        info!("Created timeline semaphore {:?}", semaphore);
-        Arc::new(
-            Self{
-                device: device_provider.clone(),
-                semaphore,
-                value: Mutex::new((false, starting_value)),
-            }
-        )
-    }
-
     fn increment(&self){
         let mut lock = self.value.lock().unwrap();
         let (frozen, mut value) = *lock;

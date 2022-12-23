@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
+use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self,  SemaphoreFactory}};
 use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
 use crate::init::{DeviceStore, InstanceStore, DeviceSupplier, InstanceSupplier};
 use crate::queue::QueueStore;
@@ -297,7 +297,7 @@ impl<I:InstanceStore + Clone, D: DeviceStore + InstanceSupplier<I> + Clone, S:Sw
         // let semaphore:S
         let images = self.images();
         
-        let aquire = Semaphore::new(self.device_provider());
+        let aquire = self.device_provider().create_semaphore();
         let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
         let dst = &images[dst_index as usize];
 

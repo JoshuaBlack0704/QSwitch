@@ -1,36 +1,86 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
+use log::info;
 
-use crate::{init::DeviceStore, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, InternalImageStore}};
-
-use self::{commandpool::CommandPoolSettingsStore, commandset::CommandSetSettingsStore};
+use crate::{init::{DeviceStore, DeviceSupplier}, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, InternalImageStore}};
 
 pub mod commandpool;
+pub trait CommandPoolFactory<C:CommandPoolStore>{
+    fn create_commandpool(&self, q_family_index: u32, create_flags: Option<vk::CommandPoolCreateFlags>, reset_flags: Option<vk::CommandPoolResetFlags>) -> Result<C, vk::Result>;
+}
+impl<D:DeviceStore + Clone> CommandPoolFactory<Arc<CommandPool<D>>> for D{
+    fn create_commandpool(&self, q_family_index: u32, create_flags: Option<vk::CommandPoolCreateFlags>, reset_flags: Option<vk::CommandPoolResetFlags>) -> Result<Arc<CommandPool<D>>, vk::Result> {
+        
+        let mut cmdpool_cinfo = vk::CommandPoolCreateInfo::builder();
+        cmdpool_cinfo = cmdpool_cinfo.queue_family_index(q_family_index);
+        if let Some(flags) = create_flags{
+            cmdpool_cinfo = cmdpool_cinfo.flags(flags);
+        }
+        
+        let command_pool = unsafe{self.device().create_command_pool(&cmdpool_cinfo, None)};
+        
+        match command_pool{
+            Ok(pool) => {
+                info!("Created command pool {:?}", pool);
+                return Ok(Arc::new(
+                    CommandPool{ 
+                        device: self.clone(), 
+                        command_pool: pool,
+                        _q_family_index: q_family_index,
+                        reset_flags,
+                    }
+                )
+                    
+                );
+            },
+            Err(res) => {
+                return Err(res);
+            },
+        }
+    }
+}
 pub trait CommandPoolStore{
     fn cmdpool(&self) -> &vk::CommandPool;
 }
 pub trait CommandPoolOps{
     fn reset_cmdpool(&self);
 }
-
-pub struct CommandPool<D: DeviceStore, S: CommandPoolSettingsStore>{
+pub struct CommandPool<D: DeviceStore>{
     device: D,
-    settings: S,
+    _q_family_index: u32,
+    reset_flags: Option<vk::CommandPoolResetFlags>,
     command_pool: vk::CommandPool,
 }
 
 pub mod commandset;
-pub struct CommandSet<D: DeviceStore, P: CommandPoolStore, S: CommandSetSettingsStore, C:CommandBufferStore>{
+pub trait CommandSetFactory<Cmd:CommandBufferStore, C:CommandBufferFactory<Cmd>>{
+    fn create_command_set(&self, level: vk::CommandBufferLevel, reset_flags: Option<vk::CommandBufferResetFlags>) -> C;
+}
+impl<D:DeviceStore + Clone, P:CommandPoolStore + Clone + DeviceSupplier<D>> CommandSetFactory<Arc<CommandBuffer<D>>, Arc<CommandSet<D,P,Arc<CommandBuffer<D>>>>> for P{
+    fn create_command_set(&self, level: vk::CommandBufferLevel, reset_flags: Option<vk::CommandBufferResetFlags>) -> Arc<CommandSet<D,P,Arc<CommandBuffer<D>>>> {
+        Arc::new(
+            CommandSet{
+                device: self.device_provider().clone(),
+                cmdpool: self.clone(),
+                level,
+                reset_flags,
+                cmds: Mutex::new(vec![]),
+            }
+        )
+    }
+}
+pub struct CommandSet<D: DeviceStore, P: CommandPoolStore, C:CommandBufferStore>{
     device: D,
     cmdpool: P,
-    settings: S,
+    level: vk::CommandBufferLevel,
+    reset_flags: Option<vk::CommandBufferResetFlags>,
     cmds: Mutex<Vec<C>>,
 }
 
 pub mod commandbuffer;
-pub trait CommandBufferFactory<D:DeviceStore,C:CommandBufferStore>{
-    fn next_cmd(&self) -> Arc<CommandBuffer<D>>;
+pub trait CommandBufferFactory<C:CommandBufferStore>{
+    fn next_cmd(&self) -> C;
     fn reset_cmd(&self, cmd: &C);
 }
 pub trait BindPipelineFactory{
@@ -79,8 +129,8 @@ pub struct CommandBuffer<D:DeviceStore>{
 pub mod executor;
 pub struct Executor<D:DeviceStore>{
     _device: D,
-    command_pool: Arc<CommandPool<D,commandpool::SettingsStore>>,
-    command_set: Arc<CommandSet<D, Arc<CommandPool<D,commandpool::SettingsStore>>, commandset::SettingsStore, Arc<CommandBuffer<D>>>>,
+    command_pool: Arc<CommandPool<D>>,
+    command_set: Arc<CommandSet<D, Arc<CommandPool<D>>,  Arc<CommandBuffer<D>>>>,
     queue: Arc<Queue<D>>,
     
 }

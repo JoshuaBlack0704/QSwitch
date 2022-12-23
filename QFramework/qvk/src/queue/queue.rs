@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{command::CommandBufferStore, init::{DeviceStore, DeviceSupplier}, sync};
+use crate::{command::CommandBufferStore, init::{DeviceStore, DeviceSupplier}, sync::FenceFactory};
 use crate::queue::{QueueStore, SubmitInfoStore};
 use crate::sync::FenceStore;
 
@@ -51,7 +51,7 @@ impl<D:DeviceStore + Clone> QueueOps for Arc<Queue<D>>{
         }
     }
     fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
-        let fence = sync::Fence::new(self.device_provider(), false);
+        let fence = self.device.create_fence(false);
         let res = self.submit(submits, Some(&fence));
         fence.wait(None);
         res

@@ -14,11 +14,11 @@ pub trait SettingsStore<'a, B>{
     fn add_to_builder(&'a self, builder: B) -> B;
 }
 pub mod init;
-pub mod command;
-pub mod memory;
 pub mod sync;
-pub mod image;
-pub mod queue;
-pub mod descriptor;
 pub mod shader;
+pub mod queue;
+pub mod command;
+pub mod descriptor;
 pub mod pipelines;
+pub mod memory;
+pub mod image;
