@@ -8,11 +8,13 @@ use crate::init::DeviceSource;
 
 // Layouts will simply be built by specifying bindings using method level generics and T::fn() syntax
 pub mod descriptorlayout;
+pub trait DescriptorLayoutFactory<W:WriteStore, L:DescriptorLayoutSource<W>>{
+    fn create_descriptor_layout(&self, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> L;
+}
 pub trait DescriptorLayoutBindingFactory {
     fn binding(&self) -> vk::DescriptorSetLayoutBinding;
-
 }
-pub trait DescriptorLayoutStore<W:WriteStore>{
+pub trait DescriptorLayoutSource<W:WriteStore>{
     fn layout(&self) -> vk::DescriptorSetLayout;
     fn writes(&self) -> MutexGuard<Vec<W>>;
     fn bindings(&self) -> MutexGuard<Vec<vk::DescriptorSetLayoutBinding>>;
@@ -47,9 +49,14 @@ pub struct WriteHolder{
  
 // Upon creation the descriptor set will make available a set of arc mutexed writes that can be given to other structs for updates
 pub mod set;
-
+pub trait SetFactory<S:SetSource, W:WriteStore, L:DescriptorLayoutSource<W>>{
+    fn create_set(&self, layout_provider: &L) -> S;
+}
+pub trait SetSource{
+    fn update(&self);
+}
 #[allow(unused)]
-pub struct Set<D:DeviceSource, L:DescriptorLayoutStore<W>,P:DescriptorPoolStore, W:WriteStore>{
+pub struct Set<D:DeviceSource, L:DescriptorLayoutSource<W>,P:DescriptorPoolStore, W:WriteStore>{
     device: D,
     layout: L,
     _pool: P,
@@ -60,7 +67,7 @@ pub struct Set<D:DeviceSource, L:DescriptorLayoutStore<W>,P:DescriptorPoolStore,
 pub mod pool;
 #[allow(unused)]
 pub trait DescriptorPoolStore{
-    fn allocate_set<W:WriteStore, L:DescriptorLayoutStore<W>>(&self, layout: &L) -> vk::DescriptorSet;
+    fn allocate_set<W:WriteStore, L:DescriptorLayoutSource<W>>(&self, layout: &L) -> vk::DescriptorSet;
     fn pool(&self) -> vk::DescriptorPool;
 }
 pub struct Pool<D:DeviceSource>{

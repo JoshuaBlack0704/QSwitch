@@ -2,17 +2,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
 use log::{debug, info};
-use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutStore};
+use crate::descriptor::{DescriptorLayoutBindingFactory, DescriptorLayoutSource};
 
 
 use crate::init::{DeviceSource, DeviceSupplier};
-use super::{DescriptorLayout, WriteHolder, WriteStore};
+use super::{DescriptorLayout, WriteHolder, WriteStore, DescriptorLayoutFactory};
 
-impl<D:DeviceSource + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
-    pub fn new(device_provider: &D, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<Self> {
+impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> DescriptorLayoutFactory<Arc<WriteHolder>, Arc<DescriptorLayout<D,Arc<WriteHolder>>>> for DS{
+    fn create_descriptor_layout(&self, flags: Option<vk::DescriptorSetLayoutCreateFlags>) -> Arc<DescriptorLayout<D,Arc<WriteHolder>>> {
         Arc::new(
-            Self{
-                device: device_provider.clone(),
+            DescriptorLayout{
+                device: self.device_provider().clone(),
                 bindings: Mutex::new(vec![]),
                 layout: Mutex::new(None),
                 flags,
@@ -20,7 +20,9 @@ impl<D:DeviceSource + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
             }
         )
     }
+}
 
+impl<D:DeviceSource + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
     pub fn form_binding<BP: DescriptorLayoutBindingFactory>(self: &Arc<Self>, binding_provider: &BP, stage: vk::ShaderStageFlags) -> Arc<super::WriteHolder>{
         if let Some(_) = *self.layout.lock().unwrap(){
             //The layout will be created the first time it is used
@@ -46,7 +48,7 @@ impl<D:DeviceSource + Clone> DescriptorLayout<D,Arc<WriteHolder>>{
     }
 }
 
-impl<D:DeviceSource,W:WriteStore> DescriptorLayoutStore<W> for Arc<DescriptorLayout<D,W>>{
+impl<D:DeviceSource,W:WriteStore> DescriptorLayoutSource<W> for Arc<DescriptorLayout<D,W>>{
     fn layout(&self) -> vk::DescriptorSetLayout {
         let mut layout = self.layout.lock().unwrap();
         if let Some(l) = *layout{

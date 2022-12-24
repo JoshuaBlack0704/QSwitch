@@ -3,22 +3,22 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 use crate::command::BindSetFactory;
-use crate::descriptor::{DescriptorLayoutStore, DescriptorPoolStore};
+use crate::descriptor::{DescriptorLayoutSource, DescriptorPoolStore};
 
-use crate::init::DeviceSource;
+use crate::init::{DeviceSource, DeviceSupplier};
 
-use super::{Set, WriteStore};
+use super::{Set, WriteStore, SetSource, SetFactory};
 
-impl<D:DeviceSource + Clone, W:WriteStore + Clone, L:DescriptorLayoutStore<W> + Clone, P:DescriptorPoolStore + Clone> Set<D,L,P,W>{
-    pub fn new(device_provider: &D, layout_provider: &L, pool_provider: &P) -> Arc<Self> {
-        let set = pool_provider.allocate_set(layout_provider);
-        info!("Created descriptor set {:?} using layout {:?} from pool {:?}", set, layout_provider.layout(), pool_provider.pool());
+impl<D:DeviceSource + Clone, W:WriteStore + Clone, L:DescriptorLayoutSource<W> + Clone, P:DescriptorPoolStore + DeviceSupplier<D> + Clone> SetFactory<Arc<Set<D,L,P,W>>, W, L> for P{
+    fn create_set(&self, layout_provider: &L) -> Arc<Set<D,L,P,W>> {
+        let set = self.allocate_set(layout_provider);
+        info!("Created descriptor set {:?} using layout {:?} from pool {:?}", set, layout_provider.layout(), self.pool());
         let writes = layout_provider.writes().clone();
         Arc::new(
-            Self{
-                device: device_provider.clone(),
+            Set {
+                device: self.device_provider().clone(),
                 layout: layout_provider.clone(),
-                _pool: pool_provider.clone(),
+                _pool: self.clone(),
                 writes,
                 set,
             }
@@ -26,9 +26,9 @@ impl<D:DeviceSource + Clone, W:WriteStore + Clone, L:DescriptorLayoutStore<W> + 
     }
 }
 
-impl<D:DeviceSource, W:WriteStore, L:DescriptorLayoutStore<W>, P:DescriptorPoolStore> Set<D,L,P,W>{
+impl<D:DeviceSource, W:WriteStore, L:DescriptorLayoutSource<W>, P:DescriptorPoolStore> SetSource for Arc<Set<D,L,P,W>>{
     ///Will perform any writes needed to make the set current
-    pub fn update(self: &Arc<Self>){
+    fn update(&self){
         let mut updates:Vec<vk::WriteDescriptorSet> = self.writes.iter().filter(|w| w.needs_write()).map(|w| w.get_write()).collect();
 
         for u in updates.iter_mut(){
@@ -44,7 +44,7 @@ impl<D:DeviceSource, W:WriteStore, L:DescriptorLayoutStore<W>, P:DescriptorPoolS
     
 }
 
-impl<D:DeviceSource, L:DescriptorLayoutStore<W>, P:DescriptorPoolStore, W:WriteStore> BindSetFactory for  Arc<Set<D,L,P,W>>{
+impl<D:DeviceSource, L:DescriptorLayoutSource<W>, P:DescriptorPoolStore, W:WriteStore> BindSetFactory for  Arc<Set<D,L,P,W>>{
     fn set(&self) -> vk::DescriptorSet {
         self.update();
         self.set

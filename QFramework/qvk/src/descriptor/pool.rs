@@ -2,14 +2,14 @@ use std::{collections::HashMap, sync::Arc};
 
 use ash::vk;
 use log::{debug, info};
-use crate::descriptor::{DescriptorLayoutStore, DescriptorPoolStore};
+use crate::descriptor::{DescriptorLayoutSource, DescriptorPoolStore};
 
-use crate::init::DeviceSource;
+use crate::init::{DeviceSource, DeviceSupplier};
 
 use super::{Pool, WriteStore};
 
 impl<D:DeviceSource + Clone> Pool<D>{
-    pub fn new<W:WriteStore, L:DescriptorLayoutStore<W> + Clone>(device_provider: &D, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
+    pub fn new<W:WriteStore, L:DescriptorLayoutSource<W> + Clone>(device_provider: &D, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
         let mut pool_sizes:HashMap<vk::DescriptorType, vk::DescriptorPoolSize> = HashMap::new();
         let mut max_sets = 0;
 
@@ -59,7 +59,7 @@ impl<D:DeviceSource + Clone> Pool<D>{
 }
 
 impl<D:DeviceSource> DescriptorPoolStore for Arc<Pool<D>>{
-    fn allocate_set<W:WriteStore, L:DescriptorLayoutStore<W>>(&self, layout: &L) -> vk::DescriptorSet {
+    fn allocate_set<W:WriteStore, L:DescriptorLayoutSource<W>>(&self, layout: &L) -> vk::DescriptorSet {
 
         let requests = [layout.layout()];
         
@@ -85,5 +85,11 @@ impl<D:DeviceSource> Drop for Pool<D>{
         unsafe{
             self.device.device().destroy_descriptor_pool(self.pool, None);
         }
+    }
+}
+
+impl<D:DeviceSource> DeviceSupplier<D> for Arc<Pool<D>>{
+    fn device_provider(&self) -> &D {
+        &self.device
     }
 }

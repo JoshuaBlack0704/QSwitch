@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
+use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use std::mem::size_of;
 
@@ -28,7 +28,7 @@ fn compute_pipeline(){
     let uniform_access = BufferSegment::new(&uniform, 10, None).unwrap();
     uniform_access.copy_from_ram(&data).unwrap();
 
-    let dlayout = DescriptorLayout::new(&device, None);
+    let dlayout = device.create_descriptor_layout(None);
     let storage_write = DescriptorLayout::form_binding(&dlayout, &storage_access, vk::ShaderStageFlags::COMPUTE);
     storage_access.apply(&storage_write);
     let uniform_write = DescriptorLayout::form_binding(&dlayout, &uniform_access, vk::ShaderStageFlags::COMPUTE);
@@ -37,7 +37,7 @@ fn compute_pipeline(){
     let pool_layouts = [(&dlayout, 1)];
     let dpool = descriptor::Pool::new(&device, &pool_layouts, None);
 
-    let dset = Set::new(&device, &dlayout, &dpool);
+    let dset = dpool.create_set(&dlayout);
     dset.update();
 
     let code = HLSL::new("tests/resources/shaders/increment-set.hlsl", shaderc::ShaderKind::Compute, "main", None);

@@ -17,7 +17,6 @@ pub mod init;
 pub mod sync;
 pub mod shader;
 pub mod queue;
-///TODO: Get rid of command set struct
 pub mod command;
 pub mod descriptor;
 pub mod pipelines;
