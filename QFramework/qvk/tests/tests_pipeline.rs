@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
+use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use std::mem::size_of;
 
@@ -43,11 +43,9 @@ fn compute_pipeline(){
     let code = HLSL::new("tests/resources/shaders/increment-set.hlsl", shaderc::ShaderKind::Compute, "main", None);
     let shader = device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
 
-    let mut settings = pipelines::layout::Settings::new(None);
-    settings.add_layout(&dlayout);
-    let playout = pipelines::Layout::new(&device, &settings);
+    let playout = device.create_pipeline_layout(&[&dlayout], &[], None);
 
-    let compute = pipelines::Compute::new(&device, &shader, &playout, None);
+    let compute = playout.create_compute_pipeline(&shader, None);
 
     let exe = Executor::new(&device, vk::QueueFlags::COMPUTE);
     let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);

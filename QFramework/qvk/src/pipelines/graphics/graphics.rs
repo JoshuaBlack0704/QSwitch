@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::{init::DeviceSource, pipelines::PipelineLayoutStore, shader::ShaderSource};
+use crate::{init::DeviceSource, pipelines::PipelineLayoutSource, shader::ShaderSource};
 
 use super::{Graphics, RenderPassStore, VertexStateFactory, TesselationStateFactory, InputStateFactory, ViewportStateFactory, RasterizationStateFactory, MultisampleStateFactory, DepthStencilStateFactory, ColorBlendStateFactory, ColorBlendAttachmentFactory, DynamicStateFactory};
 
@@ -45,7 +45,7 @@ pub struct State<Shd:ShaderSource>{
     
 }
 
-impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutStore + Clone> Graphics<D,R,L>{
+impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutSource + Clone> Graphics<D,R,L>{
     pub fn new<S:GraphicsPipelineState>(device_provider: &D, state: &S, layout: &L, renderpass: &R, tgt_subpass: u32) -> Result<Arc<Self>, vk::Result>{
         let mut info = vk::GraphicsPipelineCreateInfo::builder();
         if let Some(flags) = state.flags(){
@@ -112,7 +112,7 @@ impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutStore + 
     }
 }
 
-impl<D:DeviceSource,R:RenderPassStore,L:PipelineLayoutStore> Drop for Graphics<D,R,L>{
+impl<D:DeviceSource,R:RenderPassStore,L:PipelineLayoutSource> Drop for Graphics<D,R,L>{
     fn drop(&mut self) {
         debug!("Destroyed graphics pipeline {:?}", self.pipeline);
         unsafe{

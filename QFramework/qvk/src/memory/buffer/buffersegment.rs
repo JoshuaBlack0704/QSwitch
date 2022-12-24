@@ -3,7 +3,7 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferSource,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceSource, InstanceSource, InstanceSupplier, DeviceSupplier}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, descriptor::{WriteStore, ApplyWriteFactory}};
+use crate::{command::{CommandBufferSource,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceSource, InstanceSource, InstanceSupplier, DeviceSupplier}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, descriptor::{WriteSource, ApplyWriteFactory}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, InternalImageStore};
@@ -194,7 +194,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:Bu
 }
 
 impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>> ApplyWriteFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
-    fn apply<W:WriteStore>(&self, write: &W) {
+    fn apply<W:WriteSource>(&self, write: &W) {
 
         let info = vk::WriteDescriptorSet::builder()
         .dst_array_element(0)

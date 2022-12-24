@@ -4,42 +4,47 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::command::BindPipelineFactory;
-use crate::init::DeviceSource;
-use crate::pipelines::PipelineLayoutStore;
+use crate::init::{DeviceSource, DeviceSupplier};
+use crate::pipelines::PipelineLayoutSource;
 use crate::shader::ShaderSource;
 
-use super::Compute;
+use super::{Compute, ComputePipelineFactory, ComputePipelineSource};
 
-impl<D:DeviceSource + Clone, L:PipelineLayoutStore + Clone> Compute<D,L>{
-    pub fn new<Shd:ShaderSource>(device_provider: &D, shader: &Shd, layout_provider: &L, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
+impl<D:DeviceSource + Clone, L:PipelineLayoutSource + DeviceSupplier<D> + Clone> ComputePipelineFactory<Arc<Compute<D,L>>> for L{
+    fn create_compute_pipeline(&self, shader: &impl ShaderSource, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D,L>> {
         let mut info = vk::ComputePipelineCreateInfo::builder();
         if let Some(flags) = flags{
             info = info.flags(flags);
         }
         info = info.stage(shader.stage());
-        info = info.layout(layout_provider.layout());
+        info = info.layout(self.layout());
         let info = [info.build()];
         
         let pipeline;
         unsafe{
-            let device = device_provider.device();
+            let device = self.device_provider().device();
             pipeline = device.create_compute_pipelines(vk::PipelineCache::null(), &info, None).unwrap()[0];
         }
 
         info!("Created compute pipeline {:?}", pipeline);
 
         Arc::new(
-            Self{
-                device: device_provider.clone(),
-                layout: layout_provider.clone(),
+            Compute{
+                device: self.device_provider().clone(),
+                layout: self.clone(),
                 pipeline,
             }
         )
-        
     }
 }
 
-impl<D:DeviceSource, L:PipelineLayoutStore> BindPipelineFactory for Arc<Compute<D,L>>{
+impl<D:DeviceSource, L:PipelineLayoutSource> ComputePipelineSource for Arc<Compute<D,L>>{
+    fn pipeline(&self) -> &vk::Pipeline {
+        &self.pipeline
+    }
+}
+
+impl<D:DeviceSource, L:PipelineLayoutSource> BindPipelineFactory for Arc<Compute<D,L>>{
     fn layout(&self) -> vk::PipelineLayout {
         self.layout.layout()
     }
@@ -53,7 +58,7 @@ impl<D:DeviceSource, L:PipelineLayoutStore> BindPipelineFactory for Arc<Compute<
     }
 }
 
-impl<D:DeviceSource, L:PipelineLayoutStore> Drop for Compute<D,L>{
+impl<D:DeviceSource, L:PipelineLayoutSource> Drop for Compute<D,L>{
     fn drop(&mut self) {
         debug!("Destroyed compute pipeline {:?}", self.pipeline);
         unsafe{

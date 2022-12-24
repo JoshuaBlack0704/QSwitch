@@ -2,7 +2,7 @@ use ash::vk;
 
 use crate::init::DeviceSource;
 
-use super::PipelineLayoutStore;
+use super::PipelineLayoutSource;
 
 pub mod renderpass;
 pub trait RenderPassStore{
@@ -83,7 +83,7 @@ pub trait DynamicStateFactory{
     fn flags(&self) -> Option<vk::PipelineDynamicStateCreateFlags>;
     fn dynamics(&self) -> &[vk::DynamicState];
 }
-pub struct Graphics<D:DeviceSource, R:RenderPassStore, L:PipelineLayoutStore>{
+pub struct Graphics<D:DeviceSource, R:RenderPassStore, L:PipelineLayoutSource>{
     device: D,
     _render_pass: R,
     _layout: L,

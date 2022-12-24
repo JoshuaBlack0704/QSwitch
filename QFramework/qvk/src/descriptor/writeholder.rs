@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
-use super::{WriteHolder, WriteStore};
+use super::{WriteHolder, WriteSource};
 
 impl WriteHolder{
     pub fn new(ty: vk::DescriptorType, dst_binding: u32, write: vk::WriteDescriptorSet) -> Arc<WriteHolder> {
@@ -17,7 +17,7 @@ impl WriteHolder{
     }
 }
 
-impl WriteStore for Arc<WriteHolder>{
+impl WriteSource for Arc<WriteHolder>{
     fn update(&self, mut write: vk::WriteDescriptorSet) {
         let mut lock = self.write.lock().unwrap();
         let mut signal = self.needs_update.lock().unwrap();
