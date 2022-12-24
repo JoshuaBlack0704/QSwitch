@@ -3,7 +3,7 @@ use std::{mem::size_of, sync::{Arc, Mutex}};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferStore,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceSource, InstanceSource, InstanceSupplier, DeviceSupplier}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, descriptor::{WriteStore, ApplyWriteFactory}};
+use crate::{command::{CommandBufferSource,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceSource, InstanceSource, InstanceSupplier, DeviceSupplier}, memory::{buffer::buffer::BufferAlignmentType, Partition, PartitionSystem, partitionsystem::PartitionError}, descriptor::{WriteStore, ApplyWriteFactory}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, InternalImageStore};
@@ -130,7 +130,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
     fn copy_to_segment_internal<Buf:BufferStore, BP:BufferCopyFactory + InternalBufferStore<Buf>>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError> {
         let exe = Executor::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER);
         
-        let cmd = exe.next_cmd();
+        let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.buffer_copy(self, dst).unwrap();
         cmd.end().unwrap();
@@ -142,7 +142,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
     fn copy_to_image_internal<Img:ImageStore, IS: InternalImageStore<Img> + ImageCopyFactory>(&self, dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
         let exe = Executor::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER);
         
-        let cmd = exe.next_cmd();
+        let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.buffer_image_copy(self, dst, buffer_addressing).unwrap();
         // self.copy_to_image(&cmd, dst, buffer_addressing)?;

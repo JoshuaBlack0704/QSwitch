@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{command::CommandBufferStore, init::{DeviceSource, DeviceSupplier}, sync::FenceFactory};
+use crate::{command::CommandBufferSource, init::{DeviceSource, DeviceSupplier}, sync::FenceFactory};
 use crate::queue::{QueueSource, SubmitInfoSource};
 use crate::sync::FenceSource;
 
@@ -38,7 +38,7 @@ impl<D:DeviceSource> DeviceSupplier<D> for Arc<Queue<D>>{
 }
 
 impl<D:DeviceSource + Clone> QueueOps for Arc<Queue<D>>{
-    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoSource<C>, F:FenceSource>(&self, submits: &[S], fence: Option<&F>) -> std::result::Result<(), ash::vk::Result> {
+    fn submit<C:CommandBufferSource + Clone, S:SubmitInfoSource<C>, F:FenceSource>(&self, submits: &[S], fence: Option<&F>) -> std::result::Result<(), ash::vk::Result> {
         let submits:Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
 
         let device = self.device.device();
@@ -51,7 +51,7 @@ impl<D:DeviceSource + Clone> QueueOps for Arc<Queue<D>>{
             device.queue_submit2(self.queue, &submits, _fence)
         }
     }
-    fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoSource<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
+    fn wait_submit<C:CommandBufferSource + Clone, S:SubmitInfoSource<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
         let fence = self.create_fence(false);
         let res = self.submit(submits, Some(&fence));
         fence.wait(None);

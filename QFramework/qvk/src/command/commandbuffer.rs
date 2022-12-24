@@ -5,8 +5,9 @@ use log::debug;
 
 use crate::{init::DeviceSource, memory::buffer::InternalBufferStore};
 
-use super::{CommandBuffer, CommandBufferStore, BindPipelineFactory, BindSetFactory, CommandOpError};
+use super::{CommandBuffer, CommandBufferSource, BindPipelineFactory, BindSetFactory, CommandOpError};
 
+ 
 impl<D:DeviceSource + Clone> CommandBuffer<D>{
     pub fn new(device_store: &D, cmd: vk::CommandBuffer) -> Arc<CommandBuffer<D>> {
         Arc::new(
@@ -18,7 +19,7 @@ impl<D:DeviceSource + Clone> CommandBuffer<D>{
     }
 }
 
-impl<D:DeviceSource> CommandBufferStore for Arc<CommandBuffer<D>>{
+impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
     fn cmd(&self) -> vk::CommandBuffer {
         self.cmd
     }

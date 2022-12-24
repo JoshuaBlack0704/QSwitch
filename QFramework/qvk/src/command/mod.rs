@@ -4,34 +4,32 @@ use ash::vk;
 
 use crate::{init::DeviceSource, queue::Queue, memory::buffer::{BufferStore, InternalBufferStore}, image::{ImageStore, InternalImageStore}};
 
-use self::{commandpool::CommandPoolSettingsStore, commandset::CommandSetSettingsStore};
-
 pub mod commandpool;
-pub trait CommandPoolStore{
+pub trait CommandPoolFactory<C:CommandPoolSource>{
+    fn reset_flags(&self) -> Option<vk::CommandPoolResetFlags> {None}
+    fn create_command_pool(&self, queue_family_index: u32, create_flags: Option<vk::CommandPoolCreateFlags>) -> Result<C, vk::Result>;
+}
+pub trait CommandPoolSource{
     fn cmdpool(&self) -> &vk::CommandPool;
+}
+pub trait CommandPoolSupplier<C:CommandPoolSource>{
+    fn cmdpool_source(&self) -> &C;
 }
 pub trait CommandPoolOps{
     fn reset_cmdpool(&self);
 }
-
-pub struct CommandPool<D: DeviceSource, S: CommandPoolSettingsStore>{
+pub struct CommandPool<D: DeviceSource, C:CommandBufferSource>{
     device: D,
-    settings: S,
+    reset_flags: Option<vk::CommandPoolResetFlags>,
     command_pool: vk::CommandPool,
-}
-
-pub mod commandset;
-pub struct CommandSet<D: DeviceSource, P: CommandPoolStore, S: CommandSetSettingsStore, C:CommandBufferStore>{
-    device: D,
-    cmdpool: P,
-    settings: S,
     cmds: Mutex<Vec<C>>,
 }
 
 pub mod commandbuffer;
-pub trait CommandBufferFactory<D:DeviceSource,C:CommandBufferStore>{
-    fn next_cmd(&self) -> Arc<CommandBuffer<D>>;
-    fn reset_cmd(&self, cmd: &C);
+pub trait CommandBufferFactory<C:CommandBufferSource>{
+    fn next_cmd(&self, level: vk::CommandBufferLevel) -> C;
+    fn reset_cmd(&self, cmd: &C, reset_flags: Option<vk::CommandBufferResetFlags>);
+    fn created_cmds(&self) -> Vec<C>;
 }
 pub trait BindPipelineFactory{
     fn layout(&self) -> vk::PipelineLayout;
@@ -52,7 +50,7 @@ pub trait ImageCopyFactory{
     fn offset(&self) -> vk::Offset3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
 }
-pub trait CommandBufferStore{
+pub trait CommandBufferSource{
     fn cmd(&self) -> vk::CommandBuffer;
     fn begin(&self, info: Option<vk::CommandBufferBeginInfo>) -> Result<(), vk::Result>;
     fn end(&self) -> Result<(), vk::Result>;
@@ -79,8 +77,7 @@ pub struct CommandBuffer<D:DeviceSource>{
 pub mod executor;
 pub struct Executor<D:DeviceSource>{
     _device: D,
-    command_pool: Arc<CommandPool<D,commandpool::SettingsStore>>,
-    command_set: Arc<CommandSet<D, Arc<CommandPool<D,commandpool::SettingsStore>>, commandset::SettingsStore, Arc<CommandBuffer<D>>>>,
+    command_pool: Arc<CommandPool<D, Arc<CommandBuffer<D>>>>,
     queue: Arc<Queue<D>>,
     
 }

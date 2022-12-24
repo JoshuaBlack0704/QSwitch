@@ -4,7 +4,7 @@ use image::{self, EncodableLayout};
 
 use ash::vk;
 
-use crate::{command::{CommandBufferStore, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, Memory, memory},  image::ImageResource};
+use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, Memory, memory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
@@ -115,7 +115,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         
         let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
         
-        let cmd = exe.next_cmd();
+        let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.image_buffer_copy(self, dst, buffer_addressing).unwrap();
         cmd.end().unwrap();
@@ -146,7 +146,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         
         let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
         
-        let cmd = exe.next_cmd();
+        let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.image_copy(self, dst).unwrap();
         cmd.end().unwrap();
@@ -177,7 +177,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
 
         let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
         
-        let cmd = exe.next_cmd();
+        let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.image_blit(self, dst, scale_filter).unwrap();
         cmd.end().unwrap();

@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferStore}};
+use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use std::mem::size_of;
 
@@ -50,7 +50,7 @@ fn compute_pipeline(){
     let compute = pipelines::Compute::new(&device, &shader, &playout, None);
 
     let exe = Executor::new(&device, vk::QueueFlags::COMPUTE);
-    let cmd = exe.next_cmd();
+    let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
     cmd.begin(None).unwrap();
     cmd.bind_pipeline(&compute);
     cmd.bind_set(&dset, 0, &compute);

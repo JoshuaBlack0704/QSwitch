@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::command::CommandBufferStore;
+use crate::command::CommandBufferSource;
 use crate::queue::SubmitInfoSource;
 use crate::sync::SemaphoreSource;
 
 use super::SubmitSet;
 
 
-impl<C:CommandBufferStore + Clone> SubmitSet<C>{
+impl<C:CommandBufferSource + Clone> SubmitSet<C>{
     pub fn new(first_cmd: &C) -> Self {
         let info = vk::CommandBufferSubmitInfo::builder().device_mask(0).command_buffer(first_cmd.cmd());
         Self{
@@ -21,7 +21,7 @@ impl<C:CommandBufferStore + Clone> SubmitSet<C>{
     }
 }
 
-impl<C:CommandBufferStore + Clone> SubmitInfoSource<C> for SubmitSet<C>{
+impl<C:CommandBufferSource + Clone> SubmitInfoSource<C> for SubmitSet<C>{
     fn info(&self) -> vk::SubmitInfo2 {
       
         vk::SubmitInfo2::builder()

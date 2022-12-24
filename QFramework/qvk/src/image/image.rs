@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::command::{CommandBufferFactory, CommandBufferStore, Executor};
+use crate::command::{CommandBufferFactory, CommandBufferSource, Executor};
 use crate::image::ImageStore;
 use crate::init::{DeviceSource, DeviceSupplier};
 use crate::memory::{MemoryStore, partitionsystem,  Memory, PartitionSystem};
@@ -138,7 +138,7 @@ impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemoryStore + Clone> Image<D,
 }
 
 impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
-    fn transition<C:CommandBufferStore>(
+    fn transition<C:CommandBufferSource>(
         &self, 
         cmd: &C, 
         new_layout: vk::ImageLayout, 
@@ -216,7 +216,7 @@ impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemoryStore> ImageStore for A
             return;
         }
         let executor = Executor::new(&self.device, vk::QueueFlags::GRAPHICS);
-        let cmd = executor.next_cmd();
+        let cmd = executor.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         
         if let Some(range) = subresources{

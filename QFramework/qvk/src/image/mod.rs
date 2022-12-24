@@ -4,7 +4,7 @@ use ash::vk;
 use std::sync::MutexGuard;
 
 use crate::{memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
-use crate::command::CommandBufferStore;
+use crate::command::CommandBufferSource;
 use crate::image::imageresource::ImageResourceMemOpError;
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferStore, InternalBufferStore};
@@ -13,7 +13,7 @@ use crate::memory::MemoryStore;
 pub mod image;
 pub trait ImageStore{
     /// Returns the old layout
-    fn transition<C:CommandBufferStore>(
+    fn transition<C:CommandBufferSource>(
         &self,
         cmd: &C,
         new_layout: vk::ImageLayout,

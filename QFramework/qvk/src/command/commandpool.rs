@@ -1,32 +1,61 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use ash::vk::{self, CommandPoolCreateFlags, CommandPoolCreateInfo};
+use ash::vk;
 use log::{debug, info};
-use crate::command::CommandPoolStore;
+use crate::command::CommandPoolSource;
 
 use crate::init::{DeviceSource, DeviceSupplier};
-use super::{CommandPool, CommandPoolOps};
+use super::{CommandPool, CommandPoolOps, CommandPoolFactory, CommandBufferFactory, CommandBuffer, CommandBufferSource};
 
 
-pub trait CommandPoolSettingsStore{
-    fn queue_family_index(&self) -> u32;
-    fn reset_flags(&self) -> Option<vk::CommandPoolResetFlags>;
-    fn create_flags(&self) -> Option<CommandPoolCreateFlags>;
+impl<D:DeviceSource + Clone> CommandBufferFactory<Arc<CommandBuffer<D>>> for Arc<CommandPool<D, Arc<CommandBuffer<D>>>>{
+    fn next_cmd(&self, level: vk::CommandBufferLevel) -> Arc<CommandBuffer<D>> {
+        // First we need to see if there are any cmds available
+        let mut cmds = self.cmds.lock().unwrap();
+
+        //All we do is loop through cmds and see if we have a free cmd
+        for cmd in cmds.iter(){
+            if Arc::strong_count(cmd) == 1{
+                //If we do we return it
+                return cmd.clone();
+            }
+        }
+      
+        // If not we need to make a new batch
+        let mut alloc_builder = vk::CommandBufferAllocateInfo::builder();
+        alloc_builder = alloc_builder.command_pool(self.command_pool);
+        alloc_builder = alloc_builder.command_buffer_count(1);
+        alloc_builder = alloc_builder.level(level);
+        let new_cmds = unsafe{self.device.device().allocate_command_buffers(&alloc_builder).expect("Could not allocate command buffers")};
+        // Now the book keeping and queueing
+        for cmd in new_cmds{
+            info!("Created command buffer {:?}", cmd);
+            cmds.push(CommandBuffer::new(&self.device, cmd));
+        }
+        // Now we get a newly queued element
+        cmds.last().unwrap().clone()
+    }
+
+    fn reset_cmd(&self, cmd: &Arc<CommandBuffer<D>>, reset_flags: Option<vk::CommandBufferResetFlags>) {
+        if let Some(f) = reset_flags{
+            unsafe{self.device.device().reset_command_buffer(cmd.cmd(), f)}.expect("Failed to reset command buffer");
+        }
+        else{
+            unsafe{self.device.device().reset_command_buffer(cmd.cmd(), vk::CommandBufferResetFlags::empty())}.expect("Failed to reset command buffer");
+        }
+    }
+
+    fn created_cmds(&self) -> Vec<Arc<CommandBuffer<D>>> {
+        self.cmds.lock().unwrap().clone()
+    }
 }
 
-#[derive(Clone)]
-pub struct SettingsStore{
-    pub queue_family_index: u32,
-    pub create_flags: Option<CommandPoolCreateFlags>,
-    pub reset_flags: Option<vk::CommandPoolResetFlags>,
-}
-
-impl<D: DeviceSource + Clone, S: CommandPoolSettingsStore + Clone> CommandPool<D,S>{
-    pub fn new(settings: &S, device_provider: &D) -> Result<Arc<CommandPool<D,S>>, vk::Result>{
-        
-        let mut cmdpool_cinfo = CommandPoolCreateInfo::builder();
-        cmdpool_cinfo = cmdpool_cinfo.queue_family_index(settings.queue_family_index());
-        if let Some(flags) = settings.create_flags(){
+impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> CommandPoolFactory<Arc<CommandPool<D, Arc<CommandBuffer<D>>>>> for DS{
+    fn create_command_pool(&self, queue_family_index: u32, create_flags: Option<vk::CommandPoolCreateFlags>) -> Result<Arc<CommandPool<D, Arc<CommandBuffer<D>>>>, vk::Result> {
+        let device_provider = self.device_provider();
+        let mut cmdpool_cinfo = vk::CommandPoolCreateInfo::builder();
+        cmdpool_cinfo = cmdpool_cinfo.queue_family_index(queue_family_index);
+        if let Some(flags) = create_flags{
             cmdpool_cinfo = cmdpool_cinfo.flags(flags);
         }
         
@@ -35,19 +64,29 @@ impl<D: DeviceSource + Clone, S: CommandPoolSettingsStore + Clone> CommandPool<D
         match command_pool{
             Ok(pool) => {
                 info!("Created command pool {:?}", pool);
-                return Ok(Arc::new(CommandPool{ device: device_provider.clone(), settings: settings.clone(), command_pool: pool}));
+                return Ok(
+                    Arc::new(
+                        CommandPool{ 
+                            device: device_provider.clone(), 
+                            command_pool: pool,
+                            reset_flags: self.reset_flags(),
+                            cmds: Mutex::new(vec![]),
+                        }
+                    )
+                    
+                );
             },
             Err(res) => {
                 return Err(res);
             },
         }
-        
     }
 }
 
-impl<D:DeviceSource, S:CommandPoolSettingsStore> CommandPoolOps for Arc<CommandPool<D,S>>{
+
+impl<D:DeviceSource, C:CommandBufferSource> CommandPoolOps for Arc<CommandPool<D,C>>{
     fn reset_cmdpool(&self) {
-        match self.settings.reset_flags(){
+        match self.reset_flags{
             Some(f) => {
                 unsafe{self.device.device().reset_command_pool(self.command_pool, f)}.expect("Could not reset command pool");
             },
@@ -58,13 +97,13 @@ impl<D:DeviceSource, S:CommandPoolSettingsStore> CommandPoolOps for Arc<CommandP
     }
 }
 
-impl <D: DeviceSource, S: CommandPoolSettingsStore> CommandPoolStore for Arc<CommandPool<D,S>>{
+impl <D: DeviceSource, C:CommandBufferSource> CommandPoolSource for Arc<CommandPool<D,C>>{
     fn cmdpool(&self) -> &vk::CommandPool {
         &self.command_pool
     }
 }
 
-impl<D: DeviceSource, S: CommandPoolSettingsStore> Drop for CommandPool<D,S>{
+impl<D: DeviceSource, C:CommandBufferSource> Drop for CommandPool<D,C>{
     fn drop(&mut self) {
         debug!("Destroyed command pool {:?}", self.command_pool);
         unsafe{
@@ -73,34 +112,7 @@ impl<D: DeviceSource, S: CommandPoolSettingsStore> Drop for CommandPool<D,S>{
     }
 }
 
-impl SettingsStore{
-    pub fn new(queue_family_index: u32) -> SettingsStore {
-        SettingsStore{ queue_family_index, create_flags: None, reset_flags: None }
-    }
-    pub fn set_create_flags(&mut self, flags: CommandPoolCreateFlags){
-        self.create_flags = Some(flags);
-    }
-    pub fn set_reset_flags(&mut self, flags: vk::CommandPoolResetFlags){
-        self.reset_flags = Some(flags);
-    }
-}
-
-impl CommandPoolSettingsStore for SettingsStore{
-    fn queue_family_index(&self) -> u32 {
-        self.queue_family_index
-    }
-
-    fn create_flags(&self) -> Option<CommandPoolCreateFlags> {
-        self.create_flags
-    }
-
-    fn reset_flags(&self) -> Option<vk::CommandPoolResetFlags> {
-        self.reset_flags
-    }
-
-}
-
-impl<D: DeviceSource, S: CommandPoolSettingsStore> DeviceSupplier<D> for CommandPool<D,S>{
+impl<D: DeviceSource, C:CommandBufferSource> DeviceSupplier<D> for CommandPool<D,C>{
     fn device_provider(&self) -> &D {
         &self.device
     }
