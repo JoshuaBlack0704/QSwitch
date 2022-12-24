@@ -5,11 +5,14 @@ use ash::vk;
 use crate::init::DeviceSource;
 
 pub mod shader;
+pub trait ShaderFactory<Shd: ShaderSource>{
+    fn create_shader(&self, spriv_data: &impl SpirvStore, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Shd;
+}
 pub trait SpirvStore{
     fn code(&self) -> &[u32];
     fn entry_name(&self) -> &str;
 }
-pub trait ShaderStore{
+pub trait ShaderSource{
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo;
 }
 pub struct Shader<D:DeviceSource>{

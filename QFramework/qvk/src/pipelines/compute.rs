@@ -6,12 +6,12 @@ use log::{debug, info};
 use crate::command::BindPipelineFactory;
 use crate::init::DeviceSource;
 use crate::pipelines::PipelineLayoutStore;
-use crate::shader::ShaderStore;
+use crate::shader::ShaderSource;
 
 use super::Compute;
 
 impl<D:DeviceSource + Clone, L:PipelineLayoutStore + Clone> Compute<D,L>{
-    pub fn new<Shd:ShaderStore>(device_provider: &D, shader: &Shd, layout_provider: &L, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
+    pub fn new<Shd:ShaderSource>(device_provider: &D, shader: &Shd, layout_provider: &L, flags: Option<vk::PipelineCreateFlags>) -> Arc<Compute<D, L>> {
         let mut info = vk::ComputePipelineCreateInfo::builder();
         if let Some(flags) = flags{
             info = info.flags(flags);

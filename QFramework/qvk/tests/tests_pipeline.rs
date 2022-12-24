@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::HLSL, command::{Executor, CommandBufferFactory, CommandBufferStore}};
+use qvk::{descriptor::{self, DescriptorLayout, Set, ApplyWriteFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferStore}};
 use qvk::init::DeviceSource;
 use std::mem::size_of;
 
@@ -41,7 +41,7 @@ fn compute_pipeline(){
     dset.update();
 
     let code = HLSL::new("tests/resources/shaders/increment-set.hlsl", shaderc::ShaderKind::Compute, "main", None);
-    let shader = qvk::shader::Shader::new(&device, &code, vk::ShaderStageFlags::COMPUTE, None);
+    let shader = device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
 
     let mut settings = pipelines::layout::Settings::new(None);
     settings.add_layout(&dlayout);

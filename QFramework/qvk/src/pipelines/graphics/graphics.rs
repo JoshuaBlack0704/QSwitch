@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::{info, debug};
 
-use crate::{init::DeviceSource, pipelines::PipelineLayoutStore, shader::ShaderStore};
+use crate::{init::DeviceSource, pipelines::PipelineLayoutStore, shader::ShaderSource};
 
 use super::{Graphics, RenderPassStore, VertexStateFactory, TesselationStateFactory, InputStateFactory, ViewportStateFactory, RasterizationStateFactory, MultisampleStateFactory, DepthStencilStateFactory, ColorBlendStateFactory, ColorBlendAttachmentFactory, DynamicStateFactory};
 
@@ -22,7 +22,7 @@ pub trait GraphicsPipelineState{
       
 }
 
-pub struct State<Shd:ShaderStore>{
+pub struct State<Shd:ShaderSource>{
     _flags:  Option<vk::PipelineCreateFlags>,
     shader_stages:  Vec<vk::PipelineShaderStageCreateInfo>,
     shaders: Vec<Shd>,
@@ -121,7 +121,7 @@ impl<D:DeviceSource,R:RenderPassStore,L:PipelineLayoutStore> Drop for Graphics<D
     }
 }
 
-impl<Shd:ShaderStore + Clone> State<Shd>{
+impl<Shd:ShaderSource + Clone> State<Shd>{
     pub fn new(flags: Option<vk::PipelineCreateFlags>) -> State<Shd> {
         Self{
             shader_stages:  vec![],
