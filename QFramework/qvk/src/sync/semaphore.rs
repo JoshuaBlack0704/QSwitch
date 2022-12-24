@@ -4,7 +4,7 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::init::{DeviceSource, DeviceSupplier};
-use crate::sync::SemaphoreStore;
+use crate::sync::SemaphoreSource;
 
 use super::{Semaphore, SemaphoreFactory};
 
@@ -30,7 +30,7 @@ impl<D:DeviceSource> Drop for Semaphore<D>{
     }
 }
 
-impl<D:DeviceSource> SemaphoreStore for Arc<Semaphore<D>>{
+impl<D:DeviceSource> SemaphoreSource for Arc<Semaphore<D>>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }

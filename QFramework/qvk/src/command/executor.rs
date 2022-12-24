@@ -46,7 +46,7 @@ impl<D:DeviceSource> CommandPoolOps for Executor<D>{
 }
 
 impl<D:DeviceSource + Clone> QueueOps for Executor<D>{
-    fn submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoStore<C>, F:crate::sync::FenceStore>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result> {
+    fn submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoStore<C>, F:crate::sync::FenceSource>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result> {
         self.queue.submit(submits, fence)
     }
 

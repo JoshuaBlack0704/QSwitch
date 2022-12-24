@@ -4,30 +4,30 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::init::{DeviceSource, DeviceSupplier};
-use crate::sync::FenceStore;
+use crate::sync::FenceSource;
 
-use super::Fence;
+use super::{Fence, FenceFactory};
 
-impl<D:DeviceSource + Clone> Fence<D>{
-    pub fn new(device_provider: &D, signaled: bool) -> Arc<Fence<D>> {
+impl<D:DeviceSource + Clone, DS: DeviceSupplier<D>> FenceFactory<Arc<Fence<D>>> for DS{
+    fn create_fence(&self, signaled: bool) -> Arc<Fence<D>> {
         let mut info = vk::FenceCreateInfo::builder();
         if signaled{
             info = info.flags(vk::FenceCreateFlags::SIGNALED);
         }
 
-        let fence = unsafe{device_provider.device().create_fence(&info, None).unwrap()};
+        let fence = unsafe{self.device_provider().device().create_fence(&info, None).unwrap()};
         info!("Created fence {:?}", fence);
 
         Arc::new(
             Fence{
-                device: device_provider.clone(),
+                device: self.device_provider().clone(),
                 fence,
             }
         )
     }
 }
 
-impl<D:DeviceSource> FenceStore for Arc<Fence<D>>{
+impl<D:DeviceSource> FenceSource for Arc<Fence<D>>{
     fn fence(&self) -> &vk::Fence {
         &self.fence
     }

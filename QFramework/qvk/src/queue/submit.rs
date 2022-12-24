@@ -4,7 +4,7 @@ use ash::vk;
 
 use crate::command::CommandBufferStore;
 use crate::queue::SubmitInfoStore;
-use crate::sync::SemaphoreStore;
+use crate::sync::SemaphoreSource;
 
 use super::SubmitSet;
 
@@ -37,12 +37,12 @@ impl<C:CommandBufferStore + Clone> SubmitInfoStore<C> for SubmitSet<C>{
         self.live_cmds.push(info.build());
     }
 
-    fn add_wait<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
+    fn add_wait<S:SemaphoreSource>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
         let info = semaphore_provider.submit_info(stage);
         self.wait_semaphores.push(info);
     }
 
-    fn add_signal<S:SemaphoreStore>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
+    fn add_signal<S:SemaphoreSource>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2) {
         let info = semaphore_provider.submit_info(stage);
         self.signal_semaphores.push(info);
     }

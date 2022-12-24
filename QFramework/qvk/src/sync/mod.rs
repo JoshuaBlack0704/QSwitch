@@ -5,8 +5,12 @@ use ash::vk;
 use crate::init::DeviceSource;
 
 pub mod semaphore;
-pub trait SemaphoreFactory<S:SemaphoreStore>{
+pub trait SemaphoreFactory<S:SemaphoreSource>{
     fn create_semaphore(&self) -> S;
+}
+pub trait SemaphoreSource{
+    fn semaphore(&self) -> &vk::Semaphore;
+    fn submit_info(&self, stage: vk::PipelineStageFlags2) -> vk::SemaphoreSubmitInfo;
 }
 pub struct Semaphore<D:DeviceSource>{
     device: D,
@@ -14,8 +18,8 @@ pub struct Semaphore<D:DeviceSource>{
 }
 
 pub mod timelinesemaphore;
-pub trait TimelineSemaphoreFactory<S:SemaphoreStore>{
-    fn create_timeline_semaphore(&self, starting_value: u32) -> S;
+pub trait TimelineSemaphoreFactory<S:SemaphoreSource>{
+    fn create_timeline_semaphore(&self, starting_value: u64) -> S;
 }
 pub struct TimelineSemaphore<D:DeviceSource>{
     device: D,
@@ -24,18 +28,16 @@ pub struct TimelineSemaphore<D:DeviceSource>{
 }
 
 pub mod fence;
+pub trait FenceFactory<F:FenceSource>{
+    fn create_fence(&self, signaled: bool) -> F;
+}
+pub trait FenceSource{
+    fn fence(&self) -> &vk::Fence;
+    fn wait(&self, timeout: Option<u64>);
+    fn reset(&self);
+}
 pub struct Fence<D:DeviceSource>{
     device: D,
     fence: vk::Fence,
 }
 
-pub trait FenceStore{
-    fn fence(&self) -> &vk::Fence;
-    fn wait(&self, timeout: Option<u64>);
-    fn reset(&self);
-}
-
-pub trait SemaphoreStore{
-    fn semaphore(&self) -> &vk::Semaphore;
-    fn submit_info(&self, stage: vk::PipelineStageFlags2) -> vk::SemaphoreSubmitInfo;
-}

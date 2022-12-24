@@ -4,23 +4,23 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::init::{DeviceSource, DeviceSupplier};
-use crate::sync::SemaphoreStore;
+use crate::sync::SemaphoreSource;
 
 use super::{TimelineSemaphore, TimelineSemaphoreFactory};
 
-impl<D:DeviceSource, DS:DeviceSupplier<D>> TimelineSemaphoreFactory<Arc<TimelineSemaphore<D>>> for D{
-    fn create_timeline_semaphore(&self, starting_value: u32) -> Arc<TimelineSemaphore<D>> {
+impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> TimelineSemaphoreFactory<Arc<TimelineSemaphore<D>>> for DS{
+    fn create_timeline_semaphore(&self, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
         let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
         .semaphore_type(vk::SemaphoreType::TIMELINE)
         .initial_value(starting_value);
         let info = vk::SemaphoreCreateInfo::builder()
         .push_next(&mut timeline_ext);
 
-        let semaphore = unsafe{self.device().create_semaphore(&info, None).expect("Could not create semaphore")};
+        let semaphore = unsafe{self.device_provider().device().create_semaphore(&info, None).expect("Could not create semaphore")};
         info!("Created timeline semaphore {:?}", semaphore);
         Arc::new(
-            Self{
-                device: self.clone(),
+            TimelineSemaphore{
+                device: self.device_provider().clone(),
                 semaphore,
                 value: Mutex::new((false, starting_value)),
             }
@@ -30,24 +30,6 @@ impl<D:DeviceSource, DS:DeviceSupplier<D>> TimelineSemaphoreFactory<Arc<Timeline
 
 #[allow(unused)]
 impl<D:DeviceSource + Clone> TimelineSemaphore<D>{
-    pub fn new(device_provider: &D, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
-        let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
-        .semaphore_type(vk::SemaphoreType::TIMELINE)
-        .initial_value(starting_value);
-        let info = vk::SemaphoreCreateInfo::builder()
-        .push_next(&mut timeline_ext);
-
-        let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).expect("Could not create semaphore")};
-        info!("Created timeline semaphore {:?}", semaphore);
-        Arc::new(
-            Self{
-                device: device_provider.clone(),
-                semaphore,
-                value: Mutex::new((false, starting_value)),
-            }
-        )
-    }
-
     fn increment(&self){
         let mut lock = self.value.lock().unwrap();
         let (frozen, mut value) = *lock;
@@ -73,7 +55,7 @@ impl<D:DeviceSource + Clone> TimelineSemaphore<D>{
     }
 }
 
-impl<D:DeviceSource> SemaphoreStore for Arc<TimelineSemaphore<D>>{
+impl<D:DeviceSource> SemaphoreSource for Arc<TimelineSemaphore<D>>{
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
