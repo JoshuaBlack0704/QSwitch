@@ -21,7 +21,7 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone, Img:ImageStore + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
+impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageStore + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
     pub fn new(image_provider: &Img, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
         
         if miplevel > image_provider.mip_levels(){
@@ -94,7 +94,7 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone, Img
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone, Img:ImageStore + DeviceSupplier<D>> ImageSubresourceStore for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageStore + DeviceSupplier<D>> ImageSubresourceStore for Arc<ImageResource<I,D,Img>>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }

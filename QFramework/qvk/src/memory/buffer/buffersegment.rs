@@ -59,7 +59,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:Bu
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D> + Clone, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D> + Clone, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }

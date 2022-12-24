@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 
 use crate::command::CommandBufferStore;
-use crate::queue::SubmitInfoStore;
+use crate::queue::SubmitInfoSource;
 use crate::sync::SemaphoreSource;
 
 use super::SubmitSet;
@@ -21,7 +21,7 @@ impl<C:CommandBufferStore + Clone> SubmitSet<C>{
     }
 }
 
-impl<C:CommandBufferStore + Clone> SubmitInfoStore<C> for SubmitSet<C>{
+impl<C:CommandBufferStore + Clone> SubmitInfoSource<C> for SubmitSet<C>{
     fn info(&self) -> vk::SubmitInfo2 {
       
         vk::SubmitInfo2::builder()

@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{image::{Image, ImageResource}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{memory, Memory}};
+use qvk::{image::{Image, ImageResource}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{memory, Memory}, queue::QueueFactory};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event::{Event, WindowEvent}, event_loop::EventLoop, window::WindowBuilder};
 use qvk::image::ImageStore;
@@ -56,7 +56,7 @@ fn main(){
                 }
             },
             Event::MainEventsCleared => {
-                let queue = qvk::queue::Queue::new(&device, vk::QueueFlags::GRAPHICS).unwrap();                
+                let queue = device.create_queue(vk::QueueFlags::GRAPHICS).unwrap();
                 swapchain.present_image(&resource, &queue);
             }
             _ => {}

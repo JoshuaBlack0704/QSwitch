@@ -52,7 +52,7 @@ pub struct SettingsStore{
     
 }
 
-impl<D:DeviceSource + Clone, M:MemoryStore + Clone> Image<D,M>{
+impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemoryStore + Clone> Image<D,M>{
     pub fn new<S:ImageSettingsStore>(device_provider: &D, memory_provider: &M, settings: &S) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         let extensions = settings.extensions();
@@ -137,7 +137,7 @@ impl<D:DeviceSource + Clone, M:MemoryStore + Clone> Image<D,M>{
     }
 }
 
-impl<D:DeviceSource + Clone, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
+impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemoryStore> ImageStore for Arc<Image<D,M>>{
     fn transition<C:CommandBufferStore>(
         &self, 
         cmd: &C, 

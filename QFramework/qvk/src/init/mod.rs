@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use ash::vk;
 
-use crate::queue::QueueStore;
+use crate::queue::QueueSource;
 use crate::image::{ImageStore, ImageViewStore};
 
 use self::swapchain::SwapchainSettingsStore;
@@ -64,7 +64,7 @@ pub struct PhysicalDeviceData{
 }
 
 pub mod swapchain;
-pub struct Swapchain<I:InstanceSource, D: DeviceSource, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueStore>{
+pub struct Swapchain<I:InstanceSource, D: DeviceSource, S: SwapchainSettingsStore, Img:ImageStore, ImgV: ImageViewStore, Q:QueueSource>{
     _instance: I,
     device: D,
     _settings: S,

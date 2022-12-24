@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{init::DeviceSource, queue::{Queue, QueueOps, SubmitSet, SubmitInfoStore}};
+use crate::{init::{DeviceSource, DeviceSupplier}, queue::{QueueOps, SubmitSet, SubmitInfoSource, QueueFactory}};
 
 use super::{Executor, commandpool, CommandPool, commandset, CommandSet, CommandBufferFactory, CommandBuffer, CommandBufferStore, CommandPoolOps};
 
-impl<D:DeviceSource + Clone> Executor<D>{
+impl<D:DeviceSource + Clone + DeviceSupplier<D>> Executor<D>{
     pub fn new(device_provider: &D, queue_flags: vk::QueueFlags) -> Arc<Executor<D>> {
         let index = device_provider.get_queue(queue_flags).unwrap().1;
         let settings = commandpool::SettingsStore::new(index);
@@ -15,7 +15,7 @@ impl<D:DeviceSource + Clone> Executor<D>{
         settings.batch_size = 1;
         let bset = CommandSet::new(&settings, device_provider, &pool);
 
-        let queue = Queue::new(device_provider, queue_flags).unwrap();
+        let queue = device_provider.create_queue(queue_flags).unwrap();
 
         Arc::new(
             Self{
@@ -46,11 +46,11 @@ impl<D:DeviceSource> CommandPoolOps for Executor<D>{
 }
 
 impl<D:DeviceSource + Clone> QueueOps for Executor<D>{
-    fn submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoStore<C>, F:crate::sync::FenceSource>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result> {
+    fn submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoSource<C>, F:crate::sync::FenceSource>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result> {
         self.queue.submit(submits, fence)
     }
 
-    fn wait_submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
+    fn wait_submit<C:CommandBufferStore + Clone, S:crate::queue::SubmitInfoSource<C>>(&self, submits: &[S]) -> Result<(), vk::Result> {
         self.queue.wait_submit(submits)
     }
 

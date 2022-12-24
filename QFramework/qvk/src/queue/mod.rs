@@ -7,7 +7,7 @@ use crate::sync::FenceSource;
 use crate::sync::SemaphoreSource;
 
 pub mod submit;
-pub trait SubmitInfoStore<C:CommandBufferStore + Clone>{
+pub trait SubmitInfoSource<C:CommandBufferStore + Clone>{
     fn info(&self) -> vk::SubmitInfo2;
     fn add_cmd(&mut self, cmd: &C);
     fn add_wait<S:SemaphoreSource>(&mut self, semaphore_provider: &Arc<S>, stage: vk::PipelineStageFlags2);
@@ -22,13 +22,16 @@ pub struct SubmitSet<C:CommandBufferStore + Clone>{
 
 
 pub mod queue;
-pub trait QueueStore{
+pub trait QueueFactory<Q:QueueSource>{
+    fn create_queue(&self, flags: vk::QueueFlags) -> Option<Q>;
+}
+pub trait QueueSource{
     fn queue(&self) -> &vk::Queue;
 }
 pub trait QueueOps{
-    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>, F:FenceSource>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result>;
+    fn submit<C:CommandBufferStore + Clone, S:SubmitInfoSource<C>, F:FenceSource>(&self, submits: &[S], fence: Option<&F>) -> Result<(), vk::Result>;
     ///Will create an internal fence to wait on the operation
-    fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoStore<C>>(&self, submits: &[S]) -> Result<(), vk::Result>;
+    fn wait_submit<C:CommandBufferStore + Clone, S:SubmitInfoSource<C>>(&self, submits: &[S]) -> Result<(), vk::Result>;
     fn wait_idle(&self);
 }
 pub struct Queue<D:DeviceSource>{
