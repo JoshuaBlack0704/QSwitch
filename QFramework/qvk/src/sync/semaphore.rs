@@ -6,20 +6,21 @@ use log::{debug, info};
 use crate::init::{DeviceSource, DeviceSupplier};
 use crate::sync::SemaphoreStore;
 
-use super::Semaphore;
+use super::{Semaphore, SemaphoreFactory};
 
-impl<D:DeviceSource + Clone> Semaphore<D>{
-    pub fn new(device_provider: &D) -> Arc<Semaphore<D>>{
+impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> SemaphoreFactory<Arc<Semaphore<D>>> for DS{
+    fn create_semaphore(&self) -> Arc<Semaphore<D>> {
+        let device_source = self.device_provider();
         let info = vk::SemaphoreCreateInfo::builder();
-        let semaphore = unsafe{device_provider.device().create_semaphore(&info, None).unwrap()};
+        let semaphore = unsafe{device_source.device().create_semaphore(&info, None).unwrap()};
         info!("Created semaphore {:?}", semaphore);
         Arc::new(Semaphore{
-            device: device_provider.clone(),
+            device: device_source.clone(),
             semaphore,
         })
     }
 }
-
+ 
 impl<D:DeviceSource> Drop for Semaphore<D>{
     fn drop(&mut self) {
         debug!("Destroyed semaphore {:?}", self.semaphore);

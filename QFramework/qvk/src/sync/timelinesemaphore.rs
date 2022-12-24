@@ -3,10 +3,30 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::DeviceSource;
+use crate::init::{DeviceSource, DeviceSupplier};
 use crate::sync::SemaphoreStore;
 
-use super::TimelineSemaphore;
+use super::{TimelineSemaphore, TimelineSemaphoreFactory};
+
+impl<D:DeviceSource, DS:DeviceSupplier<D>> TimelineSemaphoreFactory<Arc<TimelineSemaphore<D>>> for D{
+    fn create_timeline_semaphore(&self, starting_value: u32) -> Arc<TimelineSemaphore<D>> {
+        let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
+        .semaphore_type(vk::SemaphoreType::TIMELINE)
+        .initial_value(starting_value);
+        let info = vk::SemaphoreCreateInfo::builder()
+        .push_next(&mut timeline_ext);
+
+        let semaphore = unsafe{self.device().create_semaphore(&info, None).expect("Could not create semaphore")};
+        info!("Created timeline semaphore {:?}", semaphore);
+        Arc::new(
+            Self{
+                device: self.clone(),
+                semaphore,
+                value: Mutex::new((false, starting_value)),
+            }
+        )
+    }
+}
 
 #[allow(unused)]
 impl<D:DeviceSource + Clone> TimelineSemaphore<D>{

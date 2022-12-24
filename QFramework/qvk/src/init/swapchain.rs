@@ -3,13 +3,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{Image, ImageResource, ImageView}, memory::{Memory, PartitionSystem}, queue::{Queue, QueueOps}, sync::{self, Semaphore}};
-use crate::image::{ImageStore, ImageSubresourceStore, ImageViewStore, InternalImageStore};
-use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
-use crate::queue::QueueStore;
-use crate::sync::{FenceStore, SemaphoreStore};
+use crate::{image::{ImageStore, ImageSubresourceStore, InternalImageStore, Image, ImageView, ImageResource, ImageViewStore}, sync::{SemaphoreStore, FenceStore, self}, queue::{QueueOps, Queue, QueueStore}, memory::{Memory, PartitionSystem}};
+use crate::sync::SemaphoreFactory;
 
-use super::Swapchain;
+use super::{Swapchain, InstanceSource, DeviceSource, InstanceSupplier, DeviceSupplier};
 
 pub trait SwapchainSettingsStore{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
@@ -210,7 +207,7 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone, S:
 
 }
 
-impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
+impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
     fn present<Sem:SemaphoreStore> (&self, next_image: u32, waits: Option<&[&Sem]>) {
 
         
@@ -297,7 +294,7 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone, S:
         // let semaphore:S
         let images = self.images();
         
-        let aquire = Semaphore::new(self.device_provider());
+        let aquire = self.device_provider().create_semaphore();
         let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
         let dst = &images[dst_index as usize];
 

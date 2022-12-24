@@ -5,12 +5,18 @@ use ash::vk;
 use crate::init::DeviceSource;
 
 pub mod semaphore;
+pub trait SemaphoreFactory<S:SemaphoreStore>{
+    fn create_semaphore(&self) -> S;
+}
 pub struct Semaphore<D:DeviceSource>{
     device: D,
     semaphore: vk::Semaphore,
 }
 
 pub mod timelinesemaphore;
+pub trait TimelineSemaphoreFactory<S:SemaphoreStore>{
+    fn create_timeline_semaphore(&self, starting_value: u32) -> S;
+}
 pub struct TimelineSemaphore<D:DeviceSource>{
     device: D,
     semaphore: vk::Semaphore,
