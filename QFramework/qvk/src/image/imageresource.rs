@@ -4,11 +4,11 @@ use image::{self, EncodableLayout};
 
 use ash::vk;
 
-use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{BufferSegment, BufferFactory}, MemoryFactory},  image::ImageResource};
+use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{BufferFactory, BufferSegmentSource}, MemoryFactory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
-use crate::memory::buffer::{BufferSegmentStore, BufferSource, BufferSupplier};
+use crate::memory::buffer::{BufferSource, BufferSupplier, BufferSegmentFactory};
 
 
 #[derive(Clone, Debug)]
@@ -79,9 +79,9 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
         
         let host_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index(), None).unwrap();
         let buf = host_mem.create_buffer(bytes.len() as u64 * 2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-        let part = BufferSegment::new(&buf, bytes.len() as u64, None).unwrap();
-        part.copy_from_ram(&bytes).unwrap();
-        part.copy_to_image_internal(&resource, None).unwrap();
+        let seg = buf.create_segment(bytes.len() as u64, None).unwrap();
+        seg.copy_from_ram(&bytes).unwrap();
+        seg.copy_to_image_internal(&resource, None).unwrap();
 
         image.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
         resource.blit_to_image_internal(tgt, vk::Filter::LINEAR).unwrap();

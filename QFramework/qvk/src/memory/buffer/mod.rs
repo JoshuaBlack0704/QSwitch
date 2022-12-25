@@ -44,7 +44,10 @@ pub struct Buffer<D: DeviceSource, M: MemorySource, P: PartitionSource>{
 }
 
 pub mod buffersegment;
-pub trait BufferSegmentStore{
+pub trait BufferSegmentFactory<BSeg: BufferSegmentSource>{
+    fn create_segment(&self, size: u64, alignment: Option<u64>) -> Result<BSeg, PartitionError>;
+}
+pub trait BufferSegmentSource{
     fn get_partition(&self) -> &Partition;
     fn device_addr(&self) -> vk::DeviceSize;
     fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
@@ -53,10 +56,9 @@ pub trait BufferSegmentStore{
     ///Addressing is (bufferRowLength, bufferImageHeight)
     fn copy_to_image_internal<I:ImageStore, IS: InternalImageStore<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
-pub struct BufferSegment<I:InstanceSource, D: DeviceSource + InstanceSupplier<I>, M:MemorySource, B: BufferSource + MemorySupplier<M> + DeviceSupplier<D>, P:PartitionSource>{
+pub struct BufferSegment<I:InstanceSource, D: DeviceSource + InstanceSupplier<I>, M:MemorySource, B: BufferSource + MemorySupplier<M> + DeviceSupplier<D>>{
 
     buffer: B,
-    _partition_sys: Mutex<P>,
     partition: Partition,
     desc_buffer_info: [vk::DescriptorBufferInfo;1],
     _device_addr: Option<vk::DeviceAddress>,

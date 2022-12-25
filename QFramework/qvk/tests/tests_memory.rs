@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{init::{instance, device, DeviceSource, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegment, BufferSegmentStore, BufferFactory}, MemoryFactory}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
+use qvk::{init::{instance, device, DeviceSource, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegmentSource, BufferFactory, BufferSegmentFactory}, MemoryFactory}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
 
 #[test]
 fn buffer_image(){
@@ -24,8 +24,8 @@ fn buffer_image(){
     let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image_extent).unwrap();
     
     let s1 = host_mem.create_buffer(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let src = BufferSegment::new(&s1, size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
-    let dst = BufferSegment::new(&s1, size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
+    let src = s1.create_segment(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
+    let dst = s1.create_segment(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
 
     let data = vec![0x0000ffff; (image_extent.width * image_extent.height) as usize];
     let mut res = vec![0u32; (image_extent.width * image_extent.height) as usize];
@@ -54,7 +54,7 @@ fn buffer_ram(){
     let host_mem = device.create_memory(1024, device.host_memory_index(), None).unwrap();
 
     let storage = host_mem.create_buffer(1024, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let storge_access = BufferSegment::new(&storage, 200, None).unwrap();
+    let storge_access = storage.create_segment(200, None).unwrap();
 
     let data = [20u8; 200];
     let mut dst = [0u8; 200];
@@ -81,11 +81,11 @@ fn buffer_buffer(){
     let dev_mem = device.create_memory(1024, device.device_memory_index(), None).unwrap();
 
     let s1 = host_mem.create_buffer(200, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let src = BufferSegment::new(&s1, 200, None).unwrap();
+    let src = s1.create_segment(200, None).unwrap();
     let s2 = dev_mem.create_buffer(200, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let dst = BufferSegment::new(&s2, 200, None).unwrap();
+    let dst = s2.create_segment(200, None).unwrap();
     let s3 = host_mem.create_buffer(200, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let fin = BufferSegment::new(&s3, 200, None).unwrap();
+    let fin = s3.create_segment(200, None).unwrap();
 
     let data = [20u8; 200];
     let mut res = [0u8; 200];
@@ -128,8 +128,8 @@ fn image_image(){
     let resource2 = ImageResource::new(&image2, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image_extent).unwrap();
     
     let s1 = host_mem.create_buffer(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let src = BufferSegment::new(&s1, size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
-    let dst = BufferSegment::new(&s1, size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
+    let src = s1.create_segment(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
+    let dst = s1.create_segment(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64, None).unwrap();
 
     let data = vec![0x0000ffff; (image_extent.width * image_extent.height) as usize];
     let mut res = vec![0u32; (image_extent.width * image_extent.height) as usize];

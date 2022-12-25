@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegment, BufferSegmentStore, BufferFactory}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
+use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegmentSource, BufferFactory, BufferSegmentFactory}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use qvk::descriptor::SetFactory;
 
@@ -23,10 +23,10 @@ fn main(){
     let data = [src.len() as u32];
 
     let storage = host_mem.create_buffer(1024 * 1024, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let storage_access = BufferSegment::new(&storage, (size_of::<u32>() * src.len()) as u64, None).unwrap();
+    let storage_access = storage.create_segment((size_of::<u32>() * src.len()) as u64, None).unwrap();
     storage_access.copy_from_ram(&src).unwrap();
     let uniform = host_mem.create_buffer(1024, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
-    let uniform_access = BufferSegment::new(&uniform, 10, None).unwrap();
+    let uniform_access = uniform.create_segment(10, None).unwrap();
     uniform_access.copy_from_ram(&data).unwrap();
 
     let dlayout = device.create_descriptor_layout(None);

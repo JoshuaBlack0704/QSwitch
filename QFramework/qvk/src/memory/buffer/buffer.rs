@@ -7,7 +7,7 @@ use crate::{init::{DeviceSource, DeviceSupplier}, memory::{Partition, partitions
 use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
 use crate::memory::buffer::BufferSource;
 
-use super::{Buffer, BufferFactory};
+use super::{Buffer, BufferFactory, BufferSupplier};
 
 
 pub trait BufferSettingsStore{
@@ -45,7 +45,7 @@ pub struct SettingsStore{
     pub share: Option<Vec<u32>>,
 }
 
-impl<D:DeviceSource + Clone, M:MemorySource + Clone, MS:MemorySupplier<M> + DeviceSupplier<D>> BufferFactory<Arc<Buffer<D,M,PartitionSystem>>> for MS{
+impl<D:DeviceSource + Clone , M:MemorySource + Clone, MS:MemorySupplier<M> + DeviceSupplier<D>> BufferFactory<Arc<Buffer<D,M,PartitionSystem>>> for MS{
     fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags, flags: Option<vk::BufferCreateFlags>, extensions: Option<*const c_void>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError> {
         // First we need to create the buffer
         let mut info = vk::BufferCreateInfo::builder();
@@ -202,5 +202,11 @@ impl<D:DeviceSource, P:PartitionSource, M:MemorySource> DeviceSupplier<D> for Ar
 impl<D:DeviceSource, P:PartitionSource, M:MemorySource> MemorySupplier<M> for Arc<Buffer<D,M,P>>{
     fn memory_source(&self) -> &M {
         &self.memory
+    }
+}
+
+impl <D:DeviceSource, M:MemorySource, P:PartitionSource> BufferSupplier<Self> for Arc<Buffer<D,M,P>>{
+    fn buffer_provider(&self) -> &Self {
+        self
     }
 }

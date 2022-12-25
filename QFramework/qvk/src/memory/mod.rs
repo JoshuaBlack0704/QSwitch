@@ -23,15 +23,15 @@ pub struct PartitionSystem{
 }
 
 pub mod memory;
+pub trait MemoryFactory<M:MemorySource>{
+    fn create_memory(&self, size: u64, type_index: u32, extensions: Option<*const c_void>) -> Result<M, vk::Result>;
+}
 pub trait MemorySource{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
     fn memory(&self) -> &vk::DeviceMemory;
 }
 pub trait MemorySupplier<M:MemorySource>{
     fn memory_source(&self) -> &M;
-}
-pub trait MemoryFactory<M:MemorySource>{
-    fn create_memory(&self, size: u64, type_index: u32, extensions: Option<*const c_void>) -> Result<M, vk::Result>;
 }
 pub struct Memory<D: DeviceSource, P: PartitionSource>{
     device: D,
