@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{init::{instance, device, DeviceSource, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegmentSource, BufferFactory, BufferSegmentFactory}, MemoryFactory}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
+use qvk::{init::{instance, device, DeviceSource, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegmentSource, BufferFactory, BufferSegmentFactory}, MemoryFactory}, image::{ImageResource, ImageSource, ImageResourceSource, ImageFactory}};
 
 #[test]
 fn buffer_image(){
@@ -19,8 +19,8 @@ fn buffer_image(){
 
     let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
-    let image_settings = image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-    let image = Image::new(&device, &dev_mem, &image_settings).unwrap();
+    let image = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image_extent).unwrap();
     
     let s1 = host_mem.create_buffer(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
@@ -117,14 +117,14 @@ fn image_image(){
 
     let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
-    let image_settings = image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-    let image1 = Image::new(&device, &dev_mem, &image_settings).unwrap();
+    let image1 = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    image1.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource1 = ImageResource::new(&image1, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image_extent).unwrap();
     
     let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
-    let image_settings = image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-    let image2 = Image::new(&device, &dev_mem, &image_settings).unwrap();
+    let image2 = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    image2.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource2 = ImageResource::new(&image2, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image_extent).unwrap();
     
     let s1 = host_mem.create_buffer(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();

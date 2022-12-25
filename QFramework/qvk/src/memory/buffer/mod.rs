@@ -3,7 +3,7 @@ use std::{marker::PhantomData, sync::Mutex};
 
 use ash::vk;
 use crate::command::{ImageCopyFactory, BufferCopyFactory};
-use crate::image::{ImageStore, InternalImageStore};
+use crate::image::{ImageSource, ImageSupplier};
 
 use crate::init::{DeviceSource, InstanceSupplier, InstanceSource, DeviceSupplier};
 use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
@@ -54,7 +54,7 @@ pub trait BufferSegmentSource{
     fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
     fn copy_to_segment_internal<B:BufferSource, BP:BufferCopyFactory + BufferSupplier<B>>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image_internal<I:ImageStore, IS: InternalImageStore<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    fn copy_to_image_internal<I:ImageSource, IS: ImageSupplier<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
 pub struct BufferSegment<I:InstanceSource, D: DeviceSource + InstanceSupplier<I>, M:MemorySource, B: BufferSource + MemorySupplier<M> + DeviceSupplier<D>>{
 

@@ -6,9 +6,11 @@ use ash::vk;
 
 use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{BufferFactory, BufferSegmentSource}, MemoryFactory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
-use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
+use crate::image::{ImageSource, ImageResourceSource, ImageSupplier};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferSource, BufferSupplier, BufferSegmentFactory};
+
+use super::ImageFactory;
 
 
 #[derive(Clone, Debug)]
@@ -21,7 +23,7 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageStore + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
+impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
     pub fn new(image_provider: &Img, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
         
         if miplevel > image_provider.mip_levels(){
@@ -73,8 +75,8 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
         let image_extent = vk::Extent3D::builder().width(image.width()).height(image.height()).depth(1).build();
 
         let dev_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().device_memory_index(), None).unwrap();
-        let image_settings = crate::image::image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-        let image = crate::image::Image::new(tgt.image.device_provider(), &dev_mem, &image_settings).unwrap();
+        let image = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+        image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
         let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
         
         let host_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index(), None).unwrap();
@@ -91,7 +93,7 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageStore + DeviceSupplier<D>> ImageSubresourceStore for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D>> ImageResourceSource for Arc<ImageResource<I,D,Img>>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }
@@ -121,7 +123,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         Ok(())
     }
 
-    fn copy_to_image_internal<ImgExt:ImageStore, IR:ImageCopyFactory + InternalImageStore<ImgExt>>(&self, dst: &IR) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_image_internal<ImgExt:ImageSource, IR:ImageCopyFactory + ImageSupplier<ImgExt>>(&self, dst: &IR) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -152,7 +154,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         Ok(())
     }
 
-    fn blit_to_image_internal<ImgExt:ImageStore, IR:ImageCopyFactory + InternalImageStore<ImgExt>>(&self, dst: &IR, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
+    fn blit_to_image_internal<ImgExt:ImageSource, IR:ImageCopyFactory + ImageSupplier<ImgExt>>(&self, dst: &IR, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError> {
         if self.extent.width == 0{
             return Ok(());
         }
@@ -186,7 +188,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
 
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageStore + DeviceSupplier<D>> ImageCopyFactory for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>> ImageCopyFactory for Arc<ImageResource<I,D,Img>>{
     fn extent(&self) -> vk::Extent3D {
         self.extent
     }
@@ -204,7 +206,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageStore + De
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageStore + DeviceSupplier<D>> InternalImageStore<Img> for Arc<ImageResource<I,D,Img>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>> ImageSupplier<Img> for Arc<ImageResource<I,D,Img>>{
     fn image_provider(&self) -> &Img {
         &self.image
     }

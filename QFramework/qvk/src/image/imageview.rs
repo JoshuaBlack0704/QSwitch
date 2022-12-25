@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::image::{ImageStore, ImageViewStore};
+use crate::image::{ImageSource, ImageViewSource};
 use crate::init::DeviceSource;
 
 use super::ImageView;
 
-impl<D:DeviceSource, I:ImageStore> ImageViewStore for Arc<ImageView<D,I>>{
+impl<D:DeviceSource, I:ImageSource> ImageViewSource for Arc<ImageView<D,I>>{
     
 }

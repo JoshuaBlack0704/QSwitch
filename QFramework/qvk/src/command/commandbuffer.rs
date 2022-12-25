@@ -86,7 +86,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         Ok(())
     }
 
-    fn buffer_image_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageStore, IR: super::ImageCopyFactory + crate::image::InternalImageStore<I>>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
+    fn buffer_image_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageSource, IR: super::ImageCopyFactory + crate::image::ImageSupplier<I>>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
         if dst.extent().width == 0{
             return Ok(());
         }
@@ -127,7 +127,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         Ok(())
     }
 
-    fn image_copy<I1: crate::image::ImageStore, I2: crate::image::ImageStore, IR1: super::ImageCopyFactory + crate::image::InternalImageStore<I1>, IR2: super::ImageCopyFactory + crate::image::InternalImageStore<I2>>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError> {
+    fn image_copy<I1: crate::image::ImageSource, I2: crate::image::ImageSource, IR1: super::ImageCopyFactory + crate::image::ImageSupplier<I1>, IR2: super::ImageCopyFactory + crate::image::ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError> {
         if src.extent().width == 0{
             return Ok(());
         }
@@ -169,7 +169,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         Ok(())
     }
 
-    fn image_blit<I1: crate::image::ImageStore, I2: crate::image::ImageStore, IR1: super::ImageCopyFactory + crate::image::InternalImageStore<I1>, IR2: super::ImageCopyFactory + crate::image::InternalImageStore<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError> {
+    fn image_blit<I1: crate::image::ImageSource, I2: crate::image::ImageSource, IR1: super::ImageCopyFactory + crate::image::ImageSupplier<I1>, IR2: super::ImageCopyFactory + crate::image::ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError> {
         if src.extent().width == 0{
             return Ok(());
         }
@@ -215,7 +215,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         Ok(())
     }
 
-    fn image_buffer_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageStore, IR: super::ImageCopyFactory + crate::image::InternalImageStore<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
+    fn image_buffer_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageSource, IR: super::ImageCopyFactory + crate::image::ImageSupplier<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
         let buffer_offset = dst.offset();
         let mut addressing = (0,0);
         if let Some(a) = buffer_addressing{

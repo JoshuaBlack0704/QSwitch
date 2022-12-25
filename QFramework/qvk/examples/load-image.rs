@@ -1,8 +1,8 @@
 use ash::vk;
-use qvk::{image::{Image, ImageResource}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{MemoryFactory}, queue::QueueFactory};
+use qvk::{image::{ImageResource, ImageFactory}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{MemoryFactory}, queue::QueueFactory};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event::{Event, WindowEvent}, event_loop::EventLoop, window::WindowBuilder};
-use qvk::image::ImageStore;
+use qvk::image::ImageSource;
 use qvk::init::DeviceSource;
 
 fn main(){
@@ -27,8 +27,8 @@ fn main(){
    
     let dev_mem = device.create_memory(1024 * 1024 * 100, device.device_memory_index(), None).unwrap();
 
-    let image_settings = qvk::image::image::SettingsStore::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
-    let image = Image::new(&device, &dev_mem, &image_settings).unwrap();
+    let image = dev_mem.create_image(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
     let file = String::from("examples/resources/drone.jpg");
     ImageResource::load_image(&resource, &file);

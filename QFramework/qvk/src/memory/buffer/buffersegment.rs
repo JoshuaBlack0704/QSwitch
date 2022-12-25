@@ -6,7 +6,7 @@ use log::{debug, info};
 use crate::{command::{CommandBufferSource,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceSource, InstanceSource, InstanceSupplier, DeviceSupplier}, memory::{buffer::buffer::BufferAlignmentType, Partition, partitionsystem::PartitionError}, descriptor::{WriteSource, ApplyWriteFactory}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
-use crate::image::{ImageStore, InternalImageStore};
+use crate::image::{ImageSource, ImageSupplier};
 use crate::memory::{MemorySupplier, MemorySource};
 use crate::memory::buffer::{BufferSegmentSource, BufferSource, BufferSupplier};
 
@@ -135,7 +135,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         Ok(())
     }
 
-    fn copy_to_image_internal<Img:ImageStore, IS: InternalImageStore<Img> + ImageCopyFactory>(&self, dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+    fn copy_to_image_internal<Img:ImageSource, IS: ImageSupplier<Img> + ImageCopyFactory>(&self, dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
         let exe = Executor::new(self.buffer.device_provider(), vk::QueueFlags::TRANSFER);
         
         let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
