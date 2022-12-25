@@ -1,13 +1,13 @@
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, ffi::c_void};
 
 use ash::vk;
 use log::{debug, info};
 
 use crate::{init::{DeviceSource, DeviceSupplier}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
 use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
-use crate::memory::buffer::BufferStore;
+use crate::memory::buffer::BufferSource;
 
-use super::Buffer;
+use super::{Buffer, BufferFactory};
 
 
 pub trait BufferSettingsStore{
@@ -45,31 +45,26 @@ pub struct SettingsStore{
     pub share: Option<Vec<u32>>,
 }
 
-impl<D:DeviceSource + Clone, M:MemorySource + Clone> Buffer<D,M,PartitionSystem>{
-    pub fn new<S:BufferSettingsStore>(settings: &S, device_provider: &D, memory_provider: &M) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
+impl<D:DeviceSource + Clone, M:MemorySource + Clone, MS:MemorySupplier<M> + DeviceSupplier<D>> BufferFactory<Arc<Buffer<D,M,PartitionSystem>>> for MS{
+    fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags, flags: Option<vk::BufferCreateFlags>, extensions: Option<*const c_void>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError> {
         // First we need to create the buffer
         let mut info = vk::BufferCreateInfo::builder();
-        let mut extensions = settings.extensions();
-        if let Some(extensions) = &mut extensions{
-            for ext in extensions.iter_mut(){
-                match ext {
-                    _ => todo!()
-                };
-            }
+        if let Some(ptr) = extensions{
+           info.p_next = ptr; 
         }
-        if let Some(flags) = settings.flags(){
+        if let Some(flags) = flags{
             info = info.flags(flags);
         }
-        info = info.size(settings.size());
-        info = info.usage(settings.usage());
+        info = info.size(size);
+        info = info.usage(usage);
         info = info.sharing_mode(vk::SharingMode::EXCLUSIVE);
-        let share = settings.share();
-        if let Some(indecies) = &share{
+        let indices = self.share();
+        if let Some(indices) = &indices{
             info = info.sharing_mode(vk::SharingMode::CONCURRENT);
-            info = info.queue_family_indices(&indecies);
+            info = info.queue_family_indices(&indices);
         }
         
-        let device = device_provider.device();
+        let device = self.device_provider().device();
         let buffer = unsafe{device.create_buffer(&info, None)};
         
         if let Err(e) = buffer{
@@ -78,37 +73,37 @@ impl<D:DeviceSource + Clone, M:MemorySource + Clone> Buffer<D,M,PartitionSystem>
         
         let buffer = buffer.unwrap();
         let reqs:vk::MemoryRequirements = unsafe{device.get_buffer_memory_requirements(buffer)};
-        let memory_partition = memory_provider.partition(reqs.size, Some(reqs.alignment));
+        let memory_partition = self.memory_source().partition(reqs.size, Some(reqs.alignment));
             
         if let Err(e) = memory_partition{
             return Err(BufferCreateError::ParitionError(e));
         }
         let memory_partition = memory_partition.unwrap();
         let offset = memory_partition.offset();
-        info!("Created buffer {:?} of size {:?} on memory {:?} at offset {:?}", buffer, settings.size(), *memory_provider.memory(), offset);
+        info!("Created buffer {:?} of size {:?} on memory {:?} at offset {:?}", buffer, size, *self.memory_source().memory(), offset);
         
         // Now that we have a suitable memory partition we need to bind our buffer
-        let result = unsafe{device.bind_buffer_memory(buffer, *memory_provider.memory(), offset)};
+        let result = unsafe{device.bind_buffer_memory(buffer, *self.memory_source().memory(), offset)};
         if let Err(e) = result {
             return Err(BufferCreateError::VulkanResult(e));
         }
 
         let mut alignment = BufferAlignmentType::Free;
-        if settings.usage().contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-            alignment = BufferAlignmentType::Aligned(device_provider.physical_device().properties.limits.min_storage_buffer_offset_alignment);
+        if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
+            alignment = BufferAlignmentType::Aligned(self.device_provider().physical_device().properties.limits.min_storage_buffer_offset_alignment);
         }
-        else if settings.usage().contains(vk::BufferUsageFlags::UNIFORM_BUFFER){
-            alignment = BufferAlignmentType::Aligned(device_provider.physical_device().properties.limits.min_uniform_buffer_offset_alignment);
+        else if usage.contains(vk::BufferUsageFlags::UNIFORM_BUFFER){
+            alignment = BufferAlignmentType::Aligned(self.device_provider().physical_device().properties.limits.min_uniform_buffer_offset_alignment);
         }
-        else if settings.usage().contains(vk::BufferUsageFlags::UNIFORM_TEXEL_BUFFER){
-            alignment = BufferAlignmentType::Aligned(device_provider.physical_device().properties.limits.min_texel_buffer_offset_alignment);
+        else if usage.contains(vk::BufferUsageFlags::UNIFORM_TEXEL_BUFFER){
+            alignment = BufferAlignmentType::Aligned(self.device_provider().physical_device().properties.limits.min_texel_buffer_offset_alignment);
         }
         
         Ok(Arc::new(Buffer{
-            device: device_provider.clone(),
-            memory: memory_provider.clone(),
+            device: self.device_provider().clone(),
+            memory: self.memory_source().clone(),
             memory_partition,
-            partition_sys: Mutex::new(PartitionSystem::new(settings.size())),
+            partition_sys: Mutex::new(PartitionSystem::new(size)),
             buffer,
             alignment_type: alignment,
             info: info.build(),
@@ -116,7 +111,7 @@ impl<D:DeviceSource + Clone, M:MemorySource + Clone> Buffer<D,M,PartitionSystem>
     }
 }
 
-impl<D:DeviceSource, M:MemorySource, P:PartitionSource> BufferStore for Arc<Buffer<D,M,P>>{
+impl<D:DeviceSource, M:MemorySource, P:PartitionSource> BufferSource for Arc<Buffer<D,M,P>>{
 
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer

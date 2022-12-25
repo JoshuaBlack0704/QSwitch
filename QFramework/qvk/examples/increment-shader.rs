@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
+use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegment, BufferSegmentStore, BufferFactory}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use qvk::descriptor::SetFactory;
 
@@ -22,12 +22,10 @@ fn main(){
     let mut dst = [10u32;100];
     let data = [src.len() as u32];
 
-    let settings = buffer::SettingsStore::new(1024 * 1024, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
-    let storage = Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
+    let storage = host_mem.create_buffer(1024 * 1024, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
     let storage_access = BufferSegment::new(&storage, (size_of::<u32>() * src.len()) as u64, None).unwrap();
     storage_access.copy_from_ram(&src).unwrap();
-    let settings = buffer::SettingsStore::new(1024, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
-    let uniform = Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
+    let uniform = host_mem.create_buffer(1024, vk::BufferUsageFlags::UNIFORM_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
     let uniform_access = BufferSegment::new(&uniform, 10, None).unwrap();
     uniform_access.copy_from_ram(&data).unwrap();
 

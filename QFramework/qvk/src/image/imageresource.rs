@@ -4,11 +4,11 @@ use image::{self, EncodableLayout};
 
 use ash::vk;
 
-use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, MemoryFactory},  image::ImageResource};
+use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{BufferSegment, BufferFactory}, MemoryFactory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
-use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
+use crate::memory::buffer::{BufferSegmentStore, BufferSource, BufferSupplier};
 
 
 #[derive(Clone, Debug)]
@@ -78,8 +78,7 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
         let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
         
         let host_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index(), None).unwrap();
-        let settings = buffer::SettingsStore::new(bytes.len() as u64 * 2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
-        let buf = Buffer::new(&settings, tgt.image.device_provider(), &host_mem).expect("Could not bind buffer");
+        let buf = host_mem.create_buffer(bytes.len() as u64 * 2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
         let part = BufferSegment::new(&buf, bytes.len() as u64, None).unwrap();
         part.copy_from_ram(&bytes).unwrap();
         part.copy_to_image_internal(&resource, None).unwrap();
@@ -109,7 +108,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         self.layout.lock().unwrap()
     }
 
-    fn copy_to_buffer_internal<B:BufferStore, BP:BufferCopyFactory + InternalBufferStore<B>>(&self, dst: &BP, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
+    fn copy_to_buffer_internal<B:BufferSource, BP:BufferCopyFactory + BufferSupplier<B>>(&self, dst: &BP, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError> {
         
         let exe = Executor::new(self.image.device_provider(), vk::QueueFlags::GRAPHICS);
         

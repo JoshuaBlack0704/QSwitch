@@ -6,7 +6,7 @@ use log::{debug, info};
 use crate::init::{DeviceSource, DeviceSupplier};
 use crate::memory::{MemorySource, PartitionSource};
 
-use super::{Memory, Partition, partitionsystem, PartitionSystem, MemoryFactory};
+use super::{Memory, Partition, partitionsystem, PartitionSystem, MemoryFactory, MemorySupplier};
 
 impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> MemoryFactory<Arc<Memory<D, PartitionSystem>>> for DS{
     fn create_memory(&self, size: u64, type_index: u32, extensions: Option<*const c_void>) -> Result<Arc<Memory<D, PartitionSystem>>, vk::Result> {
@@ -64,8 +64,14 @@ impl<D: DeviceSource, P: PartitionSource> Drop for Memory<D,P>{
     }
 }
 
-impl<D:DeviceSource, P:PartitionSource> DeviceSupplier<D> for Memory<D,P>{
+impl<D:DeviceSource, P:PartitionSource> DeviceSupplier<D> for Arc<Memory<D,P>>{
     fn device_provider(&self) -> &D {
         &self.device
+    }
+}
+
+impl<D:DeviceSource, P:PartitionSource> MemorySupplier<Self> for Arc<Memory<D,P>>{
+    fn memory_source(&self) -> &Self {
+        self
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use ash::vk;
 use log::debug;
 
-use crate::{init::DeviceSource, memory::buffer::InternalBufferStore};
+use crate::{init::DeviceSource, memory::buffer::BufferSupplier};
 
 use super::{CommandBuffer, CommandBufferSource, BindPipelineFactory, BindSetFactory, CommandOpError};
 
@@ -66,7 +66,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
     }
 
 
-    fn buffer_copy<B1:crate::memory::buffer::BufferStore, B2:crate::memory::buffer::BufferStore, BP1: super::BufferCopyFactory + InternalBufferStore<B1>, BP2: super::BufferCopyFactory + InternalBufferStore<B2>>(&self, src: &BP1, dst: &BP2) -> Result<(), CommandOpError> {
+    fn buffer_copy<B1:crate::memory::buffer::BufferSource, B2:crate::memory::buffer::BufferSource, BP1: super::BufferCopyFactory + BufferSupplier<B1>, BP2: super::BufferCopyFactory + BufferSupplier<B2>>(&self, src: &BP1, dst: &BP2) -> Result<(), CommandOpError> {
         
         if src.size() > dst.size(){
             return Err(CommandOpError::MemOpNoSpace);
@@ -86,7 +86,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         Ok(())
     }
 
-    fn buffer_image_copy<B:crate::memory::buffer::BufferStore, BS: super::BufferCopyFactory + InternalBufferStore<B>, I:crate::image::ImageStore, IR: super::ImageCopyFactory + crate::image::InternalImageStore<I>>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
+    fn buffer_image_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageStore, IR: super::ImageCopyFactory + crate::image::InternalImageStore<I>>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
         if dst.extent().width == 0{
             return Ok(());
         }
@@ -215,7 +215,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         Ok(())
     }
 
-    fn image_buffer_copy<B:crate::memory::buffer::BufferStore, BS: super::BufferCopyFactory + InternalBufferStore<B>, I:crate::image::ImageStore, IR: super::ImageCopyFactory + crate::image::InternalImageStore<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
+    fn image_buffer_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageStore, IR: super::ImageCopyFactory + crate::image::InternalImageStore<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
         let buffer_offset = dst.offset();
         let mut addressing = (0,0);
         if let Some(a) = buffer_addressing{

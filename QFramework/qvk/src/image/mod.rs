@@ -7,7 +7,7 @@ use crate::{memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferSource;
 use crate::image::imageresource::ImageResourceMemOpError;
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
-use crate::memory::buffer::{BufferStore, InternalBufferStore};
+use crate::memory::buffer::{BufferSource, BufferSupplier};
 use crate::memory::MemorySource;
 
 pub mod image;
@@ -50,7 +50,7 @@ pub trait ImageSubresourceStore{
     fn offset(&self) -> vk::Offset3D;
     fn extent(&self) -> vk::Extent3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
-    fn copy_to_buffer_internal<B:BufferStore, BP:BufferCopyFactory + InternalBufferStore<B>>(&self, dst: &BP, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
+    fn copy_to_buffer_internal<B:BufferSource, BP:BufferCopyFactory + BufferSupplier<B>>(&self, dst: &BP, buffer_addressing: Option<(u32,u32)>) -> Result<(), ImageResourceMemOpError>;
     fn copy_to_image_internal<I:ImageStore, IR:ImageCopyFactory+ InternalImageStore<I>>(&self, dst: &IR) -> Result<(), ImageResourceMemOpError>;
     fn blit_to_image_internal<I:ImageStore, IR:ImageCopyFactory + InternalImageStore<I>>(&self, dst: &IR, scale_filter: vk::Filter) -> Result<(), ImageResourceMemOpError>;
 }
