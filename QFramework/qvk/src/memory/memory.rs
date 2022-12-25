@@ -1,57 +1,33 @@
+use std::ffi::c_void;
 use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
 use crate::init::{DeviceSource, DeviceSupplier};
-use crate::memory::{MemoryStore, PartitionStore};
+use crate::memory::{MemorySource, PartitionSource};
 
-use super::{Memory, Partition, partitionsystem, PartitionSystem};
+use super::{Memory, Partition, partitionsystem, PartitionSystem, MemoryFactory};
 
-#[derive(Clone)]
-pub enum MemoryAllocateExtension{
-    Flags(vk::MemoryAllocateFlagsInfo),
-}
-
-pub trait MemorySettingsStore{
-    fn size(&self) -> vk::DeviceSize;
-    fn memory_type_index(&self) -> u32;
-    fn extensions(&self) -> Option<Vec<MemoryAllocateExtension>>;
-}
-
-#[derive(Clone)]
-pub struct SettingsStore{
-    pub size: vk::DeviceSize,
-    pub memory_type_index: u32,
-    pub extensions: Option<Vec<MemoryAllocateExtension>>,
-}
-
-impl<D: DeviceSource + Clone> Memory<D,PartitionSystem>{
-    pub fn new<S:MemorySettingsStore>(settings: &S, device_provider: &D) -> Result<Arc<Memory<D,PartitionSystem>>, vk::Result>{
+impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> MemoryFactory<Arc<Memory<D, PartitionSystem>>> for DS{
+    fn create_memory(&self, size: u64, type_index: u32, extensions: Option<*const c_void>) -> Result<Arc<Memory<D, PartitionSystem>>, vk::Result> {
         // We need to create the initial memory from our settings
         
-        let mut memory_cinfo = vk::MemoryAllocateInfo::builder();
-        memory_cinfo = memory_cinfo.allocation_size(settings.size());
-        memory_cinfo = memory_cinfo.memory_type_index(settings.memory_type_index());
-        let mut extentions = settings.extensions();
+        let mut info = vk::MemoryAllocateInfo::builder();
+        info = info.allocation_size(size);
+        info = info.memory_type_index(type_index);
         
-        if let Some(extentions) = &mut extentions{
-            for ext in extentions.iter_mut(){
-                match ext{
-                    MemoryAllocateExtension::Flags(e) => {
-                        memory_cinfo = memory_cinfo.push_next(e);
-                    },
-                }
-            }
+        if let Some(ptr) = extensions{
+            info.p_next = ptr;
         }
         
-        let partition = PartitionSystem::new(settings.size());
-        let memory = unsafe{device_provider.device().allocate_memory(&memory_cinfo, None)};
+        let partition = PartitionSystem::new(size);
+        let memory = unsafe{self.device_provider().device().allocate_memory(&info, None)};
         
         match memory{
             Ok(m) => {
-                info!("Created device memory {:?} of size {:?}", m, settings.size());
+                info!("Created device memory {:?} of size {:?}", m, size);
                 let memory = Memory{ 
-                    device: device_provider.clone(),
+                    device: self.device_provider().clone(),
                     partition_sys: Mutex::new(partition),
                     memory: m };
                 return Ok(Arc::new(memory));
@@ -60,7 +36,8 @@ impl<D: DeviceSource + Clone> Memory<D,PartitionSystem>{
         }
     }
 }
-impl<D: DeviceSource, P: PartitionStore> MemoryStore for Arc<Memory<D,P>>{
+
+impl<D: DeviceSource, P: PartitionSource> MemorySource for Arc<Memory<D,P>>{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError> {
         self.partition_sys.lock().unwrap().partition(size, move |offset| {
             if let Some(alignment) = alignment{
@@ -78,7 +55,7 @@ impl<D: DeviceSource, P: PartitionStore> MemoryStore for Arc<Memory<D,P>>{
 
 }
 
-impl<D: DeviceSource, P: PartitionStore> Drop for Memory<D,P>{
+impl<D: DeviceSource, P: PartitionSource> Drop for Memory<D,P>{
     fn drop(&mut self) {
         debug!("Destroyed device memory {:?}", self.memory);
         unsafe{
@@ -87,37 +64,7 @@ impl<D: DeviceSource, P: PartitionStore> Drop for Memory<D,P>{
     }
 }
 
-impl SettingsStore{
-    pub fn new(size: vk::DeviceSize, memory_type_index: u32) -> SettingsStore {
-        SettingsStore{ size, memory_type_index, extensions: None }
-    }
-    
-    pub fn add_extension(&mut self, ext: MemoryAllocateExtension){
-       self.extensions.get_or_insert(vec![]).push(ext); 
-    }
-    
-    pub fn use_alloc_flags(&mut self, flags: vk::MemoryAllocateFlags){
-        let info = vk::MemoryAllocateFlagsInfo::builder().flags(flags).build();
-        self.add_extension(MemoryAllocateExtension::Flags(info));
-    }
-}
-
-impl MemorySettingsStore for SettingsStore{
-    fn size(&self) -> vk::DeviceSize {
-        self.size
-    }
-
-    fn memory_type_index(&self) -> u32 {
-        self.memory_type_index
-    }
-
-    fn extensions(&self) -> Option<Vec<MemoryAllocateExtension>> {
-        self.extensions.clone()
-    }
-
-}
-
-impl<D:DeviceSource, P:PartitionStore> DeviceSupplier<D> for Memory<D,P>{
+impl<D:DeviceSource, P:PartitionSource> DeviceSupplier<D> for Memory<D,P>{
     fn device_provider(&self) -> &D {
         &self.device
     }

@@ -1,5 +1,5 @@
 use std::{collections::VecDeque, sync::Arc};
-use crate::memory::PartitionStore;
+use crate::memory::PartitionSource;
 
 use super::{Partition, PartitionSystem};
 
@@ -55,7 +55,7 @@ impl PartitionSystem{
     }
 }
 
-impl PartitionStore for PartitionSystem{
+impl PartitionSource for PartitionSystem{
     fn partition<F:Fn(u64) -> bool>(&mut self, size: u64, alignment_fn: F) -> Result<Partition, PartitionError> {
         // As we try accumulating enough memory will will also combine unused memory
         // We will approach this by queueing through the partitions

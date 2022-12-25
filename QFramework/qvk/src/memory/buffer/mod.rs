@@ -5,7 +5,7 @@ use crate::command::{ImageCopyFactory, BufferCopyFactory};
 use crate::image::{ImageStore, InternalImageStore};
 
 use crate::init::{DeviceSource, InstanceSupplier, InstanceSource, DeviceSupplier};
-use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
+use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
 use crate::memory::buffer::buffer::BufferAlignmentType;
 use crate::memory::buffer::buffersegment::BufferSegmentMemOpError;
 use crate::memory::partitionsystem::PartitionError;
@@ -25,7 +25,7 @@ pub trait BufferStore{
 pub trait InternalBufferStore<B:BufferStore>{
     fn buffer_provider(&self) -> &B;
 }
-pub struct Buffer<D: DeviceSource, M: MemoryStore, P: PartitionStore>{
+pub struct Buffer<D: DeviceSource, M: MemorySource, P: PartitionSource>{
 
     device: D,
     memory: M,
@@ -46,7 +46,7 @@ pub trait BufferSegmentStore{
     ///Addressing is (bufferRowLength, bufferImageHeight)
     fn copy_to_image_internal<I:ImageStore, IS: InternalImageStore<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
-pub struct BufferSegment<I:InstanceSource, D: DeviceSource + InstanceSupplier<I>, M:MemoryStore, B: BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>, P:PartitionStore>{
+pub struct BufferSegment<I:InstanceSource, D: DeviceSource + InstanceSupplier<I>, M:MemorySource, B: BufferStore + MemorySupplier<M> + DeviceSupplier<D>, P:PartitionSource>{
 
     buffer: B,
     _partition_sys: Mutex<P>,

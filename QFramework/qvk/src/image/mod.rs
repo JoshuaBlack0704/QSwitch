@@ -8,7 +8,7 @@ use crate::command::CommandBufferSource;
 use crate::image::imageresource::ImageResourceMemOpError;
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferStore, InternalBufferStore};
-use crate::memory::MemoryStore;
+use crate::memory::MemorySource;
 
 pub mod image;
 pub trait ImageStore{
@@ -34,7 +34,7 @@ pub trait ImageStore{
 pub trait InternalImageStore<I:ImageStore>{
     fn image_provider(&self) -> &I;
 }
-pub struct Image<D:DeviceSource, M:MemoryStore>{
+pub struct Image<D:DeviceSource, M:MemorySource>{
     device: D,
     memory: Option<M>,
     _partition: Option<Partition>,

@@ -4,7 +4,7 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::{init::{DeviceSource, DeviceSupplier}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
-use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
+use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
 use crate::memory::buffer::BufferStore;
 
 use super::Buffer;
@@ -45,7 +45,7 @@ pub struct SettingsStore{
     pub share: Option<Vec<u32>>,
 }
 
-impl<D:DeviceSource + Clone, M:MemoryStore + Clone> Buffer<D,M,PartitionSystem>{
+impl<D:DeviceSource + Clone, M:MemorySource + Clone> Buffer<D,M,PartitionSystem>{
     pub fn new<S:BufferSettingsStore>(settings: &S, device_provider: &D, memory_provider: &M) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError>{
         // First we need to create the buffer
         let mut info = vk::BufferCreateInfo::builder();
@@ -116,7 +116,7 @@ impl<D:DeviceSource + Clone, M:MemoryStore + Clone> Buffer<D,M,PartitionSystem>{
     }
 }
 
-impl<D:DeviceSource, M:MemoryStore, P:PartitionStore> BufferStore for Arc<Buffer<D,M,P>>{
+impl<D:DeviceSource, M:MemorySource, P:PartitionSource> BufferStore for Arc<Buffer<D,M,P>>{
 
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer
@@ -143,7 +143,7 @@ impl<D:DeviceSource, M:MemoryStore, P:PartitionStore> BufferStore for Arc<Buffer
     }
 }
 
-impl<D:DeviceSource, M:MemoryStore, P:PartitionStore> Drop for Buffer<D,M,P>{
+impl<D:DeviceSource, M:MemorySource, P:PartitionSource> Drop for Buffer<D,M,P>{
     fn drop(&mut self) {
         debug!("Destroyed buffer {:?}", self.buffer);
         unsafe{
@@ -198,14 +198,14 @@ impl BufferSettingsStore for SettingsStore{
     }
 }
 
-impl<D:DeviceSource, P:PartitionStore, M:MemoryStore> DeviceSupplier<D> for Arc<Buffer<D,M,P>>{
+impl<D:DeviceSource, P:PartitionSource, M:MemorySource> DeviceSupplier<D> for Arc<Buffer<D,M,P>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<D:DeviceSource, P:PartitionStore, M:MemoryStore> InternalMemoryStore<M> for Arc<Buffer<D,M,P>>{
-    fn memory_provider(&self) -> &M {
+impl<D:DeviceSource, P:PartitionSource, M:MemorySource> MemorySupplier<M> for Arc<Buffer<D,M,P>>{
+    fn memory_source(&self) -> &M {
         &self.memory
     }
 }

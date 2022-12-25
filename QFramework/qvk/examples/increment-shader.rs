@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, memory, Memory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
+use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use qvk::descriptor::SetFactory;
 
@@ -16,8 +16,7 @@ fn main(){
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     let device = settings.create_device().expect("Could not create device");
 
-    let settings = memory::SettingsStore::new(1024 * 1024 * 10, device.host_memory_index());
-    let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let host_mem = device.create_memory(1024 * 1024 * 10, device.host_memory_index(), None).unwrap();
 
     let src = [0u32;100];
     let mut dst = [10u32;100];

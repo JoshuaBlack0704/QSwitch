@@ -4,7 +4,7 @@ use image::{self, EncodableLayout};
 
 use ash::vk;
 
-use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, Memory, memory},  image::ImageResource};
+use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{buffer, Buffer, BufferSegment}, MemoryFactory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageStore, ImageSubresourceStore, InternalImageStore};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
@@ -72,14 +72,12 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
         let bytes = image.as_bytes();
         let image_extent = vk::Extent3D::builder().width(image.width()).height(image.height()).depth(1).build();
 
-        let settings = memory::SettingsStore::new(bytes.len() as u64 * 2, tgt.image.device_provider().device_memory_index());
-        let dev_mem = Memory::new(&settings, tgt.image.device_provider()).expect("Could not allocate memory");
+        let dev_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().device_memory_index(), None).unwrap();
         let image_settings = crate::image::image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
         let image = crate::image::Image::new(tgt.image.device_provider(), &dev_mem, &image_settings).unwrap();
         let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
         
-        let settings = memory::SettingsStore::new(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index());
-        let host_mem = Memory::new(&settings, tgt.image.device_provider()).unwrap();
+        let host_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index(), None).unwrap();
         let settings = buffer::SettingsStore::new(bytes.len() as u64 * 2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
         let buf = Buffer::new(&settings, tgt.image.device_provider(), &host_mem).expect("Could not bind buffer");
         let part = BufferSegment::new(&buf, bytes.len() as u64, None).unwrap();

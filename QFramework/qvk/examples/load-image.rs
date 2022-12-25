@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{image::{Image, ImageResource}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{memory, Memory}, queue::QueueFactory};
+use qvk::{image::{Image, ImageResource}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{MemoryFactory}, queue::QueueFactory};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event::{Event, WindowEvent}, event_loop::EventLoop, window::WindowBuilder};
 use qvk::image::ImageStore;
@@ -25,9 +25,7 @@ fn main(){
     let settings = swapchain::SettingsStore::default();
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
    
-    let mut settings = memory::SettingsStore::new(1024 * 1024 * 100, device.device_memory_index());
-    settings.use_alloc_flags(vk::MemoryAllocateFlags::DEVICE_ADDRESS);
-    let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let dev_mem = device.create_memory(1024 * 1024 * 100, device.device_memory_index(), None).unwrap();
 
     let image_settings = qvk::image::image::SettingsStore::new_simple(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
     let image = Image::new(&device, &dev_mem, &image_settings).unwrap();

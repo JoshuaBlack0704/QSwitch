@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, sync::{Arc, Mutex}};
+use std::{collections::VecDeque, sync::{Arc, Mutex}, ffi::c_void};
 
 use ash::vk;
 
@@ -6,6 +6,12 @@ use crate::init::DeviceSource;
 use crate::memory::partitionsystem::PartitionError;
 
 pub mod partitionsystem;
+/// (start_addr, size, tracker)
+pub trait PartitionSource{
+    /// The alignment fn takes and offset and returns if the offset is aligned
+    fn partition<F:Fn(u64) -> bool>(&mut self, size: u64, alignment_fn: F) -> Result<Partition, PartitionError>;
+}
+
 #[derive(Clone)]
 pub struct Partition{
     pub tracker: Arc<bool>,
@@ -17,7 +23,18 @@ pub struct PartitionSystem{
 }
 
 pub mod memory;
-pub struct Memory<D: DeviceSource, P: PartitionStore>{
+pub trait MemorySource{
+    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
+    fn memory(&self) -> &vk::DeviceMemory;
+}
+
+pub trait MemorySupplier<M:MemorySource>{
+    fn memory_source(&self) -> &M;
+}
+pub trait MemoryFactory<M:MemorySource>{
+    fn create_memory(&self, size: u64, type_index: u32, extensions: Option<*const c_void>) -> Result<M, vk::Result>;
+}
+pub struct Memory<D: DeviceSource, P: PartitionSource>{
     device: D,
     partition_sys: Mutex<P>,
     memory: vk::DeviceMemory,
@@ -25,17 +42,3 @@ pub struct Memory<D: DeviceSource, P: PartitionStore>{
 
 pub mod buffer;
 
-/// (start_addr, size, tracker)
-pub trait PartitionStore{
-    /// The alignment fn takes and offset and returns if the offset is aligned
-    fn partition<F:Fn(u64) -> bool>(&mut self, size: u64, alignment_fn: F) -> Result<Partition, PartitionError>;
-}
-
-pub trait MemoryStore{
-    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
-    fn memory(&self) -> &vk::DeviceMemory;
-}
-
-pub trait InternalMemoryStore<M:MemoryStore>{
-    fn memory_provider(&self) -> &M;
-}

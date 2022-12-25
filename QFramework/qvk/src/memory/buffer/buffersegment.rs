@@ -7,7 +7,7 @@ use crate::{command::{CommandBufferSource,  BufferCopyFactory, ImageCopyFactory,
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::{ImageStore, InternalImageStore};
-use crate::memory::{InternalMemoryStore, MemoryStore, PartitionStore};
+use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
 use crate::memory::buffer::{BufferSegmentStore, BufferStore, InternalBufferStore};
 
 use super::BufferSegment;
@@ -19,7 +19,7 @@ pub enum BufferSegmentMemOpError{
 }
 
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D> + Clone> BufferSegment<I,D,M,B,PartitionSystem>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemorySource, B:BufferStore + MemorySupplier<M> + DeviceSupplier<D> + Clone> BufferSegment<I,D,M,B,PartitionSystem>{
     pub fn new(buffer_provider: &B, size: u64, custom_alignment: Option<u64>) -> Result<Arc<Self>, PartitionError>{
         
         let p;
@@ -59,7 +59,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:Bu
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D> + Clone, P:PartitionStore> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, M:MemorySource, B:BufferStore + MemorySupplier<M> + DeviceSupplier<D> + Clone, P:PartitionSource> BufferSegmentStore for Arc<BufferSegment<I,D,M,B,P>>{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
@@ -80,7 +80,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         }
 
         let target_offset = self.partition.offset + self.buffer.home_partition().offset;
-        let target_memory = self.buffer.memory_provider().memory();
+        let target_memory = self.buffer.memory_source().memory();
         let mapped_range = [vk::MappedMemoryRange::builder()
         .memory(*target_memory)
         .offset(0)
@@ -107,7 +107,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         }
 
         let target_offset = self.partition.offset + self.buffer.home_partition().offset;
-        let target_memory = self.buffer.memory_provider().memory();
+        let target_memory = self.buffer.memory_source().memory();
         let mapped_range = [vk::MappedMemoryRange::builder()
         .memory(*target_memory)
         .offset(0)
@@ -155,7 +155,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
 
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>, P:PartitionStore> BufferCopyFactory for Arc<BufferSegment<I,D,M,B,P>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemorySource, B:BufferStore + MemorySupplier<M> + DeviceSupplier<D>, P:PartitionSource> BufferCopyFactory for Arc<BufferSegment<I,D,M,B,P>>{
     fn size(&self) -> u64 {
         self.partition.size
     }
@@ -166,13 +166,13 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:Bu
 }
     
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>, P:PartitionStore> InternalBufferStore<B> for Arc<BufferSegment<I,D,M,B,P>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemorySource, B:BufferStore + MemorySupplier<M> + DeviceSupplier<D>, P:PartitionSource> InternalBufferStore<B> for Arc<BufferSegment<I,D,M,B,P>>{
     fn buffer_provider(&self) -> &B {
         &self.buffer
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>> DescriptorLayoutBindingFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemorySource, B:BufferStore + MemorySupplier<M> + DeviceSupplier<D>> DescriptorLayoutBindingFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
     fn binding(&self) -> vk::DescriptorSetLayoutBinding {
         let binding_type ;
         let usage = self.buffer.usage();
@@ -193,7 +193,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:Bu
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemoryStore, B:BufferStore + InternalMemoryStore<M> + DeviceSupplier<D>> ApplyWriteFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, M:MemorySource, B:BufferStore + MemorySupplier<M> + DeviceSupplier<D>> ApplyWriteFactory for Arc<BufferSegment<I,D,M,B,PartitionSystem>>{
     fn apply<W:WriteSource>(&self, write: &W) {
 
         let info = vk::WriteDescriptorSet::builder()

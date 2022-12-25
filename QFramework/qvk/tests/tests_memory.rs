@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{init::{instance, device, DeviceSource, InstanceFactory, DeviceFactory}, memory::{memory, Memory, buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
+use qvk::{init::{instance, device, DeviceSource, InstanceFactory, DeviceFactory}, memory::{buffer::{buffer, Buffer, BufferSegment, BufferSegmentStore}, MemoryFactory}, image::{image,Image, ImageResource, ImageStore, ImageSubresourceStore}};
 
 #[test]
 fn buffer_image(){
@@ -15,11 +15,9 @@ fn buffer_image(){
     
     let image_extent = vk::Extent3D::builder().width(100).height(100).depth(1).build();
 
-    let settings = memory::SettingsStore::new(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, device.host_memory_index());
-    let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let host_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, device.host_memory_index(), None).unwrap();
 
-    let settings = memory::SettingsStore::new(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index());
-    let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
     let image_settings = image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
     let image = Image::new(&device, &dev_mem, &image_settings).unwrap();
@@ -54,8 +52,7 @@ fn buffer_ram(){
     let settings = device::Settings::new_simple(instance.clone());
     let device = settings.create_device().expect("Could not create device");
 
-    let settings = memory::SettingsStore::new(1024, device.host_memory_index());
-    let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let host_mem = device.create_memory(1024, device.host_memory_index(), None).unwrap();
 
     let settings = buffer::SettingsStore::new(1024, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
     let storage = Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
@@ -82,10 +79,8 @@ fn buffer_buffer(){
     let settings = device::Settings::new_simple(instance.clone());
     let device = settings.create_device().expect("Could not create device");
 
-    let settings = memory::SettingsStore::new(1024, device.host_memory_index());
-    let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
-    let settings = memory::SettingsStore::new(1024, device.device_memory_index());
-    let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let host_mem = device.create_memory(1024, device.host_memory_index(), None).unwrap();
+    let dev_mem = device.create_memory(1024, device.device_memory_index(), None).unwrap();
 
     let settings = buffer::SettingsStore::new(200, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST);
     let s1 = Buffer::new(&settings, &device, &host_mem).expect("Could not bind buffer");
@@ -121,18 +116,15 @@ fn image_image(){
     
     let image_extent = vk::Extent3D::builder().width(100).height(100).depth(1).build();
 
-    let settings = memory::SettingsStore::new(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, device.host_memory_index());
-    let host_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let host_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2 * 3, device.host_memory_index(), None).unwrap();
 
-    let settings = memory::SettingsStore::new(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index());
-    let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
     let image_settings = image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
     let image1 = Image::new(&device, &dev_mem, &image_settings).unwrap();
     let resource1 = ImageResource::new(&image1, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image_extent).unwrap();
     
-    let settings = memory::SettingsStore::new(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index());
-    let dev_mem = Memory::new(&settings, &device).expect("Could not allocate memory");
+    let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
     let image_settings = image::SettingsStore::new_simple(vk::Format::R8G8B8A8_SRGB, image_extent, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));    
     let image2 = Image::new(&device, &dev_mem, &image_settings).unwrap();
