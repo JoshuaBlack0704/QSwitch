@@ -10,7 +10,7 @@ use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier
 use crate::memory::buffer::{BufferSource, BufferSupplier};
 use crate::memory::MemorySource;
 
-use self::image::ImageCreateError;
+use self::{image::ImageCreateError, imageresource::ImageResourceCreateError};
 
 pub mod image;
 pub trait ImageFactory<Img:ImageSource>{
@@ -55,6 +55,9 @@ pub struct Image<D:DeviceSource, M:MemorySource>{
 
 
 pub mod imageresource;
+pub trait ImageResourceFactory<IR:ImageResourceSource>{
+    fn create_resource(&self, offset: vk::Offset3D, extent: vk::Extent3D, level: u32, aspect: vk::ImageAspectFlags) -> Result<IR, ImageResourceCreateError>;
+}
 pub trait ImageResourceSource{
     fn subresource(&self) -> vk::ImageSubresourceLayers;
     fn offset(&self) -> vk::Offset3D;
@@ -71,6 +74,7 @@ pub struct ImageResource<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>,
     offset: vk::Offset3D,
     extent: vk::Extent3D,
     layout: Arc<Mutex<vk::ImageLayout>>,
+    _aspect: vk::ImageAspectFlags,
     _device: PhantomData<D>,
     _instance: PhantomData<I>
 }

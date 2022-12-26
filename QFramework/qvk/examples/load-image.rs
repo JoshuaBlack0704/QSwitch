@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{image::{ImageResource, ImageFactory}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{MemoryFactory}, queue::QueueFactory};
+use qvk::{image::{ImageResource, ImageFactory, ImageResourceFactory}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::{MemoryFactory}, queue::QueueFactory};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event::{Event, WindowEvent}, event_loop::EventLoop, window::WindowBuilder};
 use qvk::image::ImageSource;
@@ -29,7 +29,7 @@ fn main(){
 
     let image = dev_mem.create_image(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
     image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
-    let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
+    let resource = image.create_resource(vk::Offset3D::default(), image.extent(), 0, vk::ImageAspectFlags::COLOR).unwrap();
     let file = String::from("examples/resources/drone.jpg");
     ImageResource::load_image(&resource, &file);
 

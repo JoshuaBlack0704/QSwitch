@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{ImageSource, ImageResourceSource, ImageSupplier, Image, ImageView, ImageResource, ImageViewSource}, sync::{SemaphoreSource, FenceSource, self}, queue::{QueueOps, Queue, QueueSource, QueueFactory}, memory::{Memory, PartitionSystem}};
+use crate::{image::{ImageSource, ImageResourceSource, ImageSupplier, Image, ImageView, ImageViewSource, ImageResourceFactory}, sync::{SemaphoreSource, FenceSource, self}, queue::{QueueOps, Queue, QueueSource, QueueFactory}, memory::{Memory, PartitionSystem}};
 use crate::sync::SemaphoreFactory;
 
 use super::{Swapchain, InstanceSource, DeviceSource, InstanceSupplier, DeviceSupplier};
@@ -302,7 +302,7 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
         src.image_provider().internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
         dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
 
-        let dst_res = ImageResource::new(dst, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), dst.extent()).unwrap();
+        let dst_res = dst.create_resource(vk::Offset3D::default(), dst.extent(), 0, vk::ImageAspectFlags::COLOR).unwrap();
         src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR).unwrap();
 
         dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);

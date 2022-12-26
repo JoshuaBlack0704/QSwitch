@@ -9,7 +9,7 @@ use crate::image::ImageSource;
 use crate::init::{DeviceSource, DeviceSupplier};
 use crate::memory::{MemorySource, partitionsystem,  Memory, PartitionSystem, MemorySupplier};
 
-use super::{Image, ImageFactory};
+use super::{Image, ImageFactory, ImageSupplier};
 
 impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource + Clone, Sup: DeviceSupplier<D> + MemorySupplier<M>> ImageFactory<Arc<Image<D,M>>> for Sup{
     fn create_image(&self, format: vk::Format, extent: vk::Extent3D, levels: u32, layers: u32, usage: vk::ImageUsageFlags, extensions: Option<*const c_void>) -> Result<Arc<Image<D,M>>, ImageCreateError> {
@@ -228,3 +228,9 @@ impl<D:DeviceSource, M:MemorySource> DeviceSupplier<D> for Arc<Image<D,M>>{
     }
 }
 
+
+impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource> ImageSupplier<Self> for Arc<Image<D,M>>{
+    fn image_provider(&self) -> &Self {
+        self
+    }
+}

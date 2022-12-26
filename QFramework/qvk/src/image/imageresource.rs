@@ -1,21 +1,20 @@
-use std::sync::{Arc, MutexGuard};
+use std::sync::{Arc, MutexGuard, Mutex};
 
 use image::{self, EncodableLayout};
 
 use ash::vk;
 
-use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor}, memory::{buffer::{BufferFactory, BufferSegmentSource}, MemoryFactory},  image::ImageResource};
+use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor, ImageTransitionFactory}, memory::{buffer::{BufferFactory, BufferSegmentSource}, MemoryFactory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageSource, ImageResourceSource, ImageSupplier};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferSource, BufferSupplier, BufferSegmentFactory};
 
-use super::ImageFactory;
+use super::{ImageFactory, ImageResourceFactory};
 
-
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum ImageResourceCreateError{
-    ResorcesDontExist,
+    ResourcesDontExist,
 }
 
 #[derive(Debug)]
@@ -23,14 +22,11 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
-    pub fn new(image_provider: &Img, aspect: vk::ImageAspectFlags, miplevel: u32, array_layer: u32, layer_count: u32, offset: vk::Offset3D, extent: vk::Extent3D) -> Result<Arc<Self>, ImageResourceCreateError>{
-        
-        if miplevel > image_provider.mip_levels(){
-            return Err(ImageResourceCreateError::ResorcesDontExist);
-        }
-        if array_layer + layer_count > image_provider.array_layers(){
-            return Err(ImageResourceCreateError::ResorcesDontExist);
+impl<I:InstanceSource, D:DeviceSource + Clone + InstanceSupplier<I> + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone, IS:ImageSupplier<Img>> ImageResourceFactory<Arc<ImageResource<I, D, Img>>> for IS{
+    fn create_resource(&self, offset: vk::Offset3D, extent: vk::Extent3D, level: u32, aspect: vk::ImageAspectFlags) -> Result<Arc<ImageResource<I, D, Img>>, ImageResourceCreateError> {
+        let image_provider = self.image_provider();
+        if level > self.image_provider().mip_levels(){
+            return Err(ImageResourceCreateError::ResourcesDontExist);
         }
         let req_size = vk::Extent3D::builder()
         .width(offset.x as u32 + extent.width)
@@ -39,34 +35,36 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
         .build();
         let act_size = image_provider.extent();
         if req_size.width > act_size.width || req_size.height > act_size.height || req_size.depth > act_size.depth{
-            return Err(ImageResourceCreateError::ResorcesDontExist);
+            return Err(ImageResourceCreateError::ResourcesDontExist);
         }
 
         let layer = vk::ImageSubresourceLayers::builder()
         .aspect_mask(aspect)
-        .mip_level(miplevel)
-        .base_array_layer(array_layer)
-        .layer_count(layer_count)
+        .mip_level(level)
+        .base_array_layer(0)
+        .layer_count(1)
         .build();
 
         let layout = image_provider.layout();
 
         Ok(
             Arc::new(
-                Self{
+                ImageResource{
                     image: image_provider.clone(),
                     resorces: layer,
                     offset,
                     extent,
                     layout,
+                    _aspect: aspect,
                     _device: std::marker::PhantomData,
                     _instance: std::marker::PhantomData,
                 }
             )
         )
-
     }
+}
 
+impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
     pub fn load_image(tgt: &Arc<Self>, file: &String){
         let reader = image::io::Reader::open(file).unwrap();
         let data = reader.decode().unwrap();
@@ -77,7 +75,7 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
         let dev_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().device_memory_index(), None).unwrap();
         let image = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
         image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
-        let resource = ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
+        let resource = image.create_resource(vk::Offset3D::default(), image.extent(), 0, vk::ImageAspectFlags::COLOR).unwrap();
         
         let host_mem = tgt.image.create_memory(bytes.len() as u64 * 2, tgt.image.device_provider().host_memory_index(), None).unwrap();
         let buf = host_mem.create_buffer(bytes.len() as u64 * 2, vk::BufferUsageFlags::STORAGE_BUFFER | vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
@@ -212,3 +210,23 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + D
     }
 }
 
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>> ImageTransitionFactory for Arc<ImageResource<I,D,Img>>{
+    fn image(&self) -> vk::Image {
+        *self.image.image()
+    }
+
+    fn range(&self) -> vk::ImageSubresourceRange {
+
+        vk::ImageSubresourceRange{
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count: 1,
+        }
+    }
+
+    fn old_layout(&self) -> Arc<Mutex<vk::ImageLayout>> {
+        self.image.layout()
+    }
+}

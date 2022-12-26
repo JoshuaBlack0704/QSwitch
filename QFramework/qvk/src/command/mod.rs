@@ -50,6 +50,11 @@ pub trait ImageCopyFactory{
     fn offset(&self) -> vk::Offset3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
 }
+pub trait ImageTransitionFactory{
+    fn image(&self) -> vk::Image;
+    fn range(&self) -> vk::ImageSubresourceRange;
+    fn old_layout(&self) -> Arc<Mutex<vk::ImageLayout>>;
+}
 pub trait CommandBufferSource{
     fn cmd(&self) -> vk::CommandBuffer;
     fn begin(&self, info: Option<vk::CommandBufferBeginInfo>) -> Result<(), vk::Result>;
@@ -63,6 +68,7 @@ pub trait CommandBufferSource{
     fn image_blit<I1: ImageSource, I2: ImageSource, IR1: ImageCopyFactory + ImageSupplier<I1>, IR2: ImageCopyFactory + ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError>;
     fn image_buffer_copy<B:BufferSource, BS: BufferCopyFactory + BufferSupplier<B>, I:ImageSource, IR: ImageCopyFactory + ImageSupplier<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
     fn dispatch(&self, x: u32, y: u32, z:u32);
+    fn transition_img<Img:ImageTransitionFactory>(&self, factory:&Img, new_layout: vk::ImageLayout, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2);
 }
 #[derive(Debug)]
 pub enum CommandOpError{

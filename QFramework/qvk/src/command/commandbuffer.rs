@@ -252,5 +252,31 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         }
     }
 
+    fn transition_img<Img:super::ImageTransitionFactory>(&self, factory:&Img, new_layout: vk::ImageLayout, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2) {
+        let mutex = factory.old_layout();
+        let mut old_layout = mutex.lock().unwrap();
+        let range = factory.range();
+        let info = vk::ImageMemoryBarrier2::builder()
+            .src_stage_mask(src_stage)
+            .src_access_mask(src_access)
+            .dst_stage_mask(dst_stage)
+            .dst_access_mask(dst_access)
+            .subresource_range(range)
+            .old_layout(*old_layout)
+            .new_layout(new_layout)
+            .image(factory.image());
+
+        let info = [info.build()];
+        let dependency = vk::DependencyInfo::builder()
+        .image_memory_barriers(&info);
+
+        unsafe{
+            self.device.device().cmd_pipeline_barrier2(self.cmd(), &dependency);
+        }
+
+        *old_layout = new_layout;
+    }
+
+
 }
 
