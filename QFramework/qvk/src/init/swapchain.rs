@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{ImageSource, ImageResourceSource, ImageSupplier, Image, ImageView, ImageViewSource, ImageResourceFactory}, sync::{SemaphoreSource, FenceSource, self}, queue::{QueueOps, Queue, QueueSource, QueueFactory}, memory::{Memory, PartitionSystem}};
+use crate::{image::{ImageSource, ImageResourceSource, ImageSupplier, Image, ImageResourceFactory}, sync::{SemaphoreSource, FenceSource, self}, queue::{QueueOps, Queue, QueueSource, QueueFactory}, memory::{Memory, PartitionSystem}};
 use crate::sync::SemaphoreFactory;
 
 use super::{Swapchain, InstanceSource, DeviceSource, InstanceSupplier, DeviceSupplier};
@@ -45,8 +45,7 @@ pub enum SwapchainCreateError{
 }
 
 type ImageType<D> = Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>;
-type ImageViewType<D> = Arc<ImageView<D, ImageType<D>>>;
-type SwapchainType<I, D, S> = Swapchain<I,D,S,ImageType<D>,ImageViewType<D>,Arc<Queue<D>>>;
+type SwapchainType<I, D, S> = Swapchain<I,D,S,ImageType<D>,Arc<Queue<D>>>;
 
 #[derive(Clone)]
 pub struct SettingsStore{
@@ -180,7 +179,6 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
                     swapchain_loader,
                     swapchain: Mutex::new(swapchain),
                     images: Mutex::new(vec![]),
-                    views: Mutex::new(vec![]),
                     present_queue: queue,
                 };
         
@@ -195,7 +193,6 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
 
     fn get_images(&self, swapchain: vk::SwapchainKHR, image_extent: vk::Extent2D){
         let mut img_lock = self.images.lock().unwrap();
-        let _img_view_lock = self.views.lock().unwrap();
         let imgs = unsafe{self.swapchain_loader.get_swapchain_images(swapchain).unwrap()};
         let mut images = Vec::with_capacity(imgs.len());
         for image in imgs.iter(){
@@ -313,7 +310,7 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
     }
 }
 
-impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, ImgV: ImageViewSource, Q:QueueSource> Drop for Swapchain<I,D,S,Img,ImgV,Q>{
+impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource,Q:QueueSource> Drop for Swapchain<I,D,S,Img,Q>{
     fn drop(&mut self) {
         let lock = self.swapchain.lock().unwrap();
         let swapchain = *lock;
@@ -422,13 +419,13 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 }
 
-impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, ImgV: ImageViewSource,Q: QueueSource> DeviceSupplier<D> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, Q: QueueSource> DeviceSupplier<D> for Arc<Swapchain<I,D,S,Img,Q>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, ImgV: ImageViewSource, Q: QueueSource> InstanceSupplier<I> for Arc<Swapchain<I,D,S,Img,ImgV,Q>>{
+impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, Q: QueueSource> InstanceSupplier<I> for Arc<Swapchain<I,D,S,Img,Q>>{
     fn instance_source(&self) -> &I {
         &self._instance
     }

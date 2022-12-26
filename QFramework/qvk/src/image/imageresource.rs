@@ -10,7 +10,7 @@ use crate::image::{ImageSource, ImageResourceSource, ImageSupplier};
 use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
 use crate::memory::buffer::{BufferSource, BufferSupplier, BufferSegmentFactory};
 
-use super::{ImageFactory, ImageResourceFactory};
+use super::{ImageFactory, ImageResourceFactory, ImageResourceSupplier};
 
 #[derive(Debug)]
 pub enum ImageResourceCreateError{
@@ -183,6 +183,14 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
         Ok(())
     }
 
+    fn aspect(&self) -> vk::ImageAspectFlags {
+        self._aspect
+    }
+
+    fn level(&self) -> u32 {
+        self.resorces.mip_level
+    }
+
 
 }
 
@@ -228,5 +236,11 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + D
 
     fn old_layout(&self) -> Arc<Mutex<vk::ImageLayout>> {
         self.image.layout()
+    }
+}
+
+impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D>> ImageResourceSupplier<Self> for Arc<ImageResource<I,D,Img>>{
+    fn image_resource(&self) -> &Self {
+        self
     }
 }
