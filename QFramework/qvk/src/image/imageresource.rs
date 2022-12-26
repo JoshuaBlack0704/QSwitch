@@ -7,7 +7,7 @@ use ash::vk;
 use crate::{command::{CommandBufferSource, ImageCopyFactory, BufferCopyFactory, Executor, ImageTransitionFactory}, memory::{buffer::{BufferFactory, BufferSegmentSource}, MemoryFactory},  image::ImageResource};
 use crate::command::CommandBufferFactory;
 use crate::image::{ImageSource, ImageResourceSource, ImageSupplier};
-use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
+use crate::init::{DeviceSource, InstanceSource, DeviceSupplier};
 use crate::memory::buffer::{BufferSource, BufferSupplier, BufferSegmentFactory};
 
 use super::{ImageFactory, ImageResourceFactory, ImageResourceSupplier};
@@ -22,8 +22,8 @@ pub enum ImageResourceMemOpError{
     
 }
 
-impl<I:InstanceSource, D:DeviceSource + Clone + InstanceSupplier<I> + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone, IS:ImageSupplier<Img>> ImageResourceFactory<Arc<ImageResource<I, D, Img>>> for IS{
-    fn create_resource(&self, offset: vk::Offset3D, extent: vk::Extent3D, level: u32, aspect: vk::ImageAspectFlags) -> Result<Arc<ImageResource<I, D, Img>>, ImageResourceCreateError> {
+impl<D:DeviceSource + Clone + DeviceSupplier<D> + InstanceSource, Img:ImageSource + DeviceSupplier<D> + Clone, IS:ImageSupplier<Img>> ImageResourceFactory<Arc<ImageResource<D, Img>>> for IS{
+    fn create_resource(&self, offset: vk::Offset3D, extent: vk::Extent3D, level: u32, aspect: vk::ImageAspectFlags) -> Result<Arc<ImageResource<D, Img>>, ImageResourceCreateError> {
         let image_provider = self.image_provider();
         if level > self.image_provider().mip_levels(){
             return Err(ImageResourceCreateError::ResourcesDontExist);
@@ -57,14 +57,13 @@ impl<I:InstanceSource, D:DeviceSource + Clone + InstanceSupplier<I> + DeviceSupp
                     layout,
                     _aspect: aspect,
                     _device: std::marker::PhantomData,
-                    _instance: std::marker::PhantomData,
                 }
             )
         )
     }
 }
 
-impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone> ImageResource<I,D,Img>{
+impl<D:DeviceSource + InstanceSource + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D> + Clone> ImageResource<D,Img>{
     pub fn load_image(tgt: &Arc<Self>, file: &String){
         let reader = image::io::Reader::open(file).unwrap();
         let data = reader.decode().unwrap();
@@ -91,7 +90,7 @@ impl<I:InstanceSource + Clone, D:DeviceSource + InstanceSupplier<I> + Clone + De
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D>> ImageResourceSource for Arc<ImageResource<I,D,Img>>{
+impl<D:DeviceSource + InstanceSource + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D>> ImageResourceSource for Arc<ImageResource<D,Img>>{
     fn subresource(&self) -> vk::ImageSubresourceLayers {
         self.resorces.clone()
     }
@@ -194,7 +193,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupp
 
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>> ImageCopyFactory for Arc<ImageResource<I,D,Img>>{
+impl<D:DeviceSource + InstanceSource, Img:ImageSource + DeviceSupplier<D>> ImageCopyFactory for Arc<ImageResource<D,Img>>{
     fn extent(&self) -> vk::Extent3D {
         self.extent
     }
@@ -212,13 +211,13 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + D
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>> ImageSupplier<Img> for Arc<ImageResource<I,D,Img>>{
+impl<D:DeviceSource + InstanceSource, Img:ImageSource + DeviceSupplier<D>> ImageSupplier<Img> for Arc<ImageResource<D,Img>>{
     fn image_provider(&self) -> &Img {
         &self.image
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>> ImageTransitionFactory for Arc<ImageResource<I,D,Img>>{
+impl<D:DeviceSource + InstanceSource, Img:ImageSource + DeviceSupplier<D>> ImageTransitionFactory for Arc<ImageResource<D,Img>>{
     fn image(&self) -> vk::Image {
         *self.image.image()
     }
@@ -239,7 +238,7 @@ impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + D
     }
 }
 
-impl<I:InstanceSource, D:DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D>> ImageResourceSupplier<Self> for Arc<ImageResource<I,D,Img>>{
+impl<D:DeviceSource + InstanceSource + Clone + DeviceSupplier<D>, Img:ImageSource + DeviceSupplier<D>> ImageResourceSupplier<Self> for Arc<ImageResource<D,Img>>{
     fn image_resource(&self) -> &Self {
         self
     }

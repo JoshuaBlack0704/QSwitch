@@ -1,10 +1,10 @@
-use std::{cmp::Ordering, io, sync::Arc, marker::PhantomData};
+use std::{cmp::Ordering, io, sync::Arc};
 use ash::vk::{self, DeviceSize, PhysicalDevice, SurfaceKHR};
 use log::{debug, info};
 use winit;
 use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use crate::init::{DeviceSource, InstanceSource, InstanceSupplier, PhysicalDeviceData};
+use crate::init::{DeviceSource, InstanceSource, PhysicalDeviceData};
 
 use super::{Device, DeviceFactory, DeviceSupplier};
 
@@ -20,7 +20,7 @@ pub trait DeviceSettingsStore{
     fn use_device_extensions(&self) -> Option<&[*const i8]>;
 }
 
-pub struct Settings<'a,I:InstanceSource, IS:InstanceSupplier<I>>{
+pub struct Settings<'a,I:InstanceSource + Clone>{
     pub choose_device:  bool,
     pub surface_support:  Option<&'a winit::window::Window>,
     pub features: Option<vk::PhysicalDeviceFeatures>,
@@ -30,11 +30,10 @@ pub struct Settings<'a,I:InstanceSource, IS:InstanceSupplier<I>>{
     pub raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
     pub acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
     pub device_extensions: Option<Vec<*const i8>>,
-    pub instance_supplier: IS,
-    marker: PhantomData<I>,
+    pub instance: I,
 
 }
-impl<'a, I:InstanceSource, IS:InstanceSupplier<I>> Settings<'a, I, IS>{
+impl<'a, I:InstanceSource + Clone> Settings<'a, I>{
     pub fn new(
         choose_device:  bool,
         surface_support:  Option<&'a winit::window::Window>,
@@ -45,8 +44,8 @@ impl<'a, I:InstanceSource, IS:InstanceSupplier<I>> Settings<'a, I, IS>{
         raytracing_features: Option<vk::PhysicalDeviceRayTracingPipelineFeaturesKHR>,
         acc_struct_features: Option<vk::PhysicalDeviceAccelerationStructureFeaturesKHR>,
         device_extensions: Option<Vec<*const i8>>,
-        instance_supplier: IS,
-    ) -> Settings<'a, I, IS> {
+        instance: I,
+    ) -> Settings<'a, I> {
         Settings{ 
             choose_device,
             surface_support,
@@ -57,11 +56,11 @@ impl<'a, I:InstanceSource, IS:InstanceSupplier<I>> Settings<'a, I, IS>{
             raytracing_features,
             acc_struct_features,
             device_extensions,
-            instance_supplier,
-            marker: PhantomData, }
+            instance,
+            }
     }
-    pub fn new_simple(instance_supplier: IS) -> Settings<'a, I, IS> {
-        let mut settings = Self::new(false, None, None, None, None, None, None, None, None, instance_supplier);
+    pub fn new_simple(instance_source: I) -> Settings<'a, I> {
+        let mut settings = Self::new(false, None, None, None, None, None, None, None, None, instance_source);
         settings.add_extension(ash::extensions::khr::Synchronization2::name().as_ptr());
         let features12 = vk::PhysicalDeviceVulkan12Features::builder()
         .buffer_device_address(true)
@@ -102,9 +101,9 @@ impl<'a, I:InstanceSource, IS:InstanceSupplier<I>> Settings<'a, I, IS>{
     pub fn add_extension(&mut self, name: *const i8){
         self.device_extensions.get_or_insert(vec![]).push(name);
     }
-    fn get_physical_devices(instance: &IS) -> Vec<PhysicalDeviceData>{
+    fn get_physical_devices(instance: &I) -> Vec<PhysicalDeviceData>{
         // First we pull all of our devices
-        let  instance = instance.instance_source().instance();
+        let  instance = instance.instance();
         let physical_devices = unsafe{instance.enumerate_physical_devices().expect("Could not get physical devices")};
         let mut datas = vec![];
         
@@ -144,7 +143,7 @@ impl<'a, I:InstanceSource, IS:InstanceSupplier<I>> Settings<'a, I, IS>{
 }
 
 
-impl<'a,I:InstanceSource, IS:InstanceSupplier<I>> DeviceSettingsStore for Settings<'a, I, IS>{
+impl<'a,I:InstanceSource + Clone, > DeviceSettingsStore for Settings<'a, I>{
     fn choose_device(&self) -> bool {
         self.choose_device
     }
@@ -174,10 +173,10 @@ impl<'a,I:InstanceSource, IS:InstanceSupplier<I>> DeviceSettingsStore for Settin
 }
 
 type DeviceType<I> = Arc<Device<I>>;
-impl<I:InstanceSource + Clone, S:InstanceSupplier<I> + DeviceSettingsStore> DeviceFactory<DeviceType<I>> for S{
+impl<'a, I:InstanceSource + Clone> DeviceFactory<DeviceType<I>> for Settings<'a,I>{
     fn create_device(&self) -> Result<DeviceType<I>, vk::Result> {
-        let instance = self.instance_source().instance();
-        let entry = self.instance_source().entry();
+        let instance = self.instance();
+        let entry = self.entry();
         let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
         
         let mut surface = None;
@@ -191,7 +190,7 @@ impl<I:InstanceSource + Clone, S:InstanceSupplier<I> + DeviceSettingsStore> Devi
         }
         
         // We need to enumerate and sort all physical devices based on memory size
-        let physical_devices = Settings::<I,S>::get_physical_devices(self);
+        let physical_devices = Settings::<I>::get_physical_devices(&self.instance);
         let physical_device;
         if self.choose_device(){
             println!("Please choose a device:");
@@ -212,7 +211,7 @@ impl<I:InstanceSource + Clone, S:InstanceSupplier<I> + DeviceSettingsStore> Devi
         
         // Now that we have chosen our device we can pull its queues
         let priorities = [1.0;1];
-        let q_cinfos = Settings::<I,S>::get_queue_infos(&physical_device, &priorities);
+        let q_cinfos = Settings::<I>::get_queue_infos(&physical_device, &priorities);
         let q_families = q_cinfos.iter().map(|i| i.queue_family_index as usize).collect();
         
         let mut device_builder = vk::DeviceCreateInfo::builder();
@@ -263,7 +262,7 @@ impl<I:InstanceSource + Clone, S:InstanceSupplier<I> + DeviceSettingsStore> Devi
             Ok(d) => {
                 info!("Created logical device {:?}", d.handle());
                 Ok(Arc::new(Device{ 
-                    instance: self.instance_source().clone(),
+                    instance: self.instance.clone(),
                     surface,
                     surface_loader,
                     physical_device,
@@ -449,15 +448,23 @@ impl MemTH{
 
 
 
-impl<I:InstanceSource, IS:InstanceSupplier<I>> InstanceSupplier<I> for Settings<'_, I, IS>{
-    fn instance_source(&self) -> &I {
-        self.instance_supplier.instance_source()
+impl<I:InstanceSource + Clone> InstanceSource for Settings<'_, I>{
+    fn instance(&self) -> &ash::Instance {
+        self.instance.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.instance.entry()
     }
 }
 
-impl<I:InstanceSource + Clone> InstanceSupplier<I> for Arc<Device<I>>{
-    fn instance_source(&self) -> &I {
-        &self.instance
+impl<I:InstanceSource + Clone>   InstanceSource for Arc<Device<I>>{
+    fn instance(&self) -> &ash::Instance {
+        self.instance.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.instance.entry()
     }
 }
 

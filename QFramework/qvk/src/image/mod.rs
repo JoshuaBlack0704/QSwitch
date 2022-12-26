@@ -6,7 +6,7 @@ use std::sync::MutexGuard;
 use crate::{memory::Partition, command::{ImageCopyFactory, BufferCopyFactory}};
 use crate::command::CommandBufferSource;
 use crate::image::imageresource::ImageResourceMemOpError;
-use crate::init::{DeviceSource, InstanceSource, DeviceSupplier, InstanceSupplier};
+use crate::init::{DeviceSource, InstanceSource, DeviceSupplier};
 use crate::memory::buffer::{BufferSource, BufferSupplier};
 use crate::memory::MemorySource;
 
@@ -73,7 +73,7 @@ pub trait ImageResourceSupplier<IR:ImageResourceSource>{
     fn image_resource(&self) -> &IR;
 }
 
-pub struct ImageResource<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>, Img:ImageSource + DeviceSupplier<D>>{
+pub struct ImageResource<D:DeviceSource + InstanceSource, Img:ImageSource + DeviceSupplier<D>>{
     image: Img,
     resorces: vk::ImageSubresourceLayers,
     offset: vk::Offset3D,
@@ -81,7 +81,6 @@ pub struct ImageResource<I:InstanceSource, D:DeviceSource + InstanceSupplier<I>,
     layout: Arc<Mutex<vk::ImageLayout>>,
     _aspect: vk::ImageAspectFlags,
     _device: PhantomData<D>,
-    _instance: PhantomData<I>
 }
 
 pub mod imageview;

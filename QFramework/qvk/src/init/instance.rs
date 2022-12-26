@@ -4,7 +4,7 @@ use ash::vk::{self, ExtendsInstanceCreateInfo};
 use log::{debug, info};
 use raw_window_handle::RawDisplayHandle;
 
-use super::{Instance, InstanceSource, InstanceFactory, InstanceSupplier};
+use super::{Instance, InstanceSource, InstanceFactory};
 pub struct Settings<'a>{
     pub app_name: CString,
     pub engine_name: CString,
@@ -154,12 +154,6 @@ impl InstanceSource for Arc<Instance>{
 
     fn entry(&self) -> &ash::Entry {
         &self.entry
-    }
-}
-
-impl InstanceSupplier<Self> for Arc<Instance>{
-    fn instance_source(&self) -> &Self {
-        self
     }
 }
 

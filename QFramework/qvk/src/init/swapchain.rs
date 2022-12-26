@@ -6,7 +6,7 @@ use log::{debug, info};
 use crate::{image::{ImageSource, ImageResourceSource, ImageSupplier, Image, ImageResourceFactory}, sync::{SemaphoreSource, FenceSource, self}, queue::{QueueOps, Queue, QueueSource, QueueFactory}, memory::{Memory, PartitionSystem}};
 use crate::sync::SemaphoreFactory;
 
-use super::{Swapchain, InstanceSource, DeviceSource, InstanceSupplier, DeviceSupplier};
+use super::{Swapchain, InstanceSource, DeviceSource, DeviceSupplier};
 
 pub trait SwapchainSettingsStore{
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
@@ -45,7 +45,7 @@ pub enum SwapchainCreateError{
 }
 
 type ImageType<D> = Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>;
-type SwapchainType<I, D, S> = Swapchain<I,D,S,ImageType<D>,Arc<Queue<D>>>;
+type SwapchainType<D, S> = Swapchain<D,S,ImageType<D>,Arc<Queue<D>>>;
 
 #[derive(Clone)]
 pub struct SettingsStore{
@@ -63,10 +63,10 @@ pub struct SettingsStore{
     pub clipped: bool,
 }
 
-impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, S:SwapchainSettingsStore + Clone> SwapchainType<I,D,S>{
+impl<D: DeviceSource + InstanceSource + Clone + DeviceSupplier<D>, S:SwapchainSettingsStore + Clone> SwapchainType<D,S>{
     pub fn new(device_supplier: &D, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
         let device_provider = device_supplier.device_provider();
-        let instance_provider = device_provider.instance_source();
+        let instance_provider = device_provider.clone();
         let surface = device_provider.surface();
         if let None = surface{
             return Err(SwapchainCreateError::NoSurface);
@@ -171,7 +171,6 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
 
         info!("Created swapchain {:?}", swapchain);
         let swapchain = Swapchain{
-                    _instance: instance_provider.clone(),
                     device: device_provider.clone(),
                     _settings: settings.clone(),
                     create_info: info.build(),
@@ -205,7 +204,7 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
 
 }
 
-impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + DeviceSupplier<D>, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<I,D,S>>{
+impl<D: DeviceSource + InstanceSource + Clone + DeviceSupplier<D>, S:SwapchainSettingsStore + Clone> SwapchainStore<ImageType<D>> for Arc<SwapchainType<D,S>>{
     fn present<Sem:SemaphoreSource> (&self, next_image: u32, waits: Option<&[&Sem]>) {
 
         
@@ -310,7 +309,7 @@ impl<I:InstanceSource + Clone, D: DeviceSource + InstanceSupplier<I> + Clone + D
     }
 }
 
-impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource,Q:QueueSource> Drop for Swapchain<I,D,S,Img,Q>{
+impl<D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Img:ImageSource,Q:QueueSource> Drop for Swapchain<D,S,Img,Q>{
     fn drop(&mut self) {
         let lock = self.swapchain.lock().unwrap();
         let swapchain = *lock;
@@ -419,15 +418,19 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 }
 
-impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, Q: QueueSource> DeviceSupplier<D> for Arc<Swapchain<I,D,S,Img,Q>>{
+impl<D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Img:ImageSource, Q: QueueSource> DeviceSupplier<D> for Arc<Swapchain<D,S,Img,Q>>{
     fn device_provider(&self) -> &D {
         &self.device
     }
 }
 
-impl<I:InstanceSource, D: DeviceSource, S:SwapchainSettingsStore, Img:ImageSource, Q: QueueSource> InstanceSupplier<I> for Arc<Swapchain<I,D,S,Img,Q>>{
-    fn instance_source(&self) -> &I {
-        &self._instance
+impl< D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Img:ImageSource, Q: QueueSource> InstanceSource for Arc<Swapchain<D,S,Img,Q>>{
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
     }
 }
 

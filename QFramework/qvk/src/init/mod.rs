@@ -15,9 +15,6 @@ pub trait InstanceSource{
     fn instance(&self) -> &ash::Instance;
     fn entry(&self) -> &ash::Entry;
 }
-pub trait InstanceSupplier<I:InstanceSource>{
-    fn instance_source(&self) -> &I;
-}
 pub struct Instance{
     entry: ash::Entry,
     instance: ash::Instance,
@@ -64,8 +61,7 @@ pub struct PhysicalDeviceData{
 }
 
 pub mod swapchain;
-pub struct Swapchain<I:InstanceSource, D: DeviceSource, S: SwapchainSettingsStore, Img:ImageSource, Q:QueueSource>{
-    _instance: I,
+pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Img:ImageSource, Q:QueueSource>{
     device: D,
     _settings: S,
     create_info: vk::SwapchainCreateInfoKHR,
