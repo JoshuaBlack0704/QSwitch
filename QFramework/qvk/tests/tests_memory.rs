@@ -19,7 +19,7 @@ fn buffer_image(){
 
     let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
-    let image = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    let image = dev_mem.create_image(&device, vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
     image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource = image.create_resource(vk::Offset3D::default(), image_extent, 0, vk::ImageAspectFlags::COLOR).unwrap();
     
@@ -117,13 +117,13 @@ fn image_image(){
 
     let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
-    let image1 = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    let image1 = dev_mem.create_image(&device, vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
     image1.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource1 = image1.create_resource(vk::Offset3D::default(), image_extent, 0, vk::ImageAspectFlags::COLOR).unwrap();
     
     let dev_mem = device.create_memory(size_of::<u32>() as u64 * image_extent.width as u64 * image_extent.height as u64 * 2, device.device_memory_index(), None).unwrap();
     
-    let image2 = dev_mem.create_image(vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    let image2 = dev_mem.create_image(&device, vk::Format::R8G8B8A8_SRGB, image_extent, 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
     image2.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource2 = image2.create_resource(vk::Offset3D::default(), image_extent, 0, vk::ImageAspectFlags::COLOR).unwrap();
     

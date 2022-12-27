@@ -22,8 +22,7 @@ pub trait ComputePipelineSource{
     fn pipeline(&self) -> &vk::Pipeline;
 }
 #[allow(unused)]
-pub struct Compute<D:DeviceSource, L:PipelineLayoutSource>{
-    device: D,
+pub struct Compute<L:PipelineLayoutSource + DeviceSource>{
     layout: L,
     pipeline: vk::Pipeline,
 }

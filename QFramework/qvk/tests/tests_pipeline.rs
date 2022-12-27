@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{descriptor::{self, DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetFactory, SetSource}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegmentSource, BufferFactory, BufferSegmentFactory}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
+use qvk::{descriptor::{DescriptorLayout, ApplyWriteFactory, DescriptorLayoutFactory, SetFactory, SetSource, DescriptorPoolFactory}, init::{device, instance, InstanceFactory, DeviceFactory}, memory::{buffer::{BufferSegmentSource, BufferFactory, BufferSegmentFactory}, MemoryFactory}, pipelines::{PipelineLayoutFactory, ComputePipelineFactory}, shader::{HLSL, ShaderFactory}, command::{Executor, CommandBufferFactory, CommandBufferSource}};
 use qvk::init::DeviceSource;
 use std::mem::size_of;
 
@@ -32,7 +32,7 @@ fn compute_pipeline(){
     uniform_access.apply(&uniform_write);
 
     let pool_layouts = [(&dlayout, 1)];
-    let dpool = descriptor::Pool::new(&device, &pool_layouts, None);
+    let dpool = device.create_descriptor_pool(&pool_layouts, None);
 
     let dset = dpool.create_set(&dlayout);
     dset.update();

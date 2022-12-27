@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
 
-use crate::{init::DeviceSource, queue::Queue, memory::buffer::{BufferSource, BufferSupplier}, image::{ImageSource, ImageSupplier}};
+use crate::{init::DeviceSource, queue::Queue};
 
 pub mod commandpool;
 pub trait CommandPoolFactory<C:CommandPoolSource>{
@@ -12,9 +12,7 @@ pub trait CommandPoolFactory<C:CommandPoolSource>{
 pub trait CommandPoolSource{
     fn cmdpool(&self) -> &vk::CommandPool;
 }
-pub trait CommandPoolSupplier<C:CommandPoolSource>{
-    fn cmdpool_source(&self) -> &C;
-}
+
 pub trait CommandPoolOps{
     fn reset_cmdpool(&self);
 }
@@ -43,12 +41,14 @@ pub trait BindSetFactory{
 pub trait BufferCopyFactory{
     fn size(&self) -> u64;
     fn offset(&self) -> u64;
+    fn buffer(&self) -> vk::Buffer;
 }
 pub trait ImageCopyFactory{
     fn extent(&self) -> vk::Extent3D;
     fn subresource(&self) -> vk::ImageSubresourceLayers;
     fn offset(&self) -> vk::Offset3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
+    fn image(&self) -> vk::Image;
 }
 pub trait ImageTransitionFactory{
     fn image(&self) -> vk::Image;
@@ -62,11 +62,11 @@ pub trait CommandBufferSource{
     fn barrier(&self, info: vk::DependencyInfo);
     fn bind_pipeline<BP: BindPipelineFactory>(&self, pipeline: &BP);
     fn bind_set<BP:BindPipelineFactory, BS: BindSetFactory>(&self, set: &BS, set_index: u32, pipeline: &BP);
-    fn buffer_copy<B1:BufferSource, B2:BufferSource, BP1: BufferCopyFactory + BufferSupplier<B1>, BP2: BufferCopyFactory + BufferSupplier<B2>>(&self, src: &BP1, dst: &BP2) -> Result<(), CommandOpError>;
-    fn buffer_image_copy<B:BufferSource, BS: BufferCopyFactory + BufferSupplier<B>, I:ImageSource, IR: ImageCopyFactory + ImageSupplier<I>>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
-    fn image_copy<I1: ImageSource, I2: ImageSource, IR1: ImageCopyFactory + ImageSupplier<I1>, IR2: ImageCopyFactory + ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError>;
-    fn image_blit<I1: ImageSource, I2: ImageSource, IR1: ImageCopyFactory + ImageSupplier<I1>, IR2: ImageCopyFactory + ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError>;
-    fn image_buffer_copy<B:BufferSource, BS: BufferCopyFactory + BufferSupplier<B>, I:ImageSource, IR: ImageCopyFactory + ImageSupplier<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
+    fn buffer_copy<BP1: BufferCopyFactory, BP2: BufferCopyFactory>(&self, src: &BP1, dst: &BP2) -> Result<(), CommandOpError>;
+    fn buffer_image_copy<BS: BufferCopyFactory, IR: ImageCopyFactory>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
+    fn image_copy<IR1: ImageCopyFactory, IR2: ImageCopyFactory>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError>;
+    fn image_blit<IR1: ImageCopyFactory, IR2: ImageCopyFactory>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError>;
+    fn image_buffer_copy<BS: BufferCopyFactory, IR: ImageCopyFactory>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError>;
     fn dispatch(&self, x: u32, y: u32, z:u32);
     fn transition_img<Img:ImageTransitionFactory>(&self, factory:&Img, new_layout: vk::ImageLayout, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2);
 }

@@ -30,9 +30,7 @@ pub trait MemorySource{
     fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError>;
     fn memory(&self) -> &vk::DeviceMemory;
 }
-pub trait MemorySupplier<M:MemorySource>{
-    fn memory_source(&self) -> &M;
-}
+
 pub struct Memory<D: DeviceSource, P: PartitionSource>{
     device: D,
     partition_sys: Mutex<P>,

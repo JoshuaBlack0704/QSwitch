@@ -6,7 +6,7 @@ use ash_window;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use crate::init::{DeviceSource, InstanceSource, PhysicalDeviceData};
 
-use super::{Device, DeviceFactory, DeviceSupplier};
+use super::{Device, DeviceFactory};
 
 pub trait DeviceSettingsStore{
     fn choose_device(&self) -> bool;
@@ -458,7 +458,7 @@ impl<I:InstanceSource + Clone> InstanceSource for Settings<'_, I>{
     }
 }
 
-impl<I:InstanceSource + Clone>   InstanceSource for Arc<Device<I>>{
+impl<I:InstanceSource + Clone> InstanceSource for Arc<Device<I>>{
     fn instance(&self) -> &ash::Instance {
         self.instance.instance()
     }
@@ -468,8 +468,3 @@ impl<I:InstanceSource + Clone>   InstanceSource for Arc<Device<I>>{
     }
 }
 
-impl<I:InstanceSource> DeviceSupplier<Self> for Arc<Device<I>>{
-    fn device_provider(&self) -> &Self {
-        self
-    }
-}

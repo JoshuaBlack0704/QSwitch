@@ -3,9 +3,9 @@ use std::sync::Arc;
 use ash::vk;
 use log::debug;
 
-use crate::{init::DeviceSource, memory::buffer::BufferSupplier};
+use crate::init::{DeviceSource, InstanceSource};
 
-use super::{CommandBuffer, CommandBufferSource, BindPipelineFactory, BindSetFactory, CommandOpError};
+use super::{CommandBuffer, CommandBufferSource, BindPipelineFactory, BindSetFactory, CommandOpError, BufferCopyFactory, ImageCopyFactory};
 
  
 impl<D:DeviceSource + Clone> CommandBuffer<D>{
@@ -66,7 +66,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
     }
 
 
-    fn buffer_copy<B1:crate::memory::buffer::BufferSource, B2:crate::memory::buffer::BufferSource, BP1: super::BufferCopyFactory + BufferSupplier<B1>, BP2: super::BufferCopyFactory + BufferSupplier<B2>>(&self, src: &BP1, dst: &BP2) -> Result<(), CommandOpError> {
+    fn buffer_copy<BP1: BufferCopyFactory, BP2: BufferCopyFactory>(&self, src: &BP1, dst: &BP2) -> Result<(), CommandOpError> {
         
         if src.size() > dst.size(){
             return Err(CommandOpError::MemOpNoSpace);
@@ -81,12 +81,12 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
 
         unsafe{
             let device = self.device.device();
-            device.cmd_copy_buffer(self.cmd, *src.buffer_provider().buffer(), *dst.buffer_provider().buffer(), &op);
+            device.cmd_copy_buffer(self.cmd, src.buffer(), dst.buffer(), &op);
         }
         Ok(())
     }
 
-    fn buffer_image_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageSource, IR: super::ImageCopyFactory + crate::image::ImageSupplier<I>>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
+    fn buffer_image_copy<BS: BufferCopyFactory, IR: ImageCopyFactory>(&self, src: &BS, dst: &IR, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
         if dst.extent().width == 0{
             return Ok(());
         }
@@ -106,7 +106,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         let subresource = dst.subresource();
         let offset = dst.offset();
         let extent = dst.extent();
-        let image = dst.image_provider().image();
+        let image = dst.image();
         let layout = dst.layout();
         
         let info = [vk::BufferImageCopy::builder()
@@ -120,14 +120,14 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
 
         unsafe{
             let device = self.device.device();
-            debug!("Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}", src.size(), *src.buffer_provider().buffer(), dst.subresource(), *image);
-            device.cmd_copy_buffer_to_image(self.cmd, *src.buffer_provider().buffer(), *image, *layout, &info);
+            debug!("Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}", src.size(), src.buffer(), dst.subresource(), image);
+            device.cmd_copy_buffer_to_image(self.cmd, src.buffer(), image, *layout, &info);
         }
 
         Ok(())
     }
 
-    fn image_copy<I1: crate::image::ImageSource, I2: crate::image::ImageSource, IR1: super::ImageCopyFactory + crate::image::ImageSupplier<I1>, IR2: super::ImageCopyFactory + crate::image::ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError> {
+    fn image_copy<IR1: ImageCopyFactory, IR2: ImageCopyFactory>(&self, src: &IR1, dst: &IR2) -> Result<(), CommandOpError> {
         if src.extent().width == 0{
             return Ok(());
         }
@@ -158,18 +158,18 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         .extent(src.extent())
         .build()];
 
-        let src_image = src.image_provider().image();
-        let dst_image = dst.image_provider().image();
-        debug!("Copying layer {:?} for image {:?} to image {:?}", src.subresource(), *src_image, *dst_image);
+        let src_image = src.image();
+        let dst_image = dst.image();
+        debug!("Copying layer {:?} for image {:?} to image {:?}", src.subresource(), src_image, dst_image);
 
         unsafe{
             let device = self.device.device();
-            device.cmd_copy_image(self.cmd, *src_image, *src_layout, *dst_image, *dst_layout, &op);
+            device.cmd_copy_image(self.cmd, src_image, *src_layout, dst_image, *dst_layout, &op);
         }
         Ok(())
     }
 
-    fn image_blit<I1: crate::image::ImageSource, I2: crate::image::ImageSource, IR1: super::ImageCopyFactory + crate::image::ImageSupplier<I1>, IR2: super::ImageCopyFactory + crate::image::ImageSupplier<I2>>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError> {
+    fn image_blit<IR1: ImageCopyFactory, IR2: ImageCopyFactory>(&self, src: &IR1, dst: &IR2, scale_filter: vk::Filter) -> Result<(), CommandOpError> {
         if src.extent().width == 0{
             return Ok(());
         }
@@ -192,8 +192,8 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         let src_layout = src.layout();
         let dst_layout = dst.layout();
 
-        let src_image = src.image_provider().image();
-        let dst_image = dst.image_provider().image();
+        let src_image = src.image();
+        let dst_image = dst.image();
 
         let src_lower = src.offset();
         let src_upper = vk::Offset3D::builder().x(src_lower.x + src.extent().width as i32).y(src_lower.y + src.extent().height as i32).z(src_lower.z + src.extent().depth as i32).build();
@@ -209,13 +209,13 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
 
         unsafe{
             let device = self.device.device();
-            device.cmd_blit_image(self.cmd, *src_image, *src_layout, *dst_image, *dst_layout, &blit, scale_filter);
+            device.cmd_blit_image(self.cmd, src_image, *src_layout, dst_image, *dst_layout, &blit, scale_filter);
         }
 
         Ok(())
     }
 
-    fn image_buffer_copy<B:crate::memory::buffer::BufferSource, BS: super::BufferCopyFactory + BufferSupplier<B>, I:crate::image::ImageSource, IR: super::ImageCopyFactory + crate::image::ImageSupplier<I>>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
+    fn image_buffer_copy<BS: BufferCopyFactory, IR: ImageCopyFactory>(&self, src: &IR, dst: &BS, buffer_addressing: Option<(u32,u32)>) -> Result<(), CommandOpError> {
         let buffer_offset = dst.offset();
         let mut addressing = (0,0);
         if let Some(a) = buffer_addressing{
@@ -225,7 +225,7 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
         let subresource = src.subresource();
         let offset = src.offset();
         let extent = src.extent();
-        let image = src.image_provider().image();
+        let image = src.image();
         let layout = src.layout();
         
         let info = [vk::BufferImageCopy::builder()
@@ -239,9 +239,9 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
 
         unsafe{
             let device = self.device.device();
-            let buffer = dst.buffer_provider().buffer();
-            debug!("Copying image layer {:?} from image {:?} to buffer {:?}", src.subresource(), *image, *buffer);
-            device.cmd_copy_image_to_buffer(self.cmd, *image, *layout, *buffer, &info);
+            let buffer = dst.buffer();
+            debug!("Copying image layer {:?} from image {:?} to buffer {:?}", src.subresource(), image, buffer);
+            device.cmd_copy_image_to_buffer(self.cmd, image, *layout, buffer, &info);
         }
         Ok(())
     }
@@ -280,3 +280,59 @@ impl<D:DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>>{
 
 }
 
+impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<CommandBuffer<D>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
+    }
+}
+
+impl<D:DeviceSource> DeviceSource for Arc<CommandBuffer<D>>{
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
+    }
+}

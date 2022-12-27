@@ -1,12 +1,12 @@
 use std::ffi::c_void;
-use std::{marker::PhantomData, sync::Mutex};
+use std::sync::Mutex;
 
 use ash::vk;
 use crate::command::{ImageCopyFactory, BufferCopyFactory};
-use crate::image::{ImageSource, ImageSupplier};
+use crate::image::ImageSource;
 
-use crate::init::{DeviceSource, InstanceSource, DeviceSupplier};
-use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
+use crate::init::DeviceSource;
+use crate::memory::{MemorySource, PartitionSource};
 use crate::memory::buffer::buffer::BufferAlignmentType;
 use crate::memory::buffer::buffersegment::BufferSegmentMemOpError;
 use crate::memory::partitionsystem::PartitionError;
@@ -29,12 +29,7 @@ pub trait BufferSource{
     fn usage(&self) -> vk::BufferUsageFlags;
 }
 
-pub trait BufferSupplier<B:BufferSource>{
-    fn buffer_provider(&self) -> &B;
-}
-pub struct Buffer<D: DeviceSource, M: MemorySource, P: PartitionSource>{
-
-    device: D,
+pub struct Buffer< M: MemorySource + DeviceSource, P: PartitionSource>{
     memory: M,
     memory_partition: Partition,
     partition_sys: Mutex<P>,
@@ -52,18 +47,15 @@ pub trait BufferSegmentSource{
     fn device_addr(&self) -> vk::DeviceSize;
     fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError>;
     fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError>;
-    fn copy_to_segment_internal<B:BufferSource, BP:BufferCopyFactory + BufferSupplier<B>>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError>;
+    fn copy_to_segment_internal<BP:BufferCopyFactory + BufferSource>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError>;
     ///Addressing is (bufferRowLength, bufferImageHeight)
-    fn copy_to_image_internal<I:ImageSource, IS: ImageSupplier<I> + ImageCopyFactory>(&self,dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
+    fn copy_to_image_internal<I:ImageSource + ImageCopyFactory>(&self,dst: &I, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result>;
 }
-pub struct BufferSegment<D: DeviceSource + InstanceSource, M:MemorySource, B: BufferSource + MemorySupplier<M> + DeviceSupplier<D>>{
-
+pub struct BufferSegment<B: BufferSource + MemorySource + DeviceSource>{
     buffer: B,
     partition: Partition,
     desc_buffer_info: [vk::DescriptorBufferInfo;1],
     _device_addr: Option<vk::DeviceAddress>,
-    _memory: PhantomData<M>,
-    _device: PhantomData<D>
 }
 
 

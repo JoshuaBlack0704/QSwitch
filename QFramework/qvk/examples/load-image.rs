@@ -27,7 +27,7 @@ fn main(){
    
     let dev_mem = device.create_memory(1024 * 1024 * 100, device.device_memory_index(), None).unwrap();
 
-    let image = dev_mem.create_image(vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
+    let image = dev_mem.create_image(&device, vk::Format::B8G8R8A8_SRGB, vk::Extent3D::builder().width(1920).height(1080).depth(1).build(), 1, 1, vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, None).unwrap();
     image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
     let resource = image.create_resource(vk::Offset3D::default(), image.extent(), 0, vk::ImageAspectFlags::COLOR).unwrap();
     let file = String::from("examples/resources/drone.jpg");

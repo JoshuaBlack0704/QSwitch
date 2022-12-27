@@ -4,12 +4,12 @@ use ash::vk;
 use log::{debug, info};
 use crate::descriptor::{DescriptorLayoutSource, DescriptorPoolSource};
 
-use crate::init::{DeviceSource, DeviceSupplier};
+use crate::init::{DeviceSource, InstanceSource};
 
-use super::{Pool, WriteSource};
+use super::{Pool, WriteSource, DescriptorPoolFactory};
 
-impl<D:DeviceSource + Clone> Pool<D>{
-    pub fn new<W:WriteSource, L:DescriptorLayoutSource<W> + Clone>(device_provider: &D, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
+impl<D:DeviceSource + Clone> DescriptorPoolFactory<Arc<Pool<D>>> for D{
+    fn create_descriptor_pool<W:WriteSource, L:DescriptorLayoutSource<W>>(&self, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
         let mut pool_sizes:HashMap<vk::DescriptorType, vk::DescriptorPoolSize> = HashMap::new();
         let mut max_sets = 0;
 
@@ -44,14 +44,14 @@ impl<D:DeviceSource + Clone> Pool<D>{
 
         let pool;
         unsafe{
-            let device = device_provider.device();
+            let device = self.device();
             pool = device.create_descriptor_pool(&info, None).unwrap();
             info!("Created descriptor pool {:?} for {max_sets} sets", pool);
         }
 
         Arc::new(
-            Self{
-                device: device_provider.clone(),
+            Pool{
+                device: self.clone(),
                 pool,
             }
         )
@@ -88,8 +88,59 @@ impl<D:DeviceSource> Drop for Pool<D>{
     }
 }
 
-impl<D:DeviceSource> DeviceSupplier<D> for Arc<Pool<D>>{
-    fn device_provider(&self) -> &D {
-        &self.device
+impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Pool<D>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
+    }
+}
+
+impl<D:DeviceSource> DeviceSource for Arc<Pool<D>>{
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
     }
 }

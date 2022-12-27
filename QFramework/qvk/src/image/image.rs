@@ -6,37 +6,37 @@ use log::{debug, info};
 
 use crate::command::{CommandBufferFactory, CommandBufferSource, Executor};
 use crate::image::ImageSource;
-use crate::init::{DeviceSource, DeviceSupplier};
-use crate::memory::{MemorySource, partitionsystem,  Memory, PartitionSystem, MemorySupplier};
+use crate::init::{DeviceSource, InstanceSource};
+use crate::memory::{MemorySource, partitionsystem,  Memory, PartitionSystem};
 
-use super::{Image, ImageFactory, ImageSupplier};
+use super::{Image, ImageFactory};
 
-impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource + Clone, Sup: DeviceSupplier<D> + MemorySupplier<M>> ImageFactory<Arc<Image<D,M>>> for Sup{
-    fn create_image(&self, format: vk::Format, extent: vk::Extent3D, levels: u32, layers: u32, usage: vk::ImageUsageFlags, extensions: Option<*const c_void>) -> Result<Arc<Image<D,M>>, ImageCreateError> {
+impl<D:DeviceSource + Clone, M: DeviceSource + MemorySource + Clone> ImageFactory<D, Arc<Image<D, M>>> for M{
+    fn create_image(&self, device_source: &D, format: vk::Format, extent: vk::Extent3D, levels: u32, layers: u32, usage: vk::ImageUsageFlags, extensions: Option<*const c_void>) -> Result<Arc<Image<D,M>>, ImageCreateError> {
         let mut info = vk::ImageCreateInfo::builder();
         if let Some(ptr) = extensions{
            info.p_next = ptr; 
         }
-        if let Some(flags) = self.create_flags(){
+        if let Some(flags) = ImageFactory::<D,Arc<Image<D,M>>>::create_flags(self){
             info = info.flags(flags);
         }
-        info = info.image_type(self.image_type());
+        info = info.image_type(ImageFactory::<D,Arc<Image<D,M>>>::image_type(self));
         info = info.format(format);
         info = info.extent(extent);
         info = info.mip_levels(levels);
         info = info.array_layers(layers);
-        info = info.samples(self.samples());
-        info = info.tiling(self.tiling());
+        info = info.samples(ImageFactory::<D,Arc<Image<D,M>>>::samples(self));
+        info = info.tiling(ImageFactory::<D,Arc<Image<D,M>>>::tiling(self));
         info = info.usage(usage);
         info = info.sharing_mode(vk::SharingMode::EXCLUSIVE);
-        let indices = self.share();
+        let indices = ImageFactory::<D,Arc<Image<D,M>>>::share(self);
         if let Some(indices) = &indices{
             info = info.sharing_mode(vk::SharingMode::CONCURRENT);
             info = info.queue_family_indices(indices);
         }
         info = info.initial_layout(vk::ImageLayout::UNDEFINED);
 
-        let device = self.device_provider().device();
+        let device = self.device();
         let image = unsafe{device.create_image(&info, None)};
         if let Err(e) = image{
             return Err(ImageCreateError::Vulkan(e));
@@ -45,20 +45,20 @@ impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource + Clone, Sup: De
         info!("Created image {:?}", image);
 
         let reqs = unsafe{device.get_image_memory_requirements(image)};
-        let memory_partition = self.memory_source().partition(reqs.size, Some(reqs.alignment));
+        let memory_partition = self.partition(reqs.size, Some(reqs.alignment));
         if let Err(e) = memory_partition{
             return Err(ImageCreateError::Memory(e));
         }
         let memory_partition = memory_partition.unwrap();
 
-        let res = unsafe{device.bind_image_memory(image, *self.memory_source().memory(), memory_partition.offset)};
+        let res = unsafe{device.bind_image_memory(image, *self.memory(), memory_partition.offset)};
         if let Err(e) = res{
             return Err(ImageCreateError::Vulkan(e));
         }
 
         let image = Arc::new(Image{
-            device: self.device_provider().clone(),
-            memory: Some(self.memory_source().clone()),
+            device: device_source.clone(),
+            memory: Some(self.clone()),
             _partition: Some(memory_partition),
             image,
             create_info: info.clone(),
@@ -75,8 +75,8 @@ pub enum ImageCreateError{
     Vulkan(vk::Result),
 }
 
-impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource + Clone> Image<D,M>{
-    pub fn from_swapchain_image(device_provider: &D, image: vk::Image, image_extent: vk::Extent2D) -> Arc<Image<D,Arc<Memory<D, PartitionSystem>>>>{
+impl<D:DeviceSource + Clone, M:MemorySource + DeviceSource + Clone> Image<D,M>{
+    pub fn from_swapchain_image(device_provider: &D, image: vk::Image, image_extent: vk::Extent2D) -> Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>{
         let extent = vk::Extent3D::builder().width(image_extent.width).height(image_extent.height).depth(1).build();
         Arc::new(
             Image{
@@ -95,7 +95,7 @@ impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource + Clone> Image<D
     }
 }
 
-impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource> ImageSource for Arc<Image<D,M>>{
+impl<D:DeviceSource + Clone, M:MemorySource + DeviceSource> ImageSource for Arc<Image<D,M>>{
     fn transition<C:CommandBufferSource>(
         &self, 
         cmd: &C, 
@@ -211,7 +211,7 @@ impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource> ImageSource for
 }
 
 
-impl<D:DeviceSource, M:MemorySource> Drop for Image<D,M>{
+impl<D:DeviceSource, M:MemorySource + DeviceSource> Drop for Image<D,M>{
     fn drop(&mut self) {
         debug!("Destroyed image {:?}", self.image);
         if let Some(_) = self.memory{
@@ -222,15 +222,79 @@ impl<D:DeviceSource, M:MemorySource> Drop for Image<D,M>{
     }
 }
 
-impl<D:DeviceSource, M:MemorySource> DeviceSupplier<D> for Arc<Image<D,M>>{
-    fn device_provider(&self) -> &D {
-        &self.device
+impl<D:DeviceSource + InstanceSource, M:MemorySource + DeviceSource> InstanceSource for Arc<Image<D,M>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
+    }
+}
+
+impl<D:DeviceSource, M:MemorySource + DeviceSource> MemorySource for Arc<Image<D,M>>{
+    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<crate::memory::Partition, partitionsystem::PartitionError> {
+        if let Some(m) = &self.memory{
+            return m.partition(size, alignment);
+        }
+
+        Err(partitionsystem::PartitionError::NoSpace)
+
+    }
+
+    fn memory(&self) -> &vk::DeviceMemory {
+        if let Some(m) = &self.memory{
+            return m.memory();
+        }
+        panic!("Image not created from application created memory");
+    }
+}
+
+impl<D:DeviceSource, M:MemorySource + DeviceSource> DeviceSource for Arc<Image<D,M>>{
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
     }
 }
 
 
-impl<D:DeviceSource + Clone + DeviceSupplier<D>, M:MemorySource> ImageSupplier<Self> for Arc<Image<D,M>>{
-    fn image_provider(&self) -> &Self {
-        self
-    }
-}

@@ -3,12 +3,13 @@ use std::sync::Arc;
 use ash::vk;
 
 use crate::image::{ImageSource, ImageViewSource};
-use crate::init::{DeviceSource, DeviceSupplier};
+use crate::init::{DeviceSource, InstanceSource};
+use crate::memory::MemorySource;
 
-use super::{ImageView, ImageSupplier, ImageViewFactory, ImageResourceSource, ImageResourceSupplier};
+use super::{ImageView, ImageViewFactory, ImageResourceSource};
 
-impl<D:DeviceSource + Clone, Img: ImageSource, IR:ImageResourceSource + Clone, Factory: DeviceSupplier<D> + ImageSupplier<Img> + ImageResourceSupplier<IR>> ImageViewFactory<Arc<ImageView<D,Img, IR>>> for Factory{
-    fn create_image_view(&self, format: vk::Format, view_type: vk::ImageViewType, swizzle: Option<vk::ComponentMapping>, flags: Option<vk::ImageViewCreateFlags>) -> Arc<ImageView<D,Img, IR>> {
+impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone> ImageViewFactory<Arc<ImageView<Factory>>> for Factory{
+    fn create_image_view(&self, format: vk::Format, view_type: vk::ImageViewType, swizzle: Option<vk::ComponentMapping>, flags: Option<vk::ImageViewCreateFlags>) -> Arc<ImageView<Factory>> {
         let components;
         if let Some(c) = swizzle{
             components = c;
@@ -28,15 +29,15 @@ impl<D:DeviceSource + Clone, Img: ImageSource, IR:ImageResourceSource + Clone, F
         }
 
         let range = vk::ImageSubresourceRange::builder()
-        .aspect_mask(self.image_resource().aspect())
-        .base_mip_level(self.image_resource().level())
+        .aspect_mask(self.aspect())
+        .base_mip_level(self.level())
         .base_array_layer(0)
         .level_count(1)
         .level_count(1);
 
         
         info = info
-        .image(*self.image_provider().image())
+        .image(*self.image())
         .view_type(view_type)
         .format(format)
         .components(components)
@@ -44,20 +45,86 @@ impl<D:DeviceSource + Clone, Img: ImageSource, IR:ImageResourceSource + Clone, F
 
         let view;
         unsafe{
-            view = self.device_provider().device().create_image_view(&info, None).unwrap();
+            view = self.device().create_image_view(&info, None).unwrap();
         }
 
         Arc::new(
             ImageView{
-                _device: self.device_provider().clone(),
-                _image_resource: self.image_resource().clone(),
-                _image: std::marker::PhantomData,
+                _image_resource: self.clone(),
                 _view: view,
             }
         )
     }
 }
 
-impl<D:DeviceSource, I:ImageSource, IR:ImageResourceSource> ImageViewSource for Arc<ImageView<D,I,IR>>{
+impl<IR:ImageResourceSource + DeviceSource + ImageSource> ImageViewSource for Arc<ImageView<IR>>{
     
+}
+
+impl<IR:ImageResourceSource + DeviceSource + ImageSource + InstanceSource> InstanceSource for Arc<ImageView<IR>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self._image_resource.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self._image_resource.entry()
+    }
+}
+
+impl<IR:ImageResourceSource + DeviceSource + ImageSource + MemorySource> MemorySource for Arc<ImageView<IR>>{
+    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<crate::memory::Partition, crate::memory::partitionsystem::PartitionError> {
+        self._image_resource.partition(size, alignment)
+    }
+
+    fn memory(&self) -> &vk::DeviceMemory {
+        self._image_resource.memory()
+    }
+}
+
+impl<IR:ImageResourceSource + DeviceSource + ImageSource> DeviceSource for Arc<ImageView<IR>>{
+    
+    fn device(&self) -> &ash::Device {
+        self._image_resource.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self._image_resource.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self._image_resource.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self._image_resource.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self._image_resource.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self._image_resource.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self._image_resource.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self._image_resource.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self._image_resource.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self._image_resource.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self._image_resource.host_memory_index()
+    }
 }

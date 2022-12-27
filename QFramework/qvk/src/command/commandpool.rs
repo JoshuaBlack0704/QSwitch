@@ -2,9 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use log::{debug, info};
-use crate::command::CommandPoolSource;
+use crate::{command::CommandPoolSource, init::InstanceSource};
 
-use crate::init::{DeviceSource, DeviceSupplier};
+use crate::init::DeviceSource;
 use super::{CommandPool, CommandPoolOps, CommandPoolFactory, CommandBufferFactory, CommandBuffer, CommandBufferSource};
 
 
@@ -50,9 +50,9 @@ impl<D:DeviceSource + Clone> CommandBufferFactory<Arc<CommandBuffer<D>>> for Arc
     }
 }
 
-impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> CommandPoolFactory<Arc<CommandPool<D, Arc<CommandBuffer<D>>>>> for DS{
+impl<D:DeviceSource + Clone> CommandPoolFactory<Arc<CommandPool<D, Arc<CommandBuffer<D>>>>> for D{
     fn create_command_pool(&self, queue_family_index: u32, create_flags: Option<vk::CommandPoolCreateFlags>) -> Result<Arc<CommandPool<D, Arc<CommandBuffer<D>>>>, vk::Result> {
-        let device_provider = self.device_provider();
+        let device_provider = self;
         let mut cmdpool_cinfo = vk::CommandPoolCreateInfo::builder();
         cmdpool_cinfo = cmdpool_cinfo.queue_family_index(queue_family_index);
         if let Some(flags) = create_flags{
@@ -112,8 +112,59 @@ impl<D: DeviceSource, C:CommandBufferSource> Drop for CommandPool<D,C>{
     }
 }
 
-impl<D: DeviceSource, C:CommandBufferSource> DeviceSupplier<D> for CommandPool<D,C>{
-    fn device_provider(&self) -> &D {
-        &self.device
+impl<D: DeviceSource + InstanceSource, C:CommandBufferSource> InstanceSource for Arc<CommandPool<D,C>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
+    }
+}
+
+impl<D: DeviceSource, C:CommandBufferSource> DeviceSource for Arc<CommandPool<D,C>>{
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
     }
 }

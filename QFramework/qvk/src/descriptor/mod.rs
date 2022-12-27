@@ -56,15 +56,16 @@ pub trait SetSource{
     fn update(&self);
 }
 #[allow(unused)]
-pub struct Set<D:DeviceSource, L:DescriptorLayoutSource<W>,P:DescriptorPoolSource, W:WriteSource>{
-    device: D,
-    layout: L,
-    _pool: P,
+pub struct Set<P:DescriptorPoolSource + DeviceSource, W:WriteSource>{
+    pool: P,
     writes: Vec<W>,
     set: vk::DescriptorSet,
 }
 
 pub mod pool;
+pub trait DescriptorPoolFactory<P:DescriptorPoolSource>{
+    fn create_descriptor_pool<W:WriteSource, L:DescriptorLayoutSource<W>>(&self, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> P;
+}
 #[allow(unused)]
 pub trait DescriptorPoolSource{
     fn allocate_set<W:WriteSource, L:DescriptorLayoutSource<W>>(&self, layout: &L) -> vk::DescriptorSet;

@@ -3,7 +3,6 @@ use std::sync::Mutex;
 use ash::vk;
 
 use crate::queue::QueueSource;
-use crate::image::ImageSource;
 
 use self::swapchain::SwapchainSettingsStore;
 
@@ -38,9 +37,6 @@ pub trait DeviceSource{
     fn host_memory_index(&self) -> u32;
 }
 
-pub trait DeviceSupplier<D:DeviceSource>{
-    fn device_provider(&self) -> &D;
-}
 pub struct Device<I: InstanceSource>{
     instance: I,
     surface: Option<vk::SurfaceKHR>,
@@ -61,14 +57,14 @@ pub struct PhysicalDeviceData{
 }
 
 pub mod swapchain;
-pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Img:ImageSource, Q:QueueSource>{
+pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q:QueueSource>{
     device: D,
     _settings: S,
-    create_info: vk::SwapchainCreateInfoKHR,
+    create_info: Mutex<vk::SwapchainCreateInfoKHR>,
     surface_loader: ash::extensions::khr::Surface,
     swapchain_loader: ash::extensions::khr::Swapchain,
     swapchain: Mutex<vk::SwapchainKHR>,
-    images: Mutex<Vec<Img>>,
+    images: Mutex<Vec<vk::Image>>,
     present_queue: Q,
 }
 

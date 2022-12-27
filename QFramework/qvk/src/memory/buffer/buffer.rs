@@ -3,11 +3,11 @@ use std::{sync::{Arc, Mutex}, ffi::c_void};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{init::{DeviceSource, DeviceSupplier}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
-use crate::memory::{MemorySupplier, MemorySource, PartitionSource};
+use crate::{init::{DeviceSource, InstanceSource}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
+use crate::memory::{MemorySource, PartitionSource};
 use crate::memory::buffer::BufferSource;
 
-use super::{Buffer, BufferFactory, BufferSupplier};
+use super::{Buffer, BufferFactory};
 
 
 pub trait BufferSettingsStore{
@@ -45,8 +45,8 @@ pub struct SettingsStore{
     pub share: Option<Vec<u32>>,
 }
 
-impl<D:DeviceSource + Clone , M:MemorySource + Clone, MS:MemorySupplier<M> + DeviceSupplier<D>> BufferFactory<Arc<Buffer<D,M,PartitionSystem>>> for MS{
-    fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags, flags: Option<vk::BufferCreateFlags>, extensions: Option<*const c_void>) -> Result<Arc<Buffer<D,M,PartitionSystem>>, BufferCreateError> {
+impl<MS:MemorySource + DeviceSource + Clone> BufferFactory<Arc<Buffer<MS,PartitionSystem>>> for MS{
+    fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags, flags: Option<vk::BufferCreateFlags>, extensions: Option<*const c_void>) -> Result<Arc<Buffer<MS,PartitionSystem>>, BufferCreateError> {
         // First we need to create the buffer
         let mut info = vk::BufferCreateInfo::builder();
         if let Some(ptr) = extensions{
@@ -64,7 +64,7 @@ impl<D:DeviceSource + Clone , M:MemorySource + Clone, MS:MemorySupplier<M> + Dev
             info = info.queue_family_indices(&indices);
         }
         
-        let device = self.device_provider().device();
+        let device = self.device();
         let buffer = unsafe{device.create_buffer(&info, None)};
         
         if let Err(e) = buffer{
@@ -73,35 +73,34 @@ impl<D:DeviceSource + Clone , M:MemorySource + Clone, MS:MemorySupplier<M> + Dev
         
         let buffer = buffer.unwrap();
         let reqs:vk::MemoryRequirements = unsafe{device.get_buffer_memory_requirements(buffer)};
-        let memory_partition = self.memory_source().partition(reqs.size, Some(reqs.alignment));
+        let memory_partition = self.partition(reqs.size, Some(reqs.alignment));
             
         if let Err(e) = memory_partition{
             return Err(BufferCreateError::ParitionError(e));
         }
         let memory_partition = memory_partition.unwrap();
         let offset = memory_partition.offset();
-        info!("Created buffer {:?} of size {:?} on memory {:?} at offset {:?}", buffer, size, *self.memory_source().memory(), offset);
+        info!("Created buffer {:?} of size {:?} on memory {:?} at offset {:?}", buffer, size, *self.memory(), offset);
         
         // Now that we have a suitable memory partition we need to bind our buffer
-        let result = unsafe{device.bind_buffer_memory(buffer, *self.memory_source().memory(), offset)};
+        let result = unsafe{device.bind_buffer_memory(buffer, *self.memory(), offset)};
         if let Err(e) = result {
             return Err(BufferCreateError::VulkanResult(e));
         }
 
         let mut alignment = BufferAlignmentType::Free;
         if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-            alignment = BufferAlignmentType::Aligned(self.device_provider().physical_device().properties.limits.min_storage_buffer_offset_alignment);
+            alignment = BufferAlignmentType::Aligned(self.physical_device().properties.limits.min_storage_buffer_offset_alignment);
         }
         else if usage.contains(vk::BufferUsageFlags::UNIFORM_BUFFER){
-            alignment = BufferAlignmentType::Aligned(self.device_provider().physical_device().properties.limits.min_uniform_buffer_offset_alignment);
+            alignment = BufferAlignmentType::Aligned(self.physical_device().properties.limits.min_uniform_buffer_offset_alignment);
         }
         else if usage.contains(vk::BufferUsageFlags::UNIFORM_TEXEL_BUFFER){
-            alignment = BufferAlignmentType::Aligned(self.device_provider().physical_device().properties.limits.min_texel_buffer_offset_alignment);
+            alignment = BufferAlignmentType::Aligned(self.physical_device().properties.limits.min_texel_buffer_offset_alignment);
         }
         
         Ok(Arc::new(Buffer{
-            device: self.device_provider().clone(),
-            memory: self.memory_source().clone(),
+            memory: self.clone(),
             memory_partition,
             partition_sys: Mutex::new(PartitionSystem::new(size)),
             buffer,
@@ -111,7 +110,7 @@ impl<D:DeviceSource + Clone , M:MemorySource + Clone, MS:MemorySupplier<M> + Dev
     }
 }
 
-impl<D:DeviceSource, M:MemorySource, P:PartitionSource> BufferSource for Arc<Buffer<D,M,P>>{
+impl<M:MemorySource + DeviceSource, P:PartitionSource> BufferSource for Arc<Buffer<M,P>>{
 
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer
@@ -138,11 +137,11 @@ impl<D:DeviceSource, M:MemorySource, P:PartitionSource> BufferSource for Arc<Buf
     }
 }
 
-impl<D:DeviceSource, M:MemorySource, P:PartitionSource> Drop for Buffer<D,M,P>{
+impl<M:MemorySource + DeviceSource, P:PartitionSource> Drop for Buffer<M,P>{
     fn drop(&mut self) {
         debug!("Destroyed buffer {:?}", self.buffer);
         unsafe{
-            self.device.device().destroy_buffer(self.buffer, None);
+            self.memory.device().destroy_buffer(self.buffer, None);
         }
     }
 }
@@ -193,20 +192,70 @@ impl BufferSettingsStore for SettingsStore{
     }
 }
 
-impl<D:DeviceSource, P:PartitionSource, M:MemorySource> DeviceSupplier<D> for Arc<Buffer<D,M,P>>{
-    fn device_provider(&self) -> &D {
-        &self.device
+impl<P:PartitionSource, M:MemorySource + DeviceSource + InstanceSource> InstanceSource for Arc<Buffer<M,P>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self.memory.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.memory.entry()
     }
 }
 
-impl<D:DeviceSource, P:PartitionSource, M:MemorySource> MemorySupplier<M> for Arc<Buffer<D,M,P>>{
-    fn memory_source(&self) -> &M {
-        &self.memory
+impl<P:PartitionSource, M:MemorySource + DeviceSource> DeviceSource for Arc<Buffer<M,P>>{
+    fn device(&self) -> &ash::Device {
+        self.memory.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.memory.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.memory.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.memory.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.memory.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.memory.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.memory.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.memory.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.memory.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.memory.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.memory.host_memory_index()
     }
 }
 
-impl <D:DeviceSource, M:MemorySource, P:PartitionSource> BufferSupplier<Self> for Arc<Buffer<D,M,P>>{
-    fn buffer_provider(&self) -> &Self {
-        self
+impl<P:PartitionSource, M:MemorySource + DeviceSource> MemorySource for Arc<Buffer<M,P>>{
+    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError> {
+        self.memory.partition(size, alignment)
+    }
+
+    fn memory(&self) -> &vk::DeviceMemory {
+        self.memory.memory()
     }
 }
+

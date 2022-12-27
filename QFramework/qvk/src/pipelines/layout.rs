@@ -3,14 +3,13 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::DeviceSupplier;
-use crate::init::DeviceSource;
+use crate::init::{DeviceSource, InstanceSource};
 use crate::descriptor::{DescriptorLayoutSource, WriteSource};
 use crate::pipelines::PipelineLayoutSource;
 
 use super::{Layout, PipelineLayoutFactory};
 
-impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> PipelineLayoutFactory<Arc<Layout<D>>> for DS{
+impl<D:DeviceSource + Clone> PipelineLayoutFactory<Arc<Layout<D>>> for D{
     fn create_pipeline_layout<W:WriteSource>(&self, layouts: &[&impl DescriptorLayoutSource<W>], pushes: &[vk::PushConstantRange], flags: Option<vk::PipelineLayoutCreateFlags>) -> Arc<Layout<D>> {
         let mut info = vk::PipelineLayoutCreateInfo::builder();
 
@@ -25,7 +24,7 @@ impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> PipelineLayoutFactory<Arc<Lay
 
         let layout;
         unsafe{
-            let device = self.device_provider().device();
+            let device = self.device();
             layout = device.create_pipeline_layout(&info, None).unwrap();
         }
 
@@ -33,7 +32,7 @@ impl<D:DeviceSource + Clone, DS:DeviceSupplier<D>> PipelineLayoutFactory<Arc<Lay
 
         Arc::new(
             Layout{
-                device: self.device_provider().clone(),
+                device: self.clone(),
                 layout,
             }
         )
@@ -46,9 +45,60 @@ impl<D:DeviceSource> PipelineLayoutSource for Arc<Layout<D>>{
     }
 }
 
-impl<D:DeviceSource> DeviceSupplier<D> for Arc<Layout<D>>{
-    fn device_provider(&self) -> &D {
-        &self.device
+impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Layout<D>>{
+    
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
+    }
+}
+
+impl<D:DeviceSource> DeviceSource for Arc<Layout<D>>{
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
     }
 }
 

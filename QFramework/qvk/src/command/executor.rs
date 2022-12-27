@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use ash::vk;
 
-use crate::{init::{DeviceSource, DeviceSupplier}, queue::{QueueOps, SubmitSet, SubmitInfoSource, QueueFactory}};
+use crate::{init::DeviceSource, queue::{QueueOps, SubmitSet, SubmitInfoSource, QueueFactory}};
 
 use super::{Executor, CommandBufferFactory, CommandBuffer, CommandBufferSource, CommandPoolOps, CommandPoolFactory};
 
-impl<D:DeviceSource + Clone + DeviceSupplier<D>> Executor<D>{
+impl<D:DeviceSource + Clone> Executor<D>{
     pub fn new(device_provider: &D, queue_flags: vk::QueueFlags) -> Arc<Executor<D>> {
         let index = device_provider.get_queue(queue_flags).unwrap().1;
         let pool = device_provider.create_command_pool(index, None).unwrap();
