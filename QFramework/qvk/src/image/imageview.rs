@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ash::vk;
-use log::debug;
+use log::{debug, info};
 
 use crate::image::{ImageSource, ImageViewSource};
 use crate::init::{DeviceSource, InstanceSource};
@@ -34,7 +34,7 @@ impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone> ImageVie
         .base_mip_level(self.level())
         .base_array_layer(0)
         .level_count(1)
-        .level_count(1);
+        .layer_count(1);
 
         
         info = info
@@ -48,6 +48,7 @@ impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone> ImageVie
         unsafe{
             view = self.device().create_image_view(&info, None).unwrap();
         }
+        info!("Created image view {:?}", view);
 
         Arc::new(
             ImageView{

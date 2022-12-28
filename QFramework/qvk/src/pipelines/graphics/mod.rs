@@ -25,10 +25,10 @@ pub trait SubpassDescriptionSource{
     fn index(&self) -> MutexGuard<u32>;
     fn flags(&self) -> Option<vk::SubpassDescriptionFlags>;
     fn bind_point(&self) -> vk::PipelineBindPoint;
-    fn input_attachments(&self) -> Option<&[vk::AttachmentReference]>;
-    fn color_attachments(&self) -> Option<&[vk::AttachmentReference]>;
-    fn resolve_attachments(&self) -> Option<&[vk::AttachmentReference]>;
-    fn depth_stencil_attachment(&self) -> Option<&vk::AttachmentReference>;
+    fn input_attachments(&self) -> Option<MutexGuard<Vec<vk::AttachmentReference>>>;
+    fn color_attachments(&self) -> Option<MutexGuard<Vec<vk::AttachmentReference>>>;
+    fn resolve_attachments(&self) -> Option<MutexGuard<Vec<vk::AttachmentReference>>>;
+    fn depth_stencil_attachment(&self) -> Option<MutexGuard<vk::AttachmentReference>>;
     fn preserve_attachments(&self) -> Option<&[u32]>;
     fn dependencies(&self) -> Option<&[vk::SubpassDependency]>;
 }
@@ -42,10 +42,11 @@ pub trait FramebufferSource{
     
 }
 pub struct Renderpass<D:DeviceSource, A:RenderpassAttachmentSource>{
-    device: D,
-    attachments: Vec<vk::AttachmentDescription>,
-    subpass_refs: Vec<vk::SubpassDescription>,
-    image_views: Vec<A>,
+    _device: D,
+    _renderpass: vk::RenderPass,
+    _attachments: Vec<vk::AttachmentDescription>,
+    _subpass_refs: Vec<vk::SubpassDescription>,
+    _image_views: Vec<A>,
 }
 pub struct RenderPassAttachment<IV:ImageViewSource>{
     index: Mutex<u32>,
@@ -66,9 +67,10 @@ pub struct SubpassDescription<A:RenderpassAttachmentSource>{
     color_refs: Mutex<Vec<vk::AttachmentReference>>,
     resolve_attachments: Vec<A>,
     resolve_refs: Mutex<Vec<vk::AttachmentReference>>,
-    depth_attachment: A,
-    depth_ref: Mutex<Vec<vk::AttachmentReference>>,
+    depth_attachment: Option<A>,
+    depth_ref: Mutex<vk::AttachmentReference>,
     preserve_attachments: Vec<u32>,
+    dependencies: Vec<vk::SubpassDependency>,
     
 }
 

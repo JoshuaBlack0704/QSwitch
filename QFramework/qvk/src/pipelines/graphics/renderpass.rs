@@ -1,7 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use ash::vk;
-use log::info;
+use log::{info, debug};
 
 use crate::{init::DeviceSource, image::ImageViewSource};
 
@@ -41,24 +41,31 @@ impl<D:DeviceSource + Clone, A:RenderpassAttachmentSource + Clone> RenderpassFac
         let mut subpass_desc = vec![];
         let mut subpass_dep = vec![];
         for subpass in subpasses.iter(){
+            
+            let input_attachments = subpass.input_attachments();
+            let color_attachments = subpass.color_attachments();
+            let resolve_attachments = subpass.resolve_attachments ();
+            let depth_attachment = subpass.depth_stencil_attachment();
+            let preserve_attachment = subpass.preserve_attachments();
+            
             let mut info = vk::SubpassDescription::builder()
             .pipeline_bind_point(subpass.bind_point());
             if let Some(flags) = subpass.flags(){
                 info = info.flags(flags);
             }
-            if let Some(a) = subpass.input_attachments(){
+            if let Some(a) = &input_attachments{
                 info = info.input_attachments(a);
             }
-            if let Some(a) = subpass.color_attachments(){
+            if let Some(a) = &color_attachments{
                 info = info.color_attachments(a);
             }
-            if let Some(a) = subpass.resolve_attachments(){
+            if let Some(a) = &resolve_attachments{
                 info = info.resolve_attachments(a);
             }
-            if let Some(a) = subpass.depth_stencil_attachment(){
+            if let Some(a) = &depth_attachment{
                 info = info.depth_stencil_attachment(a);
             }
-            if let Some(a) = subpass.preserve_attachments(){
+            if let Some(a) = &preserve_attachment{
                 info = info.preserve_attachments(a);
             }
             *subpass.index() = subpass_desc.len() as u32;
@@ -84,10 +91,11 @@ impl<D:DeviceSource + Clone, A:RenderpassAttachmentSource + Clone> RenderpassFac
         info!("Created renderpass {:?}", renderpass);
         Arc::new(
             Renderpass{
-                device: self.clone(),
-                attachments: attachments_desc,
-                subpass_refs: subpass_desc,
-                image_views: attachments.iter().map(|a| (*a).clone()).collect(),
+                _device: self.clone(),
+                _renderpass: renderpass,
+                _attachments: attachments_desc,
+                _subpass_refs: subpass_desc,
+                _image_views: attachments.iter().map(|a| (*a).clone()).collect(),
             }
         )
     }
@@ -95,24 +103,35 @@ impl<D:DeviceSource + Clone, A:RenderpassAttachmentSource + Clone> RenderpassFac
 
 impl<D:DeviceSource, A:RenderpassAttachmentSource> RenderPassSource for Arc<Renderpass<D,A>>{
     fn renderpass(&self) -> ash::vk::RenderPass {
-        todo!()
+        self._renderpass
+    }
+}
+
+impl<D:DeviceSource, A:RenderpassAttachmentSource> Drop for Renderpass<D,A>{
+    fn drop(&mut self) {
+        debug!("Destroyed renderpass {:?}", self._renderpass);
+        unsafe{
+            self._device.device().destroy_render_pass(self._renderpass, None);
+        }
     }
 }
 
 impl<IV:ImageViewSource + Clone> RenderPassAttachment<IV>{
-    pub fn new(view: &IV, initial_layout: vk::ImageLayout, subpass_layout: vk::ImageLayout, final_layout: vk::ImageLayout, load_op: vk::AttachmentLoadOp, store_op: vk::AttachmentStoreOp) -> RenderPassAttachment<IV> {
-        RenderPassAttachment{
-            index: Mutex::new(0),
-            view: Mutex::new(view.clone()),
-            initial_layout,
-            subpass_layout,
-            final_layout,
-            load_op,
-            store_op,
-        }
+    pub fn new(view: &IV, initial_layout: vk::ImageLayout, subpass_layout: vk::ImageLayout, final_layout: vk::ImageLayout, load_op: vk::AttachmentLoadOp, store_op: vk::AttachmentStoreOp) -> Arc<RenderPassAttachment<IV>> {
+        Arc::new(
+            RenderPassAttachment{
+                index: Mutex::new(0),
+                view: Mutex::new(view.clone()),
+                initial_layout,
+                subpass_layout,
+                final_layout,
+                load_op,
+                store_op,
+            }
+        )
     }
 }
-impl<IV:ImageViewSource + Clone> RenderpassAttachmentSource for RenderPassAttachment<IV>{
+impl<IV:ImageViewSource + Clone> RenderpassAttachmentSource for Arc<RenderPassAttachment<IV>>{
     fn flags(&self) -> Option<vk::AttachmentDescriptionFlags> {
         None
     }
@@ -162,7 +181,67 @@ impl<IV:ImageViewSource + Clone> RenderpassAttachmentSource for RenderPassAttach
     }
 }
 
-impl<A:RenderpassAttachmentSource> SubpassDescription<A>{
+impl<A:RenderpassAttachmentSource + Clone> SubpassDescription<A>{
+    pub fn new(bind_point: vk::PipelineBindPoint, _attachment_type: &A, flags: Option<vk::SubpassDescriptionFlags>) -> SubpassDescription<A> {
+        SubpassDescription{
+        index: Mutex::new(0),
+        bind_point,
+        flags,
+        input_attachments: vec![],
+        input_refs: Mutex::new(vec![]),
+        color_attachments: vec![],
+        color_refs: Mutex::new(vec![]),
+        resolve_attachments: vec![],
+        resolve_refs: Mutex::new(vec![]),
+        depth_attachment: None,
+        depth_ref: Mutex::new(vk::AttachmentReference::default()),
+        preserve_attachments: vec![],
+            dependencies: vec![],
+        } 
+    }
+
+    pub fn add_input_attachment(&mut self, attachment: &A){
+        self.input_attachments.push(attachment.clone());
+    }
+    pub fn add_color_attachment(&mut self, attachment: &A){
+        self.color_attachments.push(attachment.clone());
+    }
+    pub fn add_resolve_attachment(&mut self, attachment: &A){
+        self.resolve_attachments.push(attachment.clone());
+    }
+    pub fn add_depth_stencil_attachment(&mut self, attachment: &A){
+        self.depth_attachment = Some(attachment.clone());
+    }
+    pub fn add_preserve_attachment(&mut self, index: u32){
+        self.preserve_attachments.push(index);
+    }
+    pub fn add_dependency(&mut self, src_subpass: Option<u32>, src_stage: vk::PipelineStageFlags, src_access: vk::AccessFlags,  dst_stage: vk::PipelineStageFlags, dst_access: vk::AccessFlags, flags: Option<vk::DependencyFlags>){
+        let mut info = vk::SubpassDependency::builder();
+        if let Some(index) = src_subpass{
+            info = info.src_subpass(index);
+        }
+        else{
+            info = info.src_subpass(vk::SUBPASS_EXTERNAL);
+        }
+        info = info
+        .src_stage_mask(src_stage)
+        .src_access_mask(src_access)
+        .dst_subpass(*self.index.lock().unwrap())
+        .dst_stage_mask(dst_stage)
+        .dst_access_mask(dst_access);
+
+        if let Some(flags) = flags{
+            info = info.dependency_flags(flags);
+        }
+    
+        self.dependencies.push(info.build());
+    }
+    pub fn add_start_dependency(&mut self){
+        self.add_dependency(None, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::AccessFlags::NONE, vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT, vk::AccessFlags::COLOR_ATTACHMENT_WRITE, None);
+    }
+    pub fn add_depth_dependency(&mut self){
+        self.add_dependency(None, vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS, vk::AccessFlags::NONE, vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS | vk::PipelineStageFlags::LATE_FRAGMENT_TESTS, vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE, None);
+    }
     
 }
 
@@ -179,7 +258,7 @@ impl<A:RenderpassAttachmentSource> SubpassDescriptionSource for SubpassDescripti
         self.bind_point
     }
 
-    fn input_attachments(&self) -> Option<&[vk::AttachmentReference]> {
+    fn input_attachments(&self) -> Option<MutexGuard<'_, Vec<vk::AttachmentReference>>> {
         if self.input_attachments.len() == 0{
             return None;
         }
@@ -193,29 +272,70 @@ impl<A:RenderpassAttachmentSource> SubpassDescriptionSource for SubpassDescripti
         let mut lock = self.input_refs.lock().unwrap();
         *lock = refs;
 
-        Some(&(*self.input_refs)
-
-        
-
+        Some(lock)
     }
 
-    fn color_attachments(&self) -> Option<&[vk::AttachmentReference]> {
-        todo!()
+    fn color_attachments(&self) -> Option<MutexGuard<'_, Vec<vk::AttachmentReference>>> {
+        if self.color_attachments.len() == 0{
+            return None;
+        }
+        let refs:Vec<vk::AttachmentReference> = self.color_attachments.iter().map(|a| {
+            vk::AttachmentReference::builder()
+            .attachment(*a.index())
+            .layout(a.subpass_layout())
+            .build()
+        }).collect();
+
+        let mut lock = self.color_refs.lock().unwrap();
+        *lock = refs;
+
+        Some(lock)
     }
 
-    fn resolve_attachments(&self) -> Option<&[vk::AttachmentReference]> {
-        todo!()
+    fn resolve_attachments(&self) -> Option<MutexGuard<'_, Vec<vk::AttachmentReference>>> {
+        if self.resolve_attachments.len() == 0{
+            return None;
+        }
+        let refs:Vec<vk::AttachmentReference> = self.resolve_attachments.iter().map(|a| {
+            vk::AttachmentReference::builder()
+            .attachment(*a.index())
+            .layout(a.subpass_layout())
+            .build()
+        }).collect();
+
+        let mut lock = self.resolve_refs.lock().unwrap();
+        *lock = refs;
+
+        Some(lock)
     }
 
-    fn depth_stencil_attachment(&self) -> Option<&vk::AttachmentReference> {
-        todo!()
+    fn depth_stencil_attachment(&self) -> Option<MutexGuard<'_, vk::AttachmentReference>> {
+        if let Some(d) = &self.depth_attachment{
+            let depth_ref = vk::AttachmentReference::builder()
+                .attachment(*d.index())
+                .layout(d.subpass_layout())
+                .build();
+            let mut lock = self.depth_ref.lock().unwrap();
+            *lock = depth_ref;
+
+            return Some(
+                lock
+            );
+        }
+        None
     }
 
     fn preserve_attachments(&self) -> Option<&[u32]> {
-        todo!()
+        if self.preserve_attachments.len() > 0{
+           return Some(&self.preserve_attachments); 
+        }
+        None
     }
 
     fn dependencies(&self) -> Option<&[vk::SubpassDependency]> {
-        todo!()
+        if self.dependencies.len() > 0{
+            return Some(&self.dependencies);
+        }
+        None
     }
 }
