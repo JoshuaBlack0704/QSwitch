@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ash::vk;
+use log::debug;
 
 use crate::image::{ImageSource, ImageViewSource};
 use crate::init::{DeviceSource, InstanceSource};
@@ -51,14 +52,21 @@ impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone> ImageVie
         Arc::new(
             ImageView{
                 _image_resource: self.clone(),
-                _view: view,
+                view,
+                format,
             }
         )
     }
 }
 
 impl<IR:ImageResourceSource + DeviceSource + ImageSource> ImageViewSource for Arc<ImageView<IR>>{
-    
+    fn format(&self) -> vk::Format {
+        self.format
+    }
+
+    fn view(&self) -> vk::ImageView {
+        self.view
+    }
 }
 
 impl<IR:ImageResourceSource + DeviceSource + ImageSource + InstanceSource> InstanceSource for Arc<ImageView<IR>>{
@@ -126,5 +134,15 @@ impl<IR:ImageResourceSource + DeviceSource + ImageSource> DeviceSource for Arc<I
 
     fn host_memory_index(&self) -> u32 {
         self._image_resource.host_memory_index()
+    }
+}
+
+
+impl<IR:ImageResourceSource + DeviceSource + ImageSource> Drop for ImageView<IR>{
+    fn drop(&mut self) {
+        debug!("Destroyed image view {:?}", self.view);
+        unsafe{
+            self._image_resource.device().destroy_image_view(self.view, None);
+        }
     }
 }

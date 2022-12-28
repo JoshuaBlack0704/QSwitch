@@ -82,11 +82,15 @@ pub trait ImageViewFactory<Iv:ImageViewSource>{
     fn create_image_view(&self, format: vk::Format, view_type: vk::ImageViewType, swizzle: Option<vk::ComponentMapping>, flags: Option<vk::ImageViewCreateFlags>) -> Iv;
 }
 pub trait ImageViewSource{
+    fn format(&self) -> vk::Format;
+    fn view(&self) -> vk::ImageView;
+
 
 }
 pub struct ImageView<IR:ImageResourceSource + ImageSource + DeviceSource>{
     _image_resource: IR,
-    _view: vk::ImageView,
+    view: vk::ImageView,
+    format: vk::Format,
 }
 
 

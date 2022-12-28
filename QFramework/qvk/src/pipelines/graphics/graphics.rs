@@ -5,22 +5,7 @@ use log::{info, debug};
 
 use crate::{init::DeviceSource, pipelines::PipelineLayoutSource, shader::ShaderSource};
 
-use super::{Graphics, RenderPassStore, VertexStateFactory, TesselationStateFactory, InputStateFactory, ViewportStateFactory, RasterizationStateFactory, MultisampleStateFactory, DepthStencilStateFactory, ColorBlendStateFactory, ColorBlendAttachmentFactory, DynamicStateFactory};
-
-pub trait GraphicsPipelineState{
-    fn flags(&self) -> Option<vk::PipelineCreateFlags>;
-    fn shader_stages(&self) -> &[vk::PipelineShaderStageCreateInfo];
-    fn vertex_state(&self) -> vk::PipelineVertexInputStateCreateInfo;
-    fn input_assembly_state(&self) -> vk::PipelineInputAssemblyStateCreateInfo;
-    fn tesselation_state(&self) -> vk::PipelineTessellationStateCreateInfo;
-    fn viewport_state(&self) -> vk::PipelineViewportStateCreateInfo;
-    fn rasterization_state(&self) -> vk::PipelineRasterizationStateCreateInfo;
-    fn multisample_state(&self) -> vk::PipelineMultisampleStateCreateInfo;
-    fn depth_stencil_state(&self) -> vk::PipelineDepthStencilStateCreateInfo;
-    fn color_blend_state(&self) -> vk::PipelineColorBlendStateCreateInfo;
-    fn dynamic_state(&self) -> vk::PipelineDynamicStateCreateInfo;
-      
-}
+use super::{Graphics, RenderPassSource, VertexStateFactory, TesselationStateFactory, InputStateFactory, ViewportStateFactory, RasterizationStateFactory, MultisampleStateFactory, DepthStencilStateFactory, ColorBlendStateFactory, ColorBlendAttachmentFactory, DynamicStateFactory, GraphicsPipelineFactory, GraphicsPipelineState, GraphicsPipelineSource};
 
 pub struct State<Shd:ShaderSource>{
     _flags:  Option<vk::PipelineCreateFlags>,
@@ -45,8 +30,8 @@ pub struct State<Shd:ShaderSource>{
     
 }
 
-impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutSource + Clone> Graphics<D,R,L>{
-    pub fn new<S:GraphicsPipelineState>(device_provider: &D, state: &S, layout: &L, renderpass: &R, tgt_subpass: u32) -> Result<Arc<Self>, vk::Result>{
+impl<D:DeviceSource + Clone, R:RenderPassSource + Clone, L:PipelineLayoutSource + Clone, S:GraphicsPipelineState> GraphicsPipelineFactory<Arc<Graphics<D,R,L>>, S, L, R> for D{
+    fn create_graphics_pipeline(&self, state: &S, layout: &L, renderpass: &R, tgt_subpass: u32) -> Result<Arc<Graphics<D,R,L>>, vk::Result> {
         let mut info = vk::GraphicsPipelineCreateInfo::builder();
         if let Some(flags) = state.flags(){
             info = info.flags(flags);
@@ -90,7 +75,7 @@ impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutSource +
         let info = [info.build()];
         let graphics;
         unsafe{
-            graphics = device_provider.device().create_graphics_pipelines(vk::PipelineCache::null(), &info, None);
+            graphics = self.device().create_graphics_pipelines(vk::PipelineCache::null(), &info, None);
         }
 
         if let Err(e) = graphics{
@@ -102,8 +87,8 @@ impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutSource +
         info!("Created graphics pipeline {:?}", graphics);
 
         Ok(Arc::new(
-            Self{
-                device: device_provider.clone(),
+            Graphics{
+                device: self.clone(),
                 pipeline: graphics,
                 _render_pass: renderpass.clone(),
                 _layout: layout.clone(),
@@ -112,7 +97,7 @@ impl<D:DeviceSource + Clone, R:RenderPassStore + Clone, L:PipelineLayoutSource +
     }
 }
 
-impl<D:DeviceSource,R:RenderPassStore,L:PipelineLayoutSource> Drop for Graphics<D,R,L>{
+impl<D:DeviceSource,R:RenderPassSource,L:PipelineLayoutSource> Drop for Graphics<D,R,L>{
     fn drop(&mut self) {
         debug!("Destroyed graphics pipeline {:?}", self.pipeline);
         unsafe{
@@ -287,3 +272,6 @@ impl<Shd:ShaderSource + Clone> State<Shd>{
     }
 }
 
+impl<D:DeviceSource, L:PipelineLayoutSource, R:RenderPassSource> GraphicsPipelineSource for Arc<Graphics<D,R,L>>{
+    
+}
