@@ -3,152 +3,197 @@ use std::{mem::size_of, sync::Arc};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::{command::{CommandBufferSource,  BufferCopyFactory, ImageCopyFactory, Executor}, init::{DeviceSource, InstanceSource}, memory::{buffer::buffer::BufferAlignmentType, Partition, partitionsystem::PartitionError}, descriptor::{WriteSource, ApplyWriteFactory}};
 use crate::command::CommandBufferFactory;
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::ImageSource;
-use crate::memory::MemorySource;
 use crate::memory::buffer::{BufferSegmentSource, BufferSource};
+use crate::memory::MemorySource;
+use crate::{
+    command::{BufferCopyFactory, CommandBufferSource, Executor, ImageCopyFactory},
+    descriptor::{ApplyWriteFactory, WriteSource},
+    init::{DeviceSource, InstanceSource},
+    memory::{buffer::buffer::BufferAlignmentType, partitionsystem::PartitionError, Partition},
+};
 
 use super::{BufferSegment, BufferSegmentFactory};
 
 #[derive(Clone, Debug)]
-pub enum BufferSegmentMemOpError{
+pub enum BufferSegmentMemOpError {
     NoSpace,
     VulkanError(vk::Result),
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource + InstanceSource + Clone> BufferSegmentFactory<Arc<BufferSegment<B>>> for B{
-    fn create_segment(&self, size: u64, alignment: Option<u64>) -> Result<Arc<BufferSegment<B>>, PartitionError> {
+impl<B: BufferSource + MemorySource + DeviceSource + InstanceSource + Clone>
+    BufferSegmentFactory<Arc<BufferSegment<B>>> for B
+{
+    fn create_segment(
+        &self,
+        size: u64,
+        alignment: Option<u64>,
+    ) -> Result<Arc<BufferSegment<B>>, PartitionError> {
         let p;
-        if let Some(a) = alignment{
+        if let Some(a) = alignment {
             p = BufferSource::partition(self, size, BufferAlignmentType::Aligned(a));
-        }
-        else{
+        } else {
             p = BufferSource::partition(self, size, BufferAlignmentType::Free);
         }
 
-        if let Err(e) = p{
+        if let Err(e) = p {
             return Err(e);
         }
-
 
         let p = p.unwrap();
 
         let b_info = vk::DescriptorBufferInfo::builder()
-        .buffer(*self.buffer())
-        .offset(p.offset)
-        .range(p.size)
-        .build();
-        info!("Partitioned buffer {:?} at offset {:?} for {:?} bytes", *self.buffer(), p.offset, p.size);
-        Ok(
-            Arc::new(BufferSegment{
+            .buffer(*self.buffer())
+            .offset(p.offset)
+            .range(p.size)
+            .build();
+        info!(
+            "Partitioned buffer {:?} at offset {:?} for {:?} bytes",
+            *self.buffer(),
+            p.offset,
+            p.size
+        );
+        Ok(Arc::new(BufferSegment {
             buffer: self.clone(),
             partition: p,
             desc_buffer_info: [b_info],
             _device_addr: None,
-            })
-        )
+        }))
     }
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource + InstanceSource + Clone> BufferSegmentSource for Arc<BufferSegment<B>>{
+impl<B: BufferSource + MemorySource + DeviceSource + InstanceSource + Clone> BufferSegmentSource
+    for Arc<BufferSegment<B>>
+{
     fn get_partition(&self) -> &Partition {
         &self.partition
     }
 
     fn device_addr(&self) -> vk::DeviceSize {
         let device = self;
-        let ext = ash::extensions::khr::BufferDeviceAddress::new(device.instance(), device.device());
-        let info = vk::BufferDeviceAddressInfo::builder()
-        .buffer(*self.buffer.buffer());
-        let addr = unsafe{ext.get_buffer_device_address(&info)} + self.partition.offset();
+        let ext =
+            ash::extensions::khr::BufferDeviceAddress::new(device.instance(), device.device());
+        let info = vk::BufferDeviceAddressInfo::builder().buffer(*self.buffer.buffer());
+        let addr = unsafe { ext.get_buffer_device_address(&info) } + self.partition.offset();
         addr
     }
 
     fn copy_from_ram<T>(&self, src: &[T]) -> Result<(), BufferSegmentMemOpError> {
         let needed_size = size_of::<T>() * src.len();
-        if needed_size > self.partition.size as usize{
+        if needed_size > self.partition.size as usize {
             return Err(BufferSegmentMemOpError::NoSpace);
         }
 
         let target_offset = self.partition.offset + self.buffer.home_partition().offset;
         let target_memory = self.memory();
         let mapped_range = [vk::MappedMemoryRange::builder()
-        .memory(*target_memory)
-        .offset(0)
-        .size(vk::WHOLE_SIZE)
-        .build()];
-        
-        debug!("Copying {:?} bytes to buffer {:?} at offset {:?} from ram", needed_size, *self.buffer.buffer(), target_offset);
-        unsafe{
+            .memory(*target_memory)
+            .offset(0)
+            .size(vk::WHOLE_SIZE)
+            .build()];
+
+        debug!(
+            "Copying {:?} bytes to buffer {:?} at offset {:?} from ram",
+            needed_size,
+            *self.buffer.buffer(),
+            target_offset
+        );
+        unsafe {
             let device = self.device();
-            let dst = device.map_memory(*target_memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap();
+            let dst = device
+                .map_memory(
+                    *target_memory,
+                    0,
+                    vk::WHOLE_SIZE,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .unwrap();
             let dst = (dst as *mut u8).offset(target_offset as isize) as *mut T;
             let src_ptr = src.as_ptr();
             std::ptr::copy_nonoverlapping(src_ptr, dst, src.len());
             device.flush_mapped_memory_ranges(&mapped_range).unwrap();
-            device.unmap_memory(*target_memory);            
+            device.unmap_memory(*target_memory);
         }
         Ok(())
     }
 
     fn copy_to_ram<T>(&self, dst: &mut [T]) -> Result<(), BufferSegmentMemOpError> {
         let needed_size = self.partition.size;
-        if needed_size as usize > dst.len() * size_of::<T>(){
-            return Err(BufferSegmentMemOpError::NoSpace)
+        if needed_size as usize > dst.len() * size_of::<T>() {
+            return Err(BufferSegmentMemOpError::NoSpace);
         }
 
         let target_offset = self.partition.offset + self.buffer.home_partition().offset;
         let target_memory = self.memory();
         let mapped_range = [vk::MappedMemoryRange::builder()
-        .memory(*target_memory)
-        .offset(0)
-        .size(vk::WHOLE_SIZE)
-        .build()];
-        
-        debug!("Copying {:?} bytes from buffer {:?} at offset {:?} to ram", needed_size, *self.buffer.buffer(), target_offset);
-        unsafe{
+            .memory(*target_memory)
+            .offset(0)
+            .size(vk::WHOLE_SIZE)
+            .build()];
+
+        debug!(
+            "Copying {:?} bytes from buffer {:?} at offset {:?} to ram",
+            needed_size,
+            *self.buffer.buffer(),
+            target_offset
+        );
+        unsafe {
             let device = self.device();
-            let src = device.map_memory(*target_memory, 0, vk::WHOLE_SIZE, vk::MemoryMapFlags::empty()).unwrap();
+            let src = device
+                .map_memory(
+                    *target_memory,
+                    0,
+                    vk::WHOLE_SIZE,
+                    vk::MemoryMapFlags::empty(),
+                )
+                .unwrap();
             let src = (src as *mut u8).offset(target_offset as isize) as *mut T;
             let dst_ptr = dst.as_mut_ptr();
-            device.invalidate_mapped_memory_ranges(&mapped_range).unwrap();
+            device
+                .invalidate_mapped_memory_ranges(&mapped_range)
+                .unwrap();
             std::ptr::copy_nonoverlapping(src, dst_ptr, dst.len());
-            device.unmap_memory(*target_memory);            
+            device.unmap_memory(*target_memory);
         }
         Ok(())
     }
 
-    fn copy_to_segment_internal< BP:BufferCopyFactory + BufferSource>(&self, dst: &BP) -> Result<(), BufferSegmentMemOpError> {
+    fn copy_to_segment_internal<BP: BufferCopyFactory + BufferSource>(
+        &self,
+        dst: &BP,
+    ) -> Result<(), BufferSegmentMemOpError> {
         let exe = Executor::new(self, vk::QueueFlags::TRANSFER);
-        
+
         let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.buffer_copy(self, dst).unwrap();
         cmd.end().unwrap();
-        
+
         exe.wait_submit_internal();
         Ok(())
     }
 
-    fn copy_to_image_internal<IS: ImageSource + ImageCopyFactory>(&self, dst: &IS, buffer_addressing: Option<(u32, u32)>) -> Result<(), vk::Result> {
+    fn copy_to_image_internal<IS: ImageSource + ImageCopyFactory>(
+        &self,
+        dst: &IS,
+        buffer_addressing: Option<(u32, u32)>,
+    ) -> Result<(), vk::Result> {
         let exe = Executor::new(self, vk::QueueFlags::TRANSFER);
-        
+
         let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
         cmd.begin(None).unwrap();
         cmd.buffer_image_copy(self, dst, buffer_addressing).unwrap();
         // self.copy_to_image(&cmd, dst, buffer_addressing)?;
         cmd.end().unwrap();
-        
+
         exe.wait_submit_internal();
         Ok(())
     }
-
-
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource> BufferCopyFactory for Arc<BufferSegment<B>>{
+impl<B: BufferSource + MemorySource + DeviceSource> BufferCopyFactory for Arc<BufferSegment<B>> {
     fn size(&self) -> u64 {
         self.partition.size
     }
@@ -161,9 +206,8 @@ impl<B:BufferSource + MemorySource + DeviceSource> BufferCopyFactory for Arc<Buf
         *BufferSource::buffer(self)
     }
 }
-    
 
-impl<B:BufferSource + MemorySource + DeviceSource> BufferSource for Arc<BufferSegment<B>>{
+impl<B: BufferSource + MemorySource + DeviceSource> BufferSource for Arc<BufferSegment<B>> {
     fn buffer(&self) -> &vk::Buffer {
         self.buffer.buffer()
     }
@@ -172,7 +216,11 @@ impl<B:BufferSource + MemorySource + DeviceSource> BufferSource for Arc<BufferSe
         self.buffer.home_partition()
     }
 
-    fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError>  {
+    fn partition(
+        &self,
+        size: u64,
+        alignment_type: BufferAlignmentType,
+    ) -> Result<Partition, PartitionError> {
         BufferSource::partition(&self.buffer, size, alignment_type)
     }
 
@@ -181,41 +229,41 @@ impl<B:BufferSource + MemorySource + DeviceSource> BufferSource for Arc<BufferSe
     }
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource> DescriptorLayoutBindingFactory for Arc<BufferSegment<B>>{
+impl<B: BufferSource + MemorySource + DeviceSource> DescriptorLayoutBindingFactory
+    for Arc<BufferSegment<B>>
+{
     fn binding(&self) -> vk::DescriptorSetLayoutBinding {
-        let binding_type ;
+        let binding_type;
         let usage = self.buffer.usage();
-        if usage.contains(BufferUsageFlags::STORAGE_BUFFER){
+        if usage.contains(BufferUsageFlags::STORAGE_BUFFER) {
             binding_type = vk::DescriptorType::STORAGE_BUFFER;
-        }
-        else if usage.contains(BufferUsageFlags::UNIFORM_BUFFER){
+        } else if usage.contains(BufferUsageFlags::UNIFORM_BUFFER) {
             binding_type = vk::DescriptorType::UNIFORM_BUFFER;
-        }
-        else{
+        } else {
             unimplemented!();
         }
 
         vk::DescriptorSetLayoutBinding::builder()
-        .descriptor_type(binding_type)
-        .descriptor_count(1)
-        .build()
+            .descriptor_type(binding_type)
+            .descriptor_count(1)
+            .build()
     }
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource> ApplyWriteFactory for Arc<BufferSegment<B>>{
-    fn apply<W:WriteSource>(&self, write: &W) {
-
+impl<B: BufferSource + MemorySource + DeviceSource> ApplyWriteFactory for Arc<BufferSegment<B>> {
+    fn apply<W: WriteSource>(&self, write: &W) {
         let info = vk::WriteDescriptorSet::builder()
-        .dst_array_element(0)
-        .buffer_info(&self.desc_buffer_info)
-        .build();
+            .dst_array_element(0)
+            .buffer_info(&self.desc_buffer_info)
+            .build();
 
         write.update(info);
     }
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource + InstanceSource> InstanceSource for Arc<BufferSegment<B>>{
-    
+impl<B: BufferSource + MemorySource + DeviceSource + InstanceSource> InstanceSource
+    for Arc<BufferSegment<B>>
+{
     fn instance(&self) -> &ash::Instance {
         self.buffer.instance()
     }
@@ -225,8 +273,12 @@ impl<B:BufferSource + MemorySource + DeviceSource + InstanceSource> InstanceSour
     }
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource> MemorySource for Arc<BufferSegment<B>>{
-    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, crate::memory::partitionsystem::PartitionError> {
+impl<B: BufferSource + MemorySource + DeviceSource> MemorySource for Arc<BufferSegment<B>> {
+    fn partition(
+        &self,
+        size: u64,
+        alignment: Option<u64>,
+    ) -> Result<Partition, crate::memory::partitionsystem::PartitionError> {
         MemorySource::partition(&self.buffer, size, alignment)
     }
 
@@ -235,8 +287,7 @@ impl<B:BufferSource + MemorySource + DeviceSource> MemorySource for Arc<BufferSe
     }
 }
 
-impl<B:BufferSource + MemorySource + DeviceSource> DeviceSource for Arc<BufferSegment<B>>{
-    
+impl<B: BufferSource + MemorySource + DeviceSource> DeviceSource for Arc<BufferSegment<B>> {
     fn device(&self) -> &ash::Device {
         self.buffer.device()
     }

@@ -8,45 +8,49 @@ use crate::shader::{ShaderSource, SpirvStore};
 
 use super::{Shader, ShaderFactory};
 
-impl<D:DeviceSource + Clone> ShaderFactory<Arc<Shader<D>>> for D{
-    fn create_shader(&self, spriv_data: &impl SpirvStore, stage: vk::ShaderStageFlags, flags: Option<vk::ShaderModuleCreateFlags>) -> Arc<Shader<D>> {
+impl<D: DeviceSource + Clone> ShaderFactory<Arc<Shader<D>>> for D {
+    fn create_shader(
+        &self,
+        spriv_data: &impl SpirvStore,
+        stage: vk::ShaderStageFlags,
+        flags: Option<vk::ShaderModuleCreateFlags>,
+    ) -> Arc<Shader<D>> {
         let device_provider = self;
         let mut info = vk::ShaderModuleCreateInfo::builder();
-        if let Some(flags) = flags{
+        if let Some(flags) = flags {
             info = info.flags(flags);
         }
         info = info.code(spriv_data.code());
 
         let module;
-        unsafe{
-            module = device_provider.device().create_shader_module(&info, None).unwrap();
+        unsafe {
+            module = device_provider
+                .device()
+                .create_shader_module(&info, None)
+                .unwrap();
         }
         info!("Created shader module {:?}", module);
 
-        Arc::new(
-            Shader{
-                device: device_provider.clone(),
-                module,
-                stage,
-                name: CString::new(spriv_data.entry_name()).unwrap(),
-            }
-        )
+        Arc::new(Shader {
+            device: device_provider.clone(),
+            module,
+            stage,
+            name: CString::new(spriv_data.entry_name()).unwrap(),
+        })
     }
 }
 
-
-impl<D:DeviceSource> ShaderSource for Arc<Shader<D>>{
+impl<D: DeviceSource> ShaderSource for Arc<Shader<D>> {
     fn stage(&self) -> vk::PipelineShaderStageCreateInfo {
         vk::PipelineShaderStageCreateInfo::builder()
-        .stage(self.stage)
-        .module(self.module)
-        .name(&self.name)
-        .build()
+            .stage(self.stage)
+            .module(self.module)
+            .name(&self.name)
+            .build()
     }
 }
 
-impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Shader<D>>{
-    
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<Shader<D>> {
     fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
@@ -56,7 +60,7 @@ impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Shader<D>>{
     }
 }
 
-impl<D:DeviceSource> DeviceSource for Arc<Shader<D>>{
+impl<D: DeviceSource> DeviceSource for Arc<Shader<D>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }
@@ -102,11 +106,13 @@ impl<D:DeviceSource> DeviceSource for Arc<Shader<D>>{
     }
 }
 
-impl<D:DeviceSource> Drop for Shader<D>{
+impl<D: DeviceSource> Drop for Shader<D> {
     fn drop(&mut self) {
         debug!("Destroyed shader module {:?}", self.module);
-        unsafe{
-            self.device.device().destroy_shader_module(self.module, None);
+        unsafe {
+            self.device
+                .device()
+                .destroy_shader_module(self.module, None);
         }
     }
 }

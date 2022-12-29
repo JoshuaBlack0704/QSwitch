@@ -3,50 +3,68 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::init::{DeviceSource, InstanceSource};
 use crate::descriptor::{DescriptorLayoutSource, WriteSource};
+use crate::init::{DeviceSource, InstanceSource};
 use crate::pipelines::PipelineLayoutSource;
 
 use super::{Layout, PipelineLayoutFactory};
 
-impl<D:DeviceSource + Clone> PipelineLayoutFactory<Arc<Layout<D>>> for D{
-    fn create_pipeline_layout<W:WriteSource>(&self, layouts: &[&impl DescriptorLayoutSource<W>], pushes: &[vk::PushConstantRange], flags: Option<vk::PipelineLayoutCreateFlags>) -> Arc<Layout<D>> {
+impl<D: DeviceSource + Clone> PipelineLayoutFactory<Arc<Layout<D>>> for D {
+    fn create_pipeline_layout<W: WriteSource>(
+        &self,
+        layouts: &[&impl DescriptorLayoutSource<W>],
+        pushes: &[vk::PushConstantRange],
+        flags: Option<vk::PipelineLayoutCreateFlags>,
+    ) -> Arc<Layout<D>> {
         let mut info = vk::PipelineLayoutCreateInfo::builder();
 
-        if let Some(flags) = flags{
+        if let Some(flags) = flags {
             info = info.flags(flags);
         }
 
-        let layouts:Vec<vk::DescriptorSetLayout> = layouts.iter().map(|l| l.layout()).collect();
+        let layouts: Vec<vk::DescriptorSetLayout> = layouts.iter().map(|l| l.layout()).collect();
 
         info = info.set_layouts(&layouts);
         info = info.push_constant_ranges(&pushes);
 
         let layout;
-        unsafe{
+        unsafe {
             let device = self.device();
             layout = device.create_pipeline_layout(&info, None).unwrap();
         }
 
         info!("Created pipeline layout {:?}", layout);
 
-        Arc::new(
-            Layout{
-                device: self.clone(),
-                layout,
-            }
-        )
+        Arc::new(Layout {
+            device: self.clone(),
+            layout,
+        })
+    }
+
+    fn create_pipeline_layout_empty(&self) -> Arc<Layout<D>> {
+        let info = vk::PipelineLayoutCreateInfo::builder();
+        let layout;
+        unsafe {
+            let device = self.device();
+            layout = device.create_pipeline_layout(&info, None).unwrap();
+        }
+
+        info!("Created pipeline layout {:?}", layout);
+
+        Arc::new(Layout {
+            device: self.clone(),
+            layout,
+        })
     }
 }
 
-impl<D:DeviceSource> PipelineLayoutSource for Arc<Layout<D>>{
+impl<D: DeviceSource> PipelineLayoutSource for Arc<Layout<D>> {
     fn layout(&self) -> vk::PipelineLayout {
         self.layout
     }
 }
 
-impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Layout<D>>{
-    
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<Layout<D>> {
     fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
@@ -56,7 +74,7 @@ impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Layout<D>>{
     }
 }
 
-impl<D:DeviceSource> DeviceSource for Arc<Layout<D>>{
+impl<D: DeviceSource> DeviceSource for Arc<Layout<D>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }
@@ -102,11 +120,13 @@ impl<D:DeviceSource> DeviceSource for Arc<Layout<D>>{
     }
 }
 
-impl<D:DeviceSource> Drop for Layout<D>{
+impl<D: DeviceSource> Drop for Layout<D> {
     fn drop(&mut self) {
         debug!("Destroyed pipeline layout {:?}", self.layout);
-        unsafe{
-            self.device.device().destroy_pipeline_layout(self.layout, None);
+        unsafe {
+            self.device
+                .device()
+                .destroy_pipeline_layout(self.layout, None);
         }
     }
 }

@@ -7,60 +7,64 @@ use crate::image::{ImageSource, ImageViewSource};
 use crate::init::{DeviceSource, InstanceSource};
 use crate::memory::MemorySource;
 
-use super::{ImageView, ImageViewFactory, ImageResourceSource};
+use super::{ImageResourceSource, ImageView, ImageViewFactory};
 
-impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone> ImageViewFactory<Arc<ImageView<Factory>>> for Factory{
-    fn create_image_view(&self, format: vk::Format, view_type: vk::ImageViewType, swizzle: Option<vk::ComponentMapping>, flags: Option<vk::ImageViewCreateFlags>) -> Arc<ImageView<Factory>> {
+impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone>
+    ImageViewFactory<Arc<ImageView<Factory>>> for Factory
+{
+    fn create_image_view(
+        &self,
+        format: vk::Format,
+        view_type: vk::ImageViewType,
+        swizzle: Option<vk::ComponentMapping>,
+        flags: Option<vk::ImageViewCreateFlags>,
+    ) -> Arc<ImageView<Factory>> {
         let components;
-        if let Some(c) = swizzle{
+        if let Some(c) = swizzle {
             components = c;
-        }
-        else{
+        } else {
             components = vk::ComponentMapping::builder()
                 .r(vk::ComponentSwizzle::R)
                 .g(vk::ComponentSwizzle::G)
                 .b(vk::ComponentSwizzle::B)
                 .a(vk::ComponentSwizzle::A)
-            .build();
+                .build();
         }
 
         let mut info = vk::ImageViewCreateInfo::builder();
-        if let Some(flags) = flags{
+        if let Some(flags) = flags {
             info = info.flags(flags);
         }
 
         let range = vk::ImageSubresourceRange::builder()
-        .aspect_mask(self.aspect())
-        .base_mip_level(self.level())
-        .base_array_layer(0)
-        .level_count(1)
-        .layer_count(1);
+            .aspect_mask(self.aspect())
+            .base_mip_level(self.level())
+            .base_array_layer(0)
+            .level_count(1)
+            .layer_count(1);
 
-        
         info = info
-        .image(*self.image())
-        .view_type(view_type)
-        .format(format)
-        .components(components)
-        .subresource_range(range.build());
+            .image(*self.image())
+            .view_type(view_type)
+            .format(format)
+            .components(components)
+            .subresource_range(range.build());
 
         let view;
-        unsafe{
+        unsafe {
             view = self.device().create_image_view(&info, None).unwrap();
         }
         info!("Created image view {:?}", view);
 
-        Arc::new(
-            ImageView{
-                _image_resource: self.clone(),
-                view,
-                format,
-            }
-        )
+        Arc::new(ImageView {
+            _image_resource: self.clone(),
+            view,
+            format,
+        })
     }
 }
 
-impl<IR:ImageResourceSource + DeviceSource + ImageSource> ImageViewSource for Arc<ImageView<IR>>{
+impl<IR: ImageResourceSource + DeviceSource + ImageSource> ImageViewSource for Arc<ImageView<IR>> {
     fn format(&self) -> vk::Format {
         self.format
     }
@@ -70,8 +74,9 @@ impl<IR:ImageResourceSource + DeviceSource + ImageSource> ImageViewSource for Ar
     }
 }
 
-impl<IR:ImageResourceSource + DeviceSource + ImageSource + InstanceSource> InstanceSource for Arc<ImageView<IR>>{
-    
+impl<IR: ImageResourceSource + DeviceSource + ImageSource + InstanceSource> InstanceSource
+    for Arc<ImageView<IR>>
+{
     fn instance(&self) -> &ash::Instance {
         self._image_resource.instance()
     }
@@ -81,8 +86,14 @@ impl<IR:ImageResourceSource + DeviceSource + ImageSource + InstanceSource> Insta
     }
 }
 
-impl<IR:ImageResourceSource + DeviceSource + ImageSource + MemorySource> MemorySource for Arc<ImageView<IR>>{
-    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<crate::memory::Partition, crate::memory::partitionsystem::PartitionError> {
+impl<IR: ImageResourceSource + DeviceSource + ImageSource + MemorySource> MemorySource
+    for Arc<ImageView<IR>>
+{
+    fn partition(
+        &self,
+        size: u64,
+        alignment: Option<u64>,
+    ) -> Result<crate::memory::Partition, crate::memory::partitionsystem::PartitionError> {
         self._image_resource.partition(size, alignment)
     }
 
@@ -91,8 +102,7 @@ impl<IR:ImageResourceSource + DeviceSource + ImageSource + MemorySource> MemoryS
     }
 }
 
-impl<IR:ImageResourceSource + DeviceSource + ImageSource> DeviceSource for Arc<ImageView<IR>>{
-    
+impl<IR: ImageResourceSource + DeviceSource + ImageSource> DeviceSource for Arc<ImageView<IR>> {
     fn device(&self) -> &ash::Device {
         self._image_resource.device()
     }
@@ -138,12 +148,13 @@ impl<IR:ImageResourceSource + DeviceSource + ImageSource> DeviceSource for Arc<I
     }
 }
 
-
-impl<IR:ImageResourceSource + DeviceSource + ImageSource> Drop for ImageView<IR>{
+impl<IR: ImageResourceSource + DeviceSource + ImageSource> Drop for ImageView<IR> {
     fn drop(&mut self) {
         debug!("Destroyed image view {:?}", self.view);
-        unsafe{
-            self._image_resource.device().destroy_image_view(self.view, None);
+        unsafe {
+            self._image_resource
+                .device()
+                .destroy_image_view(self.view, None);
         }
     }
 }

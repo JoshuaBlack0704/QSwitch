@@ -1,16 +1,24 @@
-use std::{sync::{Arc, Mutex}, ffi::c_void};
+use std::{
+    ffi::c_void,
+    sync::{Arc, Mutex},
+};
 
 use ash::vk;
 use log::{debug, info};
 
-use crate::{init::{DeviceSource, InstanceSource}, memory::{Partition, partitionsystem::{self, PartitionError}, PartitionSystem}};
-use crate::memory::{MemorySource, PartitionSource};
 use crate::memory::buffer::BufferSource;
+use crate::memory::{MemorySource, PartitionSource};
+use crate::{
+    init::{DeviceSource, InstanceSource},
+    memory::{
+        partitionsystem::{self, PartitionError},
+        Partition, PartitionSystem,
+    },
+};
 
 use super::{Buffer, BufferFactory};
 
-
-pub trait BufferSettingsStore{
+pub trait BufferSettingsStore {
     fn size(&self) -> vk::DeviceSize;
     fn flags(&self) -> Option<vk::BufferCreateFlags>;
     fn extensions(&self) -> Option<Vec<BufferCreateExtension>>;
@@ -19,12 +27,10 @@ pub trait BufferSettingsStore{
 }
 
 #[derive(Clone)]
-pub enum BufferCreateExtension{
-    
-}
+pub enum BufferCreateExtension {}
 
 #[derive(Clone, Copy)]
-pub enum BufferAlignmentType{
+pub enum BufferAlignmentType {
     // No alignent, like for vertex buffers
     Free,
     // For example, if you have a storage buffer, you will need to align to minStorageBufferOffsetAlignment
@@ -32,12 +38,12 @@ pub enum BufferAlignmentType{
 }
 
 #[derive(Debug)]
-pub enum BufferCreateError{
+pub enum BufferCreateError {
     VulkanResult(vk::Result),
-    ParitionError(partitionsystem::PartitionError)
+    ParitionError(partitionsystem::PartitionError),
 }
 
-pub struct SettingsStore{
+pub struct SettingsStore {
     pub size: vk::DeviceSize,
     pub flags: Option<vk::BufferCreateFlags>,
     pub extensions: Option<Vec<BufferCreateExtension>>,
@@ -45,61 +51,88 @@ pub struct SettingsStore{
     pub share: Option<Vec<u32>>,
 }
 
-impl<MS:MemorySource + DeviceSource + Clone> BufferFactory<Arc<Buffer<MS,PartitionSystem>>> for MS{
-    fn create_buffer(&self, size: u64, usage: vk::BufferUsageFlags, flags: Option<vk::BufferCreateFlags>, extensions: Option<*const c_void>) -> Result<Arc<Buffer<MS,PartitionSystem>>, BufferCreateError> {
+impl<MS: MemorySource + DeviceSource + Clone> BufferFactory<Arc<Buffer<MS, PartitionSystem>>>
+    for MS
+{
+    fn create_buffer(
+        &self,
+        size: u64,
+        usage: vk::BufferUsageFlags,
+        flags: Option<vk::BufferCreateFlags>,
+        extensions: Option<*const c_void>,
+    ) -> Result<Arc<Buffer<MS, PartitionSystem>>, BufferCreateError> {
         // First we need to create the buffer
         let mut info = vk::BufferCreateInfo::builder();
-        if let Some(ptr) = extensions{
-           info.p_next = ptr; 
+        if let Some(ptr) = extensions {
+            info.p_next = ptr;
         }
-        if let Some(flags) = flags{
+        if let Some(flags) = flags {
             info = info.flags(flags);
         }
         info = info.size(size);
         info = info.usage(usage);
         info = info.sharing_mode(vk::SharingMode::EXCLUSIVE);
         let indices = self.share();
-        if let Some(indices) = &indices{
+        if let Some(indices) = &indices {
             info = info.sharing_mode(vk::SharingMode::CONCURRENT);
             info = info.queue_family_indices(&indices);
         }
-        
+
         let device = self.device();
-        let buffer = unsafe{device.create_buffer(&info, None)};
-        
-        if let Err(e) = buffer{
+        let buffer = unsafe { device.create_buffer(&info, None) };
+
+        if let Err(e) = buffer {
             return Err(BufferCreateError::VulkanResult(e));
         }
-        
+
         let buffer = buffer.unwrap();
-        let reqs:vk::MemoryRequirements = unsafe{device.get_buffer_memory_requirements(buffer)};
+        let reqs: vk::MemoryRequirements = unsafe { device.get_buffer_memory_requirements(buffer) };
         let memory_partition = self.partition(reqs.size, Some(reqs.alignment));
-            
-        if let Err(e) = memory_partition{
+
+        if let Err(e) = memory_partition {
             return Err(BufferCreateError::ParitionError(e));
         }
         let memory_partition = memory_partition.unwrap();
         let offset = memory_partition.offset();
-        info!("Created buffer {:?} of size {:?} on memory {:?} at offset {:?}", buffer, size, *self.memory(), offset);
-        
+        info!(
+            "Created buffer {:?} of size {:?} on memory {:?} at offset {:?}",
+            buffer,
+            size,
+            *self.memory(),
+            offset
+        );
+
         // Now that we have a suitable memory partition we need to bind our buffer
-        let result = unsafe{device.bind_buffer_memory(buffer, *self.memory(), offset)};
+        let result = unsafe { device.bind_buffer_memory(buffer, *self.memory(), offset) };
         if let Err(e) = result {
             return Err(BufferCreateError::VulkanResult(e));
         }
 
         let mut alignment = BufferAlignmentType::Free;
-        if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER){
-            alignment = BufferAlignmentType::Aligned(self.physical_device().properties.limits.min_storage_buffer_offset_alignment);
+        if usage.contains(vk::BufferUsageFlags::STORAGE_BUFFER) {
+            alignment = BufferAlignmentType::Aligned(
+                self.physical_device()
+                    .properties
+                    .limits
+                    .min_storage_buffer_offset_alignment,
+            );
+        } else if usage.contains(vk::BufferUsageFlags::UNIFORM_BUFFER) {
+            alignment = BufferAlignmentType::Aligned(
+                self.physical_device()
+                    .properties
+                    .limits
+                    .min_uniform_buffer_offset_alignment,
+            );
+        } else if usage.contains(vk::BufferUsageFlags::UNIFORM_TEXEL_BUFFER) {
+            alignment = BufferAlignmentType::Aligned(
+                self.physical_device()
+                    .properties
+                    .limits
+                    .min_texel_buffer_offset_alignment,
+            );
         }
-        else if usage.contains(vk::BufferUsageFlags::UNIFORM_BUFFER){
-            alignment = BufferAlignmentType::Aligned(self.physical_device().properties.limits.min_uniform_buffer_offset_alignment);
-        }
-        else if usage.contains(vk::BufferUsageFlags::UNIFORM_TEXEL_BUFFER){
-            alignment = BufferAlignmentType::Aligned(self.physical_device().properties.limits.min_texel_buffer_offset_alignment);
-        }
-        
-        Ok(Arc::new(Buffer{
+
+        Ok(Arc::new(Buffer {
             memory: self.clone(),
             memory_partition,
             partition_sys: Mutex::new(PartitionSystem::new(size)),
@@ -110,8 +143,7 @@ impl<MS:MemorySource + DeviceSource + Clone> BufferFactory<Arc<Buffer<MS,Partiti
     }
 }
 
-impl<M:MemorySource + DeviceSource, P:PartitionSource> BufferSource for Arc<Buffer<M,P>>{
-
+impl<M: MemorySource + DeviceSource, P: PartitionSource> BufferSource for Arc<Buffer<M, P>> {
     fn buffer(&self) -> &vk::Buffer {
         &self.buffer
     }
@@ -120,16 +152,23 @@ impl<M:MemorySource + DeviceSource, P:PartitionSource> BufferSource for Arc<Buff
         &self.memory_partition
     }
 
-    fn partition(&self, size: u64, alignment_type: BufferAlignmentType) -> Result<Partition, PartitionError> {
-        self.partition_sys.lock().unwrap().partition(size, |offset|{
-            if let BufferAlignmentType::Aligned(a) = alignment_type{
-                return offset % a == 0;
-            } 
-            if let BufferAlignmentType::Aligned(a) = self.alignment_type{
-                return offset % a == 0;
-            } 
-            true
-        })
+    fn partition(
+        &self,
+        size: u64,
+        alignment_type: BufferAlignmentType,
+    ) -> Result<Partition, PartitionError> {
+        self.partition_sys
+            .lock()
+            .unwrap()
+            .partition(size, |offset| {
+                if let BufferAlignmentType::Aligned(a) = alignment_type {
+                    return offset % a == 0;
+                }
+                if let BufferAlignmentType::Aligned(a) = self.alignment_type {
+                    return offset % a == 0;
+                }
+                true
+            })
     }
 
     fn usage(&self) -> vk::BufferUsageFlags {
@@ -137,18 +176,18 @@ impl<M:MemorySource + DeviceSource, P:PartitionSource> BufferSource for Arc<Buff
     }
 }
 
-impl<M:MemorySource + DeviceSource, P:PartitionSource> Drop for Buffer<M,P>{
+impl<M: MemorySource + DeviceSource, P: PartitionSource> Drop for Buffer<M, P> {
     fn drop(&mut self) {
         debug!("Destroyed buffer {:?}", self.buffer);
-        unsafe{
+        unsafe {
             self.memory.device().destroy_buffer(self.buffer, None);
         }
     }
 }
 
-impl SettingsStore{
+impl SettingsStore {
     pub fn new(size: vk::DeviceSize, usage: vk::BufferUsageFlags) -> SettingsStore {
-        SettingsStore{
+        SettingsStore {
             size,
             flags: None,
             extensions: None,
@@ -156,21 +195,21 @@ impl SettingsStore{
             share: None,
         }
     }
-    
-    pub fn set_create_flags(&mut self, flags: vk::BufferCreateFlags){
+
+    pub fn set_create_flags(&mut self, flags: vk::BufferCreateFlags) {
         self.flags = Some(flags);
     }
-    
-    pub fn add_extension(&mut self, ext: BufferCreateExtension){
+
+    pub fn add_extension(&mut self, ext: BufferCreateExtension) {
         self.extensions.get_or_insert(vec![]).push(ext);
     }
-    
-    pub fn share(&mut self, indecies: &[u32]){
+
+    pub fn share(&mut self, indecies: &[u32]) {
         self.share = Some(indecies.to_vec());
     }
 }
 
-impl BufferSettingsStore for SettingsStore{
+impl BufferSettingsStore for SettingsStore {
     fn size(&self) -> vk::DeviceSize {
         self.size
     }
@@ -192,8 +231,9 @@ impl BufferSettingsStore for SettingsStore{
     }
 }
 
-impl<P:PartitionSource, M:MemorySource + DeviceSource + InstanceSource> InstanceSource for Arc<Buffer<M,P>>{
-    
+impl<P: PartitionSource, M: MemorySource + DeviceSource + InstanceSource> InstanceSource
+    for Arc<Buffer<M, P>>
+{
     fn instance(&self) -> &ash::Instance {
         self.memory.instance()
     }
@@ -203,7 +243,7 @@ impl<P:PartitionSource, M:MemorySource + DeviceSource + InstanceSource> Instance
     }
 }
 
-impl<P:PartitionSource, M:MemorySource + DeviceSource> DeviceSource for Arc<Buffer<M,P>>{
+impl<P: PartitionSource, M: MemorySource + DeviceSource> DeviceSource for Arc<Buffer<M, P>> {
     fn device(&self) -> &ash::Device {
         self.memory.device()
     }
@@ -249,8 +289,12 @@ impl<P:PartitionSource, M:MemorySource + DeviceSource> DeviceSource for Arc<Buff
     }
 }
 
-impl<P:PartitionSource, M:MemorySource + DeviceSource> MemorySource for Arc<Buffer<M,P>>{
-    fn partition(&self, size: u64, alignment: Option<u64>) -> Result<Partition, partitionsystem::PartitionError> {
+impl<P: PartitionSource, M: MemorySource + DeviceSource> MemorySource for Arc<Buffer<M, P>> {
+    fn partition(
+        &self,
+        size: u64,
+        alignment: Option<u64>,
+    ) -> Result<Partition, partitionsystem::PartitionError> {
         self.memory.partition(size, alignment)
     }
 
@@ -258,4 +302,3 @@ impl<P:PartitionSource, M:MemorySource + DeviceSource> MemorySource for Arc<Buff
         self.memory.memory()
     }
 }
-

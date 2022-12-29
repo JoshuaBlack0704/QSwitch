@@ -1,77 +1,79 @@
 use std::{collections::HashMap, sync::Arc};
 
+use crate::descriptor::{DescriptorLayoutSource, DescriptorPoolSource};
 use ash::vk;
 use log::{debug, info};
-use crate::descriptor::{DescriptorLayoutSource, DescriptorPoolSource};
 
 use crate::init::{DeviceSource, InstanceSource};
 
-use super::{Pool, WriteSource, DescriptorPoolFactory};
+use super::{DescriptorPoolFactory, Pool, WriteSource};
 
-impl<D:DeviceSource + Clone> DescriptorPoolFactory<Arc<Pool<D>>> for D{
-    fn create_descriptor_pool<W:WriteSource, L:DescriptorLayoutSource<W>>(&self, layout_set_count: &[(&L, u32)], flags: Option<vk::DescriptorPoolCreateFlags>) -> Arc<Pool<D>> {
-        let mut pool_sizes:HashMap<vk::DescriptorType, vk::DescriptorPoolSize> = HashMap::new();
+impl<D: DeviceSource + Clone> DescriptorPoolFactory<Arc<Pool<D>>> for D {
+    fn create_descriptor_pool<W: WriteSource, L: DescriptorLayoutSource<W>>(
+        &self,
+        layout_set_count: &[(&L, u32)],
+        flags: Option<vk::DescriptorPoolCreateFlags>,
+    ) -> Arc<Pool<D>> {
+        let mut pool_sizes: HashMap<vk::DescriptorType, vk::DescriptorPoolSize> = HashMap::new();
         let mut max_sets = 0;
 
-        for (layout_provider, set_count) in layout_set_count.iter(){
+        for (layout_provider, set_count) in layout_set_count.iter() {
             let bindings = layout_provider.bindings();
-            for binding in bindings.iter(){
-                if let Some(size) = pool_sizes.get_mut(&binding.descriptor_type){
+            for binding in bindings.iter() {
+                if let Some(size) = pool_sizes.get_mut(&binding.descriptor_type) {
                     size.descriptor_count += binding.descriptor_count * set_count;
-                }
-                else{
-                    let _ = pool_sizes
-                        .insert(
-                            binding.descriptor_type, 
-                            vk::DescriptorPoolSize::builder()
-                                .ty(binding.descriptor_type)
-                                .descriptor_count(binding.descriptor_count * set_count)
-                                .build());
+                } else {
+                    let _ = pool_sizes.insert(
+                        binding.descriptor_type,
+                        vk::DescriptorPoolSize::builder()
+                            .ty(binding.descriptor_type)
+                            .descriptor_count(binding.descriptor_count * set_count)
+                            .build(),
+                    );
                 }
                 max_sets += set_count;
             }
         }
 
-        let pool_sizes:Vec<vk::DescriptorPoolSize> = pool_sizes.values().map(|s| *s).collect();
-        
+        let pool_sizes: Vec<vk::DescriptorPoolSize> = pool_sizes.values().map(|s| *s).collect();
+
         let mut info = vk::DescriptorPoolCreateInfo::builder()
-        .pool_sizes(&pool_sizes)
-        .max_sets(max_sets);
-        
-        if let Some(flags) = flags{
+            .pool_sizes(&pool_sizes)
+            .max_sets(max_sets);
+
+        if let Some(flags) = flags {
             info = info.flags(flags);
         }
 
         let pool;
-        unsafe{
+        unsafe {
             let device = self.device();
             pool = device.create_descriptor_pool(&info, None).unwrap();
             info!("Created descriptor pool {:?} for {max_sets} sets", pool);
         }
 
-        Arc::new(
-            Pool{
-                device: self.clone(),
-                pool,
-            }
-        )
+        Arc::new(Pool {
+            device: self.clone(),
+            pool,
+        })
     }
 }
 
-impl<D:DeviceSource> DescriptorPoolSource for Arc<Pool<D>>{
-    fn allocate_set<W:WriteSource, L:DescriptorLayoutSource<W>>(&self, layout: &L) -> vk::DescriptorSet {
-
+impl<D: DeviceSource> DescriptorPoolSource for Arc<Pool<D>> {
+    fn allocate_set<W: WriteSource, L: DescriptorLayoutSource<W>>(
+        &self,
+        layout: &L,
+    ) -> vk::DescriptorSet {
         let requests = [layout.layout()];
-        
-        let info = vk::DescriptorSetAllocateInfo::builder()
-        .descriptor_pool(self.pool)
-        .set_layouts(&requests);
 
-        unsafe{
+        let info = vk::DescriptorSetAllocateInfo::builder()
+            .descriptor_pool(self.pool)
+            .set_layouts(&requests);
+
+        unsafe {
             let device = self.device.device();
             device.allocate_descriptor_sets(&info).unwrap()[0]
         }
-        
     }
 
     fn pool(&self) -> vk::DescriptorPool {
@@ -79,17 +81,18 @@ impl<D:DeviceSource> DescriptorPoolSource for Arc<Pool<D>>{
     }
 }
 
-impl<D:DeviceSource> Drop for Pool<D>{
+impl<D: DeviceSource> Drop for Pool<D> {
     fn drop(&mut self) {
         debug!("Destroyed descriptor pool {:?}", self.pool);
-        unsafe{
-            self.device.device().destroy_descriptor_pool(self.pool, None);
+        unsafe {
+            self.device
+                .device()
+                .destroy_descriptor_pool(self.pool, None);
         }
     }
 }
 
-impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Pool<D>>{
-    
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<Pool<D>> {
     fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
@@ -99,7 +102,7 @@ impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Pool<D>>{
     }
 }
 
-impl<D:DeviceSource> DeviceSource for Arc<Pool<D>>{
+impl<D: DeviceSource> DeviceSource for Arc<Pool<D>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }

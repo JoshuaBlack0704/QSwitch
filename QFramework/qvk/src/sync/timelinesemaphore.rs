@@ -8,43 +8,44 @@ use crate::sync::SemaphoreSource;
 
 use super::{TimelineSemaphore, TimelineSemaphoreFactory};
 
-impl<D:DeviceSource + Clone> TimelineSemaphoreFactory<Arc<TimelineSemaphore<D>>> for D{
+impl<D: DeviceSource + Clone> TimelineSemaphoreFactory<Arc<TimelineSemaphore<D>>> for D {
     fn create_timeline_semaphore(&self, starting_value: u64) -> Arc<TimelineSemaphore<D>> {
         let mut timeline_ext = vk::SemaphoreTypeCreateInfo::builder()
-        .semaphore_type(vk::SemaphoreType::TIMELINE)
-        .initial_value(starting_value);
-        let info = vk::SemaphoreCreateInfo::builder()
-        .push_next(&mut timeline_ext);
+            .semaphore_type(vk::SemaphoreType::TIMELINE)
+            .initial_value(starting_value);
+        let info = vk::SemaphoreCreateInfo::builder().push_next(&mut timeline_ext);
 
-        let semaphore = unsafe{self.device().create_semaphore(&info, None).expect("Could not create semaphore")};
+        let semaphore = unsafe {
+            self.device()
+                .create_semaphore(&info, None)
+                .expect("Could not create semaphore")
+        };
         info!("Created timeline semaphore {:?}", semaphore);
-        Arc::new(
-            TimelineSemaphore{
-                device: self.clone(),
-                semaphore,
-                value: Mutex::new((false, starting_value)),
-            }
-        )
+        Arc::new(TimelineSemaphore {
+            device: self.clone(),
+            semaphore,
+            value: Mutex::new((false, starting_value)),
+        })
     }
 }
 
 #[allow(unused)]
-impl<D:DeviceSource + Clone> TimelineSemaphore<D>{
-    fn increment(&self){
+impl<D: DeviceSource + Clone> TimelineSemaphore<D> {
+    fn increment(&self) {
         let mut lock = self.value.lock().unwrap();
         let (frozen, mut value) = *lock;
-        if !frozen{
+        if !frozen {
             value += 1;
         }
         *lock = (frozen, value);
     }
-    fn freeze(&self){
+    fn freeze(&self) {
         let mut lock = self.value.lock().unwrap();
         let (mut frozen, value) = *lock;
         frozen = true;
         *lock = (frozen, value);
     }
-    fn thaw(&self){
+    fn thaw(&self) {
         let mut lock = self.value.lock().unwrap();
         let (mut frozen, value) = *lock;
         frozen = false;
@@ -55,7 +56,7 @@ impl<D:DeviceSource + Clone> TimelineSemaphore<D>{
     }
 }
 
-impl<D:DeviceSource> SemaphoreSource for Arc<TimelineSemaphore<D>>{
+impl<D: DeviceSource> SemaphoreSource for Arc<TimelineSemaphore<D>> {
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
@@ -63,15 +64,15 @@ impl<D:DeviceSource> SemaphoreSource for Arc<TimelineSemaphore<D>>{
     fn submit_info(&self, stage: vk::PipelineStageFlags2) -> vk::SemaphoreSubmitInfo {
         let lock = self.value.lock().unwrap();
         vk::SemaphoreSubmitInfo::builder()
-        .semaphore(self.semaphore)
-        .value(lock.1)
-        .stage_mask(stage)
-        .device_index(0)
-        .build()
+            .semaphore(self.semaphore)
+            .value(lock.1)
+            .stage_mask(stage)
+            .device_index(0)
+            .build()
     }
 }
 
-impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<TimelineSemaphore<D>>{
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<TimelineSemaphore<D>> {
     fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
@@ -81,7 +82,7 @@ impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<TimelineSemaphore<D
     }
 }
 
-impl<D:DeviceSource> DeviceSource for Arc<TimelineSemaphore<D>>{
+impl<D: DeviceSource> DeviceSource for Arc<TimelineSemaphore<D>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }
@@ -127,11 +128,10 @@ impl<D:DeviceSource> DeviceSource for Arc<TimelineSemaphore<D>>{
     }
 }
 
-
-impl<D:DeviceSource> Drop for TimelineSemaphore<D>{
+impl<D: DeviceSource> Drop for TimelineSemaphore<D> {
     fn drop(&mut self) {
         debug!("Destroyed timeline semaphore {:?}", self.semaphore);
-        unsafe{
+        unsafe {
             self.device.device().destroy_semaphore(self.semaphore, None);
         }
     }

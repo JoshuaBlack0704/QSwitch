@@ -4,20 +4,22 @@ use ash::vk;
 
 use super::{WriteHolder, WriteSource};
 
-impl WriteHolder{
-    pub fn new(ty: vk::DescriptorType, dst_binding: u32, write: vk::WriteDescriptorSet) -> Arc<WriteHolder> {
-        Arc::new(
-            Self{
-                write: Mutex::new(write),
-                needs_update: Mutex::new(true),
-                ty,
-                dst_binding,
-            }
-        )
+impl WriteHolder {
+    pub fn new(
+        ty: vk::DescriptorType,
+        dst_binding: u32,
+        write: vk::WriteDescriptorSet,
+    ) -> Arc<WriteHolder> {
+        Arc::new(Self {
+            write: Mutex::new(write),
+            needs_update: Mutex::new(true),
+            ty,
+            dst_binding,
+        })
     }
 }
 
-impl WriteSource for Arc<WriteHolder>{
+impl WriteSource for Arc<WriteHolder> {
     fn update(&self, mut write: vk::WriteDescriptorSet) {
         let mut lock = self.write.lock().unwrap();
         let mut signal = self.needs_update.lock().unwrap();

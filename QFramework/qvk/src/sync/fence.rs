@@ -8,61 +8,63 @@ use crate::sync::FenceSource;
 
 use super::{Fence, FenceFactory};
 
-impl<D:DeviceSource + Clone> FenceFactory<Arc<Fence<D>>> for D{
+impl<D: DeviceSource + Clone> FenceFactory<Arc<Fence<D>>> for D {
     fn create_fence(&self, signaled: bool) -> Arc<Fence<D>> {
         let mut info = vk::FenceCreateInfo::builder();
-        if signaled{
+        if signaled {
             info = info.flags(vk::FenceCreateFlags::SIGNALED);
         }
 
-        let fence = unsafe{self.device().create_fence(&info, None).unwrap()};
+        let fence = unsafe { self.device().create_fence(&info, None).unwrap() };
         info!("Created fence {:?}", fence);
 
-        Arc::new(
-            Fence{
-                device: self.clone(),
-                fence,
-            }
-        )
+        Arc::new(Fence {
+            device: self.clone(),
+            fence,
+        })
     }
 }
 
-impl<D:DeviceSource> FenceSource for Arc<Fence<D>>{
+impl<D: DeviceSource> FenceSource for Arc<Fence<D>> {
     fn fence(&self) -> &vk::Fence {
         &self.fence
     }
 
     fn wait(&self, timeout: Option<u64>) {
         let fence = [self.fence];
-        unsafe{
-            if let Some(timeout) = timeout{
-                self.device.device().wait_for_fences(&fence, true, timeout).expect("Could not wait on fence");
-            }
-            else{
-                self.device.device().wait_for_fences(&fence, true, u64::MAX).expect("Could not wait on fence");
+        unsafe {
+            if let Some(timeout) = timeout {
+                self.device
+                    .device()
+                    .wait_for_fences(&fence, true, timeout)
+                    .expect("Could not wait on fence");
+            } else {
+                self.device
+                    .device()
+                    .wait_for_fences(&fence, true, u64::MAX)
+                    .expect("Could not wait on fence");
             }
         }
     }
 
     fn reset(&self) {
-        unsafe{
+        unsafe {
             let fence = [self.fence];
             self.device.device().reset_fences(&fence).unwrap();
         }
     }
 }
 
-impl<D:DeviceSource> Drop for Fence<D>{
+impl<D: DeviceSource> Drop for Fence<D> {
     fn drop(&mut self) {
-        debug!{"Destroyed fence {:?}", self.fence};
-        unsafe{
+        debug! {"Destroyed fence {:?}", self.fence};
+        unsafe {
             self.device.device().destroy_fence(self.fence, None);
         }
     }
 }
 
-impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Fence<D>>{
-    
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<Fence<D>> {
     fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
@@ -72,7 +74,7 @@ impl<D:DeviceSource + InstanceSource> InstanceSource for Arc<Fence<D>>{
     }
 }
 
-impl<D:DeviceSource> DeviceSource for Arc<Fence<D>>{
+impl<D: DeviceSource> DeviceSource for Arc<Fence<D>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }

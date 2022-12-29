@@ -7,23 +7,23 @@ use crate::queue::QueueSource;
 use self::swapchain::SwapchainSettingsStore;
 
 pub mod instance;
-pub trait InstanceFactory<I:InstanceSource>{
+pub trait InstanceFactory<I: InstanceSource> {
     fn create_instance(&self) -> I;
 }
-pub trait InstanceSource{
+pub trait InstanceSource {
     fn instance(&self) -> &ash::Instance;
     fn entry(&self) -> &ash::Entry;
 }
-pub struct Instance{
+pub struct Instance {
     entry: ash::Entry,
     instance: ash::Instance,
 }
 
 pub mod device;
-pub trait DeviceFactory<D:DeviceSource>{
+pub trait DeviceFactory<D: DeviceSource> {
     fn create_device(&self) -> Result<D, vk::Result>;
 }
-pub trait DeviceSource{
+pub trait DeviceSource {
     fn device(&self) -> &ash::Device;
     fn surface(&self) -> &Option<vk::SurfaceKHR>;
     fn physical_device(&self) -> &PhysicalDeviceData;
@@ -37,7 +37,7 @@ pub trait DeviceSource{
     fn host_memory_index(&self) -> u32;
 }
 
-pub struct Device<I: InstanceSource>{
+pub struct Device<I: InstanceSource> {
     instance: I,
     surface: Option<vk::SurfaceKHR>,
     surface_loader: ash::extensions::khr::Surface,
@@ -46,18 +46,18 @@ pub struct Device<I: InstanceSource>{
     created_queue_families: Vec<usize>,
 }
 #[derive(Clone)]
-pub struct PhysicalDeviceData{
+pub struct PhysicalDeviceData {
     pub physical_device: vk::PhysicalDevice,
     pub properties: vk::PhysicalDeviceProperties,
     pub queue_properties: Vec<vk::QueueFamilyProperties>,
     pub raytracing_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
     pub acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
     pub mem_props: vk::PhysicalDeviceMemoryProperties,
-    pub mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT
+    pub mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT,
 }
 
 pub mod swapchain;
-pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q:QueueSource>{
+pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q: QueueSource> {
     device: D,
     _settings: S,
     create_info: Mutex<vk::SwapchainCreateInfoKHR>,
@@ -67,7 +67,3 @@ pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore
     images: Mutex<Vec<vk::Image>>,
     present_queue: Q,
 }
-
-
-
-

@@ -1,48 +1,63 @@
 use std::sync::Arc;
 
-use ash::vk;
-use log::{info, debug};
 use crate::command::BindSetFactory;
 use crate::descriptor::{DescriptorLayoutSource, DescriptorPoolSource};
+use ash::vk;
+use log::{debug, info};
 
 use crate::init::{DeviceSource, InstanceSource};
 
-use super::{Set, WriteSource, SetSource, SetFactory};
+use super::{Set, SetFactory, SetSource, WriteSource};
 
-impl<W:WriteSource + Clone, L:DescriptorLayoutSource<W>, P:DescriptorPoolSource + DeviceSource + Clone> SetFactory<Arc<Set<P,W>>, W, L> for P{
-    fn create_set(&self, layout_provider: &L) -> Arc<Set<P,W>> {
+impl<
+        W: WriteSource + Clone,
+        L: DescriptorLayoutSource<W>,
+        P: DescriptorPoolSource + DeviceSource + Clone,
+    > SetFactory<Arc<Set<P, W>>, W, L> for P
+{
+    fn create_set(&self, layout_provider: &L) -> Arc<Set<P, W>> {
         let set = self.allocate_set(layout_provider);
-        info!("Created descriptor set {:?} using layout {:?} from pool {:?}", set, layout_provider.layout(), self.pool());
+        info!(
+            "Created descriptor set {:?} using layout {:?} from pool {:?}",
+            set,
+            layout_provider.layout(),
+            self.pool()
+        );
         let writes = layout_provider.writes().clone();
-        Arc::new(
-            Set {
-                pool: self.clone(),
-                writes,
-                set,
-            }
-        )
+        Arc::new(Set {
+            pool: self.clone(),
+            writes,
+            set,
+        })
     }
 }
 
-impl<W:WriteSource, P:DescriptorPoolSource + DeviceSource> SetSource for Arc<Set<P,W>>{
+impl<W: WriteSource, P: DescriptorPoolSource + DeviceSource> SetSource for Arc<Set<P, W>> {
     ///Will perform any writes needed to make the set current
-    fn update(&self){
-        let mut updates:Vec<vk::WriteDescriptorSet> = self.writes.iter().filter(|w| w.needs_write()).map(|w| w.get_write()).collect();
+    fn update(&self) {
+        let mut updates: Vec<vk::WriteDescriptorSet> = self
+            .writes
+            .iter()
+            .filter(|w| w.needs_write())
+            .map(|w| w.get_write())
+            .collect();
 
-        for u in updates.iter_mut(){
+        for u in updates.iter_mut() {
             u.dst_set = self.set;
-            debug!("Writing binding {:?} in descriptor set {:?}", u.dst_binding, u.dst_set);
+            debug!(
+                "Writing binding {:?} in descriptor set {:?}",
+                u.dst_binding, u.dst_set
+            );
         }
 
-        unsafe{
+        unsafe {
             let device = self.device();
             device.update_descriptor_sets(&updates, &[]);
         }
     }
-    
 }
 
-impl<P:DescriptorPoolSource + DeviceSource, W:WriteSource> BindSetFactory for  Arc<Set<P,W>>{
+impl<P: DescriptorPoolSource + DeviceSource, W: WriteSource> BindSetFactory for Arc<Set<P, W>> {
     fn set(&self) -> vk::DescriptorSet {
         self.update();
         self.set
@@ -53,8 +68,9 @@ impl<P:DescriptorPoolSource + DeviceSource, W:WriteSource> BindSetFactory for  A
     }
 }
 
-impl<P:DescriptorPoolSource + DeviceSource + InstanceSource, W:WriteSource> InstanceSource for  Arc<Set<P,W>>{
-    
+impl<P: DescriptorPoolSource + DeviceSource + InstanceSource, W: WriteSource> InstanceSource
+    for Arc<Set<P, W>>
+{
     fn instance(&self) -> &ash::Instance {
         self.pool.instance()
     }
@@ -64,8 +80,7 @@ impl<P:DescriptorPoolSource + DeviceSource + InstanceSource, W:WriteSource> Inst
     }
 }
 
-impl<P:DescriptorPoolSource + DeviceSource, W:WriteSource> DeviceSource for  Arc<Set<P,W>>{
-    
+impl<P: DescriptorPoolSource + DeviceSource, W: WriteSource> DeviceSource for Arc<Set<P, W>> {
     fn device(&self) -> &ash::Device {
         self.pool.device()
     }

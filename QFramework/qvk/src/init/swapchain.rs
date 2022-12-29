@@ -3,12 +3,17 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::{ImageSource, ImageResourceSource, Image, ImageResourceFactory}, sync::{SemaphoreSource, FenceSource, self}, queue::{QueueOps, Queue, QueueSource, QueueFactory}, memory::{Memory, PartitionSystem}};
 use crate::sync::SemaphoreFactory;
+use crate::{
+    image::{Image, ImageResourceFactory, ImageResourceSource, ImageSource},
+    memory::{Memory, PartitionSystem},
+    queue::{Queue, QueueFactory, QueueOps, QueueSource},
+    sync::{self, FenceSource, SemaphoreSource},
+};
 
-use super::{Swapchain, InstanceSource, DeviceSource};
+use super::{DeviceSource, InstanceSource, Swapchain};
 
-pub trait SwapchainSettingsStore{
+pub trait SwapchainSettingsStore {
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
     fn create_flags(&self) -> Option<vk::SwapchainCreateFlagsKHR>;
     fn custom_min_image_count(&self) -> Option<u32>;
@@ -23,31 +28,38 @@ pub trait SwapchainSettingsStore{
     fn clipped(&self) -> bool;
 }
 
-pub trait SwapchainStore<D:DeviceSource>{
-    fn present<S:SemaphoreSource> (&self, next_image: u32, waits: Option<&[&S]>);
-    fn wait_present<S:SemaphoreSource>(&self, next_image: u32, waits: Option<&[&S]>);
-    fn aquire_next_image<F:FenceSource, S:SemaphoreSource>(&self, timeout: u64,fence: Option<&F>, semaphore: Option<&S>) -> u32;
+pub trait SwapchainSource<D: DeviceSource> {
+    fn present<S: SemaphoreSource>(&self, next_image: u32, waits: Option<&[&S]>);
+    fn wait_present<S: SemaphoreSource>(&self, next_image: u32, waits: Option<&[&S]>);
+    fn aquire_next_image<F: FenceSource, S: SemaphoreSource>(
+        &self,
+        timeout: u64,
+        fence: Option<&F>,
+        semaphore: Option<&S>,
+    ) -> u32;
     fn resize(&self);
     fn extent(&self) -> vk::Extent3D;
-    fn images(&self) -> Vec<Arc<Image<D,Arc<Memory<D,PartitionSystem>>>>>;
-    fn present_image<IR:ImageResourceSource + ImageSource, Q:QueueOps>(&self, src: &IR, queue: &Q); 
+    fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>>;
+    fn present_image<IR: ImageResourceSource + ImageSource, Q: QueueOps>(
+        &self,
+        src: &IR,
+        queue: &Q,
+    );
 }
 
 #[derive(Clone)]
-pub enum SwapchainCreateExtension{
-    
-}
+pub enum SwapchainCreateExtension {}
 
 #[derive(Debug)]
-pub enum SwapchainCreateError{
+pub enum SwapchainCreateError {
     NoSurface,
     VulkanError(vk::Result),
 }
 
-type SwapchainType<D, S> = Swapchain<D,S,Arc<Queue<D>>>;
+type SwapchainType<D, S> = Swapchain<D, S, Arc<Queue<D>>>;
 
 #[derive(Clone)]
-pub struct SettingsStore{
+pub struct SettingsStore {
     pub extensions: Option<Vec<SwapchainCreateExtension>>,
     pub create_flags: Option<vk::SwapchainCreateFlagsKHR>,
     pub custom_min_image_count: Option<u32>,
@@ -62,148 +74,176 @@ pub struct SettingsStore{
     pub clipped: bool,
 }
 
-impl<D: DeviceSource + InstanceSource + Clone, S:SwapchainSettingsStore + Clone> SwapchainType<D,S>{
-    pub fn new(device_supplier: &D, settings: &S, old_swapchain: Option<&Arc<Self>>)  -> Result<Arc<Self>, SwapchainCreateError>{
+impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone>
+    SwapchainType<D, S>
+{
+    pub fn new(
+        device_supplier: &D,
+        settings: &S,
+        old_swapchain: Option<&Arc<Self>>,
+    ) -> Result<Arc<Self>, SwapchainCreateError> {
         let device_provider = device_supplier;
         let instance_provider = device_provider.clone();
         let surface = device_provider.surface();
-        if let None = surface{
+        if let None = surface {
             return Err(SwapchainCreateError::NoSurface);
         }
         let surface = surface.unwrap();
-        let surface_loader = ash::extensions::khr::Surface::new(instance_provider.entry(), instance_provider.instance());
+        let surface_loader = ash::extensions::khr::Surface::new(
+            instance_provider.entry(),
+            instance_provider.instance(),
+        );
 
-        let capabilites = unsafe{surface_loader.get_physical_device_surface_capabilities(device_provider.physical_device().physical_device, surface)};
-        let present_modes = unsafe{surface_loader.get_physical_device_surface_present_modes(device_provider.physical_device().physical_device, surface)};
-        let formats = unsafe{surface_loader.get_physical_device_surface_formats(device_provider.physical_device().physical_device, surface)};
-        if let Err(e) = capabilites{
+        let capabilites = unsafe {
+            surface_loader.get_physical_device_surface_capabilities(
+                device_provider.physical_device().physical_device,
+                surface,
+            )
+        };
+        let present_modes = unsafe {
+            surface_loader.get_physical_device_surface_present_modes(
+                device_provider.physical_device().physical_device,
+                surface,
+            )
+        };
+        let formats = unsafe {
+            surface_loader.get_physical_device_surface_formats(
+                device_provider.physical_device().physical_device,
+                surface,
+            )
+        };
+        if let Err(e) = capabilites {
             return Err(SwapchainCreateError::VulkanError(e));
         }
-        if let Err(e) = present_modes{
+        if let Err(e) = present_modes {
             return Err(SwapchainCreateError::VulkanError(e));
         }
-        if let Err(e) = formats{
+        if let Err(e) = formats {
             return Err(SwapchainCreateError::VulkanError(e));
         }
         let capabilities = capabilites.unwrap();
         let present_modes = present_modes.unwrap();
         let formats = formats.unwrap();
 
-        let mut chosen_format = vk::SurfaceFormatKHR{
+        let mut chosen_format = vk::SurfaceFormatKHR {
             format: vk::Format::B8G8R8A8_SRGB,
             color_space: vk::ColorSpaceKHR::SRGB_NONLINEAR,
         };
 
-        if !formats.contains(&chosen_format){
+        if !formats.contains(&chosen_format) {
             chosen_format = formats[0];
         }
-        if let Some(custom_formats) = settings.custom_ranked_image_format(){
-            for f in custom_formats.iter(){
-                if formats.contains(f){
+        if let Some(custom_formats) = settings.custom_ranked_image_format() {
+            for f in custom_formats.iter() {
+                if formats.contains(f) {
                     chosen_format = *f;
                     break;
                 }
             }
         }
-        
+
         let mut info = vk::SwapchainCreateInfoKHR::builder();
         let extensions = settings.extensions();
-        if let Some(mut ext) = extensions{
-            for ext in ext.iter_mut(){
-                match ext{
-                    _ => todo!()
+        if let Some(mut ext) = extensions {
+            for ext in ext.iter_mut() {
+                match ext {
+                    _ => todo!(),
                 }
             }
         }
 
         let mut chosen_present_mode = vk::PresentModeKHR::FIFO;
-        if let Some(modes) = settings.custom_ranked_present_modes(){
-            for mode in modes{
-                if present_modes.contains(mode){
+        if let Some(modes) = settings.custom_ranked_present_modes() {
+            for mode in modes {
+                if present_modes.contains(mode) {
                     chosen_present_mode = *mode;
                     break;
                 }
             }
         }
-        
-        if let Some(flags) = settings.create_flags(){
+
+        if let Some(flags) = settings.create_flags() {
             info = info.flags(flags);
         }
         info = info.surface(surface);
         info = info.min_image_count(capabilities.min_image_count);
-        if let Some(c) = settings.custom_min_image_count(){
+        if let Some(c) = settings.custom_min_image_count() {
             info = info.min_image_count(c);
         }
         info = info.image_format(chosen_format.format);
         info = info.image_color_space(chosen_format.color_space);
         info = info.image_extent(capabilities.current_extent);
-        if let Some(e) = settings.custom_image_extent(){
+        if let Some(e) = settings.custom_image_extent() {
             info = info.image_extent(e);
         }
         info = info.image_array_layers(settings.image_array_layers());
         info = info.image_usage(settings.image_usage());
         info = info.image_sharing_mode(vk::SharingMode::EXCLUSIVE);
-        if let Some(i) = settings.share(){
+        if let Some(i) = settings.share() {
             info = info.image_sharing_mode(vk::SharingMode::CONCURRENT);
             info = info.queue_family_indices(i);
         }
         info = info.pre_transform(capabilities.current_transform);
-        if let Some(t) = settings.custom_pre_transform(){
+        if let Some(t) = settings.custom_pre_transform() {
             info = info.pre_transform(t);
         }
         info = info.composite_alpha(settings.composite_alpha());
         info = info.present_mode(chosen_present_mode);
         info = info.clipped(settings.clipped());
-        if let Some(os) = old_swapchain{
+        if let Some(os) = old_swapchain {
             info = info.old_swapchain(*os.swapchain.lock().unwrap());
         }
 
-        let swapchain_loader = ash::extensions::khr::Swapchain::new(instance_provider.instance(), device_provider.device());
+        let swapchain_loader = ash::extensions::khr::Swapchain::new(
+            instance_provider.instance(),
+            device_provider.device(),
+        );
 
-        let swapchain = unsafe{swapchain_loader.create_swapchain(&info, None)};
-        if let Err(e) = swapchain{
+        let swapchain = unsafe { swapchain_loader.create_swapchain(&info, None) };
+        if let Err(e) = swapchain {
             return Err(SwapchainCreateError::VulkanError(e));
         }
         let swapchain = swapchain.unwrap();
 
-        let queue = device_supplier.create_queue(vk::QueueFlags::GRAPHICS).unwrap();
+        let queue = device_supplier
+            .create_queue(vk::QueueFlags::GRAPHICS)
+            .unwrap();
 
         info!("Created swapchain {:?}", swapchain);
-        let swapchain = Swapchain{
-                    device: device_provider.clone(),
-                    _settings: settings.clone(),
-                    create_info: Mutex::new(info.build()),
-                    surface_loader,
-                    swapchain_loader,
-                    swapchain: Mutex::new(swapchain),
-                    images: Mutex::new(vec![]),
-                    present_queue: queue,
-                };
-        
+        let swapchain = Swapchain {
+            device: device_provider.clone(),
+            _settings: settings.clone(),
+            create_info: Mutex::new(info.build()),
+            surface_loader,
+            swapchain_loader,
+            swapchain: Mutex::new(swapchain),
+            images: Mutex::new(vec![]),
+            present_queue: queue,
+        };
+
         swapchain.get_images(*swapchain.swapchain.lock().unwrap());
 
-        Ok(
-            Arc::new(
-                swapchain
-            )
-        )
+        Ok(Arc::new(swapchain))
     }
 
-    fn get_images(&self, swapchain: vk::SwapchainKHR){
+    fn get_images(&self, swapchain: vk::SwapchainKHR) {
         let mut img_lock = self.images.lock().unwrap();
-        let imgs = unsafe{self.swapchain_loader.get_swapchain_images(swapchain).unwrap()};
+        let imgs = unsafe {
+            self.swapchain_loader
+                .get_swapchain_images(swapchain)
+                .unwrap()
+        };
         *img_lock = imgs;
     }
-
 }
 
-impl<D: DeviceSource + InstanceSource + Clone, S:SwapchainSettingsStore + Clone> SwapchainStore<D> for Arc<SwapchainType<D,S>>{
-    fn present<Sem:SemaphoreSource> (&self, next_image: u32, waits: Option<&[&Sem]>) {
-
-        
+impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone> SwapchainSource<D>
+    for Arc<SwapchainType<D, S>>
+{
+    fn present<Sem: SemaphoreSource>(&self, next_image: u32, waits: Option<&[&Sem]>) {
         let mut info = vk::PresentInfoKHR::builder();
-        let wait_semaphores:Vec<vk::Semaphore>;
-        if let Some(waits) = waits{
+        let wait_semaphores: Vec<vk::Semaphore>;
+        if let Some(waits) = waits {
             wait_semaphores = waits.iter().map(|s| *s.semaphore()).collect();
             info = info.wait_semaphores(&wait_semaphores);
         }
@@ -212,96 +252,154 @@ impl<D: DeviceSource + InstanceSource + Clone, S:SwapchainSettingsStore + Clone>
         info = info.swapchains(&swapchains);
         info = info.image_indices(&images_indices);
 
-        let _ = unsafe{self.swapchain_loader.queue_present(*self.present_queue.queue(), &info)};
+        let _ = unsafe {
+            self.swapchain_loader
+                .queue_present(*self.present_queue.queue(), &info)
+        };
     }
 
     fn resize(&self) {
         let mut swapchain_lock = self.swapchain.lock().unwrap();
-        let capabilites = unsafe{self.surface_loader.get_physical_device_surface_capabilities(self.device.physical_device().physical_device, self.device.surface().unwrap()).unwrap()};
-        debug!("Resizing swapchain {:?} to {:?}", *swapchain_lock, capabilites.current_extent);
+        let capabilites = unsafe {
+            self.surface_loader
+                .get_physical_device_surface_capabilities(
+                    self.device.physical_device().physical_device,
+                    self.device.surface().unwrap(),
+                )
+                .unwrap()
+        };
+        debug!(
+            "Resizing swapchain {:?} to {:?}",
+            *swapchain_lock, capabilites.current_extent
+        );
         let mut info = self.create_info.lock().unwrap();
         info.image_extent = capabilites.current_extent;
         info.old_swapchain = *swapchain_lock;
         info.image_extent = capabilites.current_extent;
-        let new_swapchain = unsafe{self.swapchain_loader.create_swapchain(&info, None).unwrap()};
-        unsafe{self.swapchain_loader.destroy_swapchain(*swapchain_lock, None)};
-        debug!("Swapchain {:?} destroyed for swapchain {:?}", *swapchain_lock, new_swapchain);
+        let new_swapchain = unsafe { self.swapchain_loader.create_swapchain(&info, None).unwrap() };
+        unsafe {
+            self.swapchain_loader
+                .destroy_swapchain(*swapchain_lock, None)
+        };
+        debug!(
+            "Swapchain {:?} destroyed for swapchain {:?}",
+            *swapchain_lock, new_swapchain
+        );
         self.get_images(new_swapchain);
         *swapchain_lock = new_swapchain;
     }
 
-    fn aquire_next_image<F:FenceSource, Sem:SemaphoreSource>(&self, timeout: u64, fence: Option<&F>, semaphore: Option<&Sem>) -> u32{
+    fn aquire_next_image<F: FenceSource, Sem: SemaphoreSource>(
+        &self,
+        timeout: u64,
+        fence: Option<&F>,
+        semaphore: Option<&Sem>,
+    ) -> u32 {
         let mut present_fence = vk::Fence::null();
         let mut present_semaphore = vk::Semaphore::null();
 
-        if let Some(f) = fence{
+        if let Some(f) = fence {
             present_fence = *f.fence();
         }
-        if let Some(s) = semaphore{
+        if let Some(s) = semaphore {
             present_semaphore = *s.semaphore();
         }
         let mut swapchain = *self.swapchain.lock().unwrap();
 
-        let mut next_image = unsafe{self.swapchain_loader.acquire_next_image(swapchain, timeout, present_semaphore, present_fence)};
-        if let Err(e) = next_image{
-            if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR){
+        let mut next_image = unsafe {
+            self.swapchain_loader.acquire_next_image(
+                swapchain,
+                timeout,
+                present_semaphore,
+                present_fence,
+            )
+        };
+        if let Err(e) = next_image {
+            if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR) {
                 todo!();
             }
             self.resize();
             swapchain = *self.swapchain.lock().unwrap();
-            next_image = unsafe{self.swapchain_loader.acquire_next_image(swapchain, timeout, present_semaphore, present_fence)};
+            next_image = unsafe {
+                self.swapchain_loader.acquire_next_image(
+                    swapchain,
+                    timeout,
+                    present_semaphore,
+                    present_fence,
+                )
+            };
         }
         let (next_image, suboptimal) = next_image.unwrap();
-        if !suboptimal{
+        if !suboptimal {
             return next_image;
         }
 
         self.resize();
         swapchain = *self.swapchain.lock().unwrap();
-        let (next_image, _) = unsafe{self.swapchain_loader.acquire_next_image(swapchain, timeout, present_semaphore, present_fence).unwrap()};
+        let (next_image, _) = unsafe {
+            self.swapchain_loader
+                .acquire_next_image(swapchain, timeout, present_semaphore, present_fence)
+                .unwrap()
+        };
 
         next_image
     }
 
-    fn wait_present<Sem:SemaphoreSource>(&self, next_image: u32, waits: Option<&[&Sem]>) {
+    fn wait_present<Sem: SemaphoreSource>(&self, next_image: u32, waits: Option<&[&Sem]>) {
         self.present(next_image, waits);
         self.present_queue.wait_idle();
-        
     }
 
     fn extent(&self) -> vk::Extent3D {
         let lock = self.create_info.lock().unwrap();
         vk::Extent3D::builder()
-        .width(lock.image_extent.width)
-        .height(lock.image_extent.height)
-        .depth(1)
-        .build()
+            .width(lock.image_extent.width)
+            .height(lock.image_extent.height)
+            .depth(1)
+            .build()
     }
 
-    fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D,PartitionSystem>>>>> {
+    fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>> {
         let mut images = vec![];
-        let info =  self.create_info.lock().unwrap();
+        let info = self.create_info.lock().unwrap();
         let lock = self.images.lock().unwrap();
-        for img in lock.iter(){
-            let img = Image::<D,Arc<Memory<D,PartitionSystem>>>::from_swapchain_image(&self.device, *img, info.image_extent);
+        for img in lock.iter() {
+            let img = Image::<D, Arc<Memory<D, PartitionSystem>>>::from_swapchain_image(
+                &self.device,
+                *img,
+                info.image_extent,
+            );
             images.push(img);
-        } 
+        }
         images
     }
 
-    fn present_image<IR:ImageResourceSource + ImageSource, Q:QueueOps>(&self, src: &IR, queue: &Q) {
+    fn present_image<IR: ImageResourceSource + ImageSource, Q: QueueOps>(
+        &self,
+        src: &IR,
+        queue: &Q,
+    ) {
         // let semaphore:S
         let images = self.images();
-        
+
         let aquire = self.create_semaphore();
-        let dst_index = self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
+        let dst_index =
+            self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
         let dst = &images[dst_index as usize];
 
         src.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
         dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
 
-        let dst_res = dst.create_resource(vk::Offset3D::default(), dst.extent(), 0, vk::ImageAspectFlags::COLOR).unwrap();
-        src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR).unwrap();
+        let dst_res = dst
+            .create_resource(
+                vk::Offset3D::default(),
+                dst.extent(),
+                0,
+                vk::ImageAspectFlags::COLOR,
+            )
+            .unwrap();
+        src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR)
+            .unwrap();
 
         dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
 
@@ -311,34 +409,35 @@ impl<D: DeviceSource + InstanceSource + Clone, S:SwapchainSettingsStore + Clone>
     }
 }
 
-impl<D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Q:QueueSource> Drop for Swapchain<D,S,Q>{
+impl<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q: QueueSource> Drop
+    for Swapchain<D, S, Q>
+{
     fn drop(&mut self) {
         let lock = self.swapchain.lock().unwrap();
         let swapchain = *lock;
         debug!("Destroying swapchain {:?}", swapchain);
-        unsafe{
+        unsafe {
             self.swapchain_loader.destroy_swapchain(swapchain, None);
         }
     }
 }
 
-impl SettingsStore{
+impl SettingsStore {
     pub fn new(
-    extensions: Option<Vec<SwapchainCreateExtension>>,
-    create_flags: Option<vk::SwapchainCreateFlagsKHR>,
-    custom_min_image_count: Option<u32>,
-    custom_ranked_image_format: Option<Vec<vk::SurfaceFormatKHR>>,
-    custom_image_extent: Option<vk::Extent2D>,
-    image_array_layers: u32,
-    image_usage: vk::ImageUsageFlags,
-    share: Option<Vec<u32>>,
-    custom_pre_transform: Option<vk::SurfaceTransformFlagsKHR>,
-    composite_alpha: vk::CompositeAlphaFlagsKHR,
-    custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
-    clipped: bool,
-    )
--> SettingsStore     {
-        SettingsStore{
+        extensions: Option<Vec<SwapchainCreateExtension>>,
+        create_flags: Option<vk::SwapchainCreateFlagsKHR>,
+        custom_min_image_count: Option<u32>,
+        custom_ranked_image_format: Option<Vec<vk::SurfaceFormatKHR>>,
+        custom_image_extent: Option<vk::Extent2D>,
+        image_array_layers: u32,
+        image_usage: vk::ImageUsageFlags,
+        share: Option<Vec<u32>>,
+        custom_pre_transform: Option<vk::SurfaceTransformFlagsKHR>,
+        composite_alpha: vk::CompositeAlphaFlagsKHR,
+        custom_ranked_present_modes: Option<Vec<vk::PresentModeKHR>>,
+        clipped: bool,
+    ) -> SettingsStore {
+        SettingsStore {
             extensions,
             create_flags,
             custom_min_image_count,
@@ -355,13 +454,26 @@ impl SettingsStore{
     }
 }
 
-impl Default for SettingsStore{
+impl Default for SettingsStore {
     fn default() -> Self {
-        Self::new(None, None, None, None, None, 1, vk::ImageUsageFlags::TRANSFER_DST, None, None, vk::CompositeAlphaFlagsKHR::OPAQUE, Some(vec![vk::PresentModeKHR::MAILBOX]), true)
+        Self::new(
+            None,
+            None,
+            None,
+            None,
+            None,
+            1,
+            vk::ImageUsageFlags::TRANSFER_DST,
+            None,
+            None,
+            vk::CompositeAlphaFlagsKHR::OPAQUE,
+            Some(vec![vk::PresentModeKHR::MAILBOX]),
+            true,
+        )
     }
 }
 
-impl SwapchainSettingsStore for SettingsStore{
+impl SwapchainSettingsStore for SettingsStore {
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>> {
         self.extensions.clone()
     }
@@ -375,8 +487,8 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 
     fn custom_ranked_image_format(&self) -> Option<&[vk::SurfaceFormatKHR]> {
-        if let Some(formats) = &self.custom_ranked_image_format{
-            return Some(&formats)
+        if let Some(formats) = &self.custom_ranked_image_format {
+            return Some(&formats);
         }
         None
     }
@@ -394,8 +506,8 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 
     fn share(&self) -> Option<&[u32]> {
-        if let Some(indecies) = &self.share{
-            return Some(&indecies)
+        if let Some(indecies) = &self.share {
+            return Some(&indecies);
         }
         None
     }
@@ -409,7 +521,7 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 
     fn custom_ranked_present_modes(&self) -> Option<&[vk::PresentModeKHR]> {
-        if let Some(modes) = &self.custom_ranked_present_modes{
+        if let Some(modes) = &self.custom_ranked_present_modes {
             return Some(&modes);
         }
         None
@@ -420,7 +532,9 @@ impl SwapchainSettingsStore for SettingsStore{
     }
 }
 
-impl<D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Q: QueueSource> DeviceSource for Arc<Swapchain<D,S,Q>>{
+impl<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q: QueueSource> DeviceSource
+    for Arc<Swapchain<D, S, Q>>
+{
     fn device(&self) -> &ash::Device {
         self.device.device()
     }
@@ -466,7 +580,9 @@ impl<D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Q: QueueSource>
     }
 }
 
-impl< D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Q: QueueSource> InstanceSource for Arc<Swapchain<D,S,Q>>{
+impl<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q: QueueSource> InstanceSource
+    for Arc<Swapchain<D, S, Q>>
+{
     fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
@@ -475,4 +591,3 @@ impl< D: DeviceSource + InstanceSource, S:SwapchainSettingsStore, Q: QueueSource
         self.device.entry()
     }
 }
-

@@ -1,5 +1,5 @@
 use ash::vk;
-use qvk::{image::{ImageResource, ImageFactory, ImageResourceFactory}, init::{device, instance, swapchain::{self, SwapchainStore}, Swapchain, InstanceFactory, DeviceFactory}, memory::MemoryFactory, queue::QueueFactory};
+use qvk::{image::{ImageResource, ImageFactory, ImageResourceFactory}, init::{device, instance, swapchain::{self, SwapchainSource}, Swapchain, InstanceFactory, DeviceFactory}, memory::MemoryFactory, queue::QueueFactory};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event::{Event, WindowEvent}, event_loop::EventLoop, window::WindowBuilder};
 use qvk::image::ImageSource;

@@ -8,45 +8,49 @@ use crate::sync::SemaphoreSource;
 
 use super::{Semaphore, SemaphoreFactory};
 
-impl<D:DeviceSource + Clone> SemaphoreFactory<Arc<Semaphore<D>>> for D{
+impl<D: DeviceSource + Clone> SemaphoreFactory<Arc<Semaphore<D>>> for D {
     fn create_semaphore(&self) -> Arc<Semaphore<D>> {
         let device_source = self;
         let info = vk::SemaphoreCreateInfo::builder();
-        let semaphore = unsafe{device_source.device().create_semaphore(&info, None).unwrap()};
+        let semaphore = unsafe {
+            device_source
+                .device()
+                .create_semaphore(&info, None)
+                .unwrap()
+        };
         info!("Created semaphore {:?}", semaphore);
-        Arc::new(Semaphore{
+        Arc::new(Semaphore {
             device: device_source.clone(),
             semaphore,
         })
     }
 }
- 
-impl<D:DeviceSource> Drop for Semaphore<D>{
+
+impl<D: DeviceSource> Drop for Semaphore<D> {
     fn drop(&mut self) {
         debug!("Destroyed semaphore {:?}", self.semaphore);
-        unsafe{
+        unsafe {
             self.device.device().destroy_semaphore(self.semaphore, None);
         }
     }
 }
 
-impl<D:DeviceSource> SemaphoreSource for Arc<Semaphore<D>>{
+impl<D: DeviceSource> SemaphoreSource for Arc<Semaphore<D>> {
     fn semaphore(&self) -> &vk::Semaphore {
         &self.semaphore
     }
 
     fn submit_info(&self, stage: vk::PipelineStageFlags2) -> vk::SemaphoreSubmitInfo {
         vk::SemaphoreSubmitInfo::builder()
-        .semaphore(self.semaphore)
-        .value(0)
-        .stage_mask(stage)
-        .device_index(0)
-        .build()
-        
+            .semaphore(self.semaphore)
+            .value(0)
+            .stage_mask(stage)
+            .device_index(0)
+            .build()
     }
 }
-impl <D:DeviceSource + InstanceSource> InstanceSource for Arc<Semaphore<D>>{
-        fn instance(&self) -> &ash::Instance {
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<Semaphore<D>> {
+    fn instance(&self) -> &ash::Instance {
         self.device.instance()
     }
 
@@ -55,7 +59,7 @@ impl <D:DeviceSource + InstanceSource> InstanceSource for Arc<Semaphore<D>>{
     }
 }
 
-impl <D:DeviceSource> DeviceSource for Arc<Semaphore<D>>{
+impl<D: DeviceSource> DeviceSource for Arc<Semaphore<D>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }
