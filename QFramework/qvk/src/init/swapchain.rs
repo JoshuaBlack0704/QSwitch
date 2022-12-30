@@ -37,6 +37,8 @@ pub trait SwapchainSource<D: DeviceSource> {
         fence: Option<&F>,
         semaphore: Option<&S>,
     ) -> u32;
+    fn gpu_aquire_next_image<S:SemaphoreSource>(&self, timeout: u64, semaphore: &S) -> u32;
+    fn cpu_aquire_next_image<F:FenceSource>(&self, timeout: u64, fence: &F) -> u32;
     fn resize(&self);
     fn extent(&self) -> vk::Extent3D;
     fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>>;
@@ -406,6 +408,93 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         let waits = [&aquire];
         self.present(dst_index, Some(&waits));
         queue.wait_idle();
+    }
+
+    fn gpu_aquire_next_image<Sem:SemaphoreSource>(&self, timeout: u64, semaphore: &Sem) -> u32 {
+        let mut swapchain = *self.swapchain.lock().unwrap();
+
+        let mut next_image = unsafe {
+            self.swapchain_loader.acquire_next_image(
+                swapchain,
+                timeout,
+                *semaphore.semaphore(),
+                vk::Fence::null(),
+            )
+        };
+        if let Err(e) = next_image {
+            if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR) {
+                todo!();
+            }
+            self.resize();
+            swapchain = *self.swapchain.lock().unwrap();
+            next_image = unsafe {
+                self.swapchain_loader.acquire_next_image(
+                    swapchain,
+                    timeout,
+                    *semaphore.semaphore(),
+                    vk::Fence::null(),
+                )
+            };
+        }
+        let (next_image, suboptimal) = next_image.unwrap();
+        if !suboptimal {
+            return next_image;
+        }
+
+        self.resize();
+        swapchain = *self.swapchain.lock().unwrap();
+        let (next_image, _) = unsafe {
+            self.swapchain_loader
+                .acquire_next_image(swapchain, timeout, *semaphore.semaphore(), vk::Fence::null())
+                .unwrap()
+        };
+
+        next_image
+    }
+
+    fn cpu_aquire_next_image<F:FenceSource>(&self, timeout: u64, fence: &F) -> u32 {
+        let mut swapchain = *self.swapchain.lock().unwrap();
+
+        let mut next_image = unsafe {
+            self.swapchain_loader.acquire_next_image(
+                swapchain,
+                timeout,
+                vk::Semaphore::null(),
+                *fence.fence(),
+            )
+        };
+        if let Err(e) = next_image {
+            if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR) {
+                todo!();
+            }
+            self.resize();
+            swapchain = *self.swapchain.lock().unwrap();
+            next_image = unsafe {
+                self.swapchain_loader.acquire_next_image(
+                    swapchain,
+                    timeout,
+                    vk::Semaphore::null(),
+                    *fence.fence(),
+                )
+            };
+        }
+        let (next_image, suboptimal) = next_image.unwrap();
+        if !suboptimal {
+            return next_image;
+        }
+
+        self.resize();
+        swapchain = *self.swapchain.lock().unwrap();
+        let (next_image, _) = unsafe {
+            self.swapchain_loader.acquire_next_image(
+                swapchain,
+                timeout,
+                vk::Semaphore::null(),
+                *fence.fence(),
+            ).unwrap()
+        };
+
+        next_image
     }
 }
 

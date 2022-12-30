@@ -3,7 +3,7 @@ use std::{mem::size_of, sync::Arc};
 use ash::vk::{self, BufferUsageFlags};
 use log::{debug, info};
 
-use crate::command::CommandBufferFactory;
+use crate::command::{CommandBufferFactory, BindVertexBufferFactory, BindIndexBufferFactory};
 use crate::descriptor::DescriptorLayoutBindingFactory;
 use crate::image::ImageSource;
 use crate::memory::buffer::{BufferSegmentSource, BufferSource};
@@ -330,5 +330,27 @@ impl<B: BufferSource + MemorySource + DeviceSource> DeviceSource for Arc<BufferS
 
     fn host_memory_index(&self) -> u32 {
         self.buffer.host_memory_index()
+    }
+}
+impl<B: BufferSource + MemorySource + DeviceSource> BindVertexBufferFactory for Arc<BufferSegment<B>> {
+    fn buffer(&self) -> vk::Buffer {
+        *self.buffer.buffer()
+    }
+
+    fn offset(&self) -> u64 {
+        self.partition.offset
+    }
+}
+impl<B: BufferSource + MemorySource + DeviceSource> BindIndexBufferFactory for Arc<BufferSegment<B>> {
+    fn buffer(&self) -> vk::Buffer {
+        *self.buffer.buffer()
+    }
+
+    fn offset(&self) -> u64 {
+        self.partition.offset
+    }
+
+    fn index_type(&self) -> vk::IndexType {
+        vk::IndexType::UINT32
     }
 }

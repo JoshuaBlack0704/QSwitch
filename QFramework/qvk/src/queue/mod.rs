@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ash::vk;
 
 use crate::sync::FenceSource;
@@ -12,12 +10,12 @@ pub trait SubmitInfoSource<C: CommandBufferSource + Clone> {
     fn add_cmd(&mut self, cmd: &C);
     fn add_wait<S: SemaphoreSource>(
         &mut self,
-        semaphore_provider: &Arc<S>,
+        semaphore_provider: &S,
         stage: vk::PipelineStageFlags2,
     );
     fn add_signal<S: SemaphoreSource>(
         &mut self,
-        semaphore_provider: &Arc<S>,
+        semaphore_provider: &S,
         stage: vk::PipelineStageFlags2,
     );
 }
@@ -40,6 +38,10 @@ pub trait QueueOps {
         &self,
         submits: &[S],
         fence: Option<&F>,
+    ) -> Result<(), vk::Result>;
+    fn gpu_submit<C: CommandBufferSource + Clone, S: SubmitInfoSource<C>>(
+        &self,
+        submits: &[S],
     ) -> Result<(), vk::Result>;
     ///Will create an internal fence to wait on the operation
     fn wait_submit<C: CommandBufferSource + Clone, S: SubmitInfoSource<C>>(

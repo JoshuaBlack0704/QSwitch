@@ -3,11 +3,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::ImageViewSource, init::DeviceSource};
+use crate::{image::ImageViewSource, init::DeviceSource, command::BeginRenderPassFactory};
 
 use super::{
     RenderPassAttachment, RenderPassSource, Renderpass, RenderpassAttachmentSource,
-    RenderpassFactory, SubpassDescription, SubpassDescriptionSource,
+    RenderpassFactory, SubpassDescription, SubpassDescriptionSource, FramebufferFactory, Framebuffer, FramebufferSource,
 };
 
 impl<D: DeviceSource + Clone, A: RenderpassAttachmentSource + Clone>
@@ -98,28 +98,103 @@ impl<D: DeviceSource + Clone, A: RenderpassAttachmentSource + Clone>
         }
         info!("Created renderpass {:?}", renderpass);
         Arc::new(Renderpass {
-            _device: self.clone(),
-            _renderpass: renderpass,
+            device: self.clone(),
+            renderpass,
             _attachments: attachments_desc,
             _subpass_refs: subpass_desc,
-            _image_views: attachments.iter().map(|a| (*a).clone()).collect(),
+            image_views: attachments.iter().map(|a| (*a).clone()).collect(),
         })
     }
 }
 
-impl<D: DeviceSource, A: RenderpassAttachmentSource> RenderPassSource for Arc<Renderpass<D, A>> {
-    fn renderpass(&self) -> ash::vk::RenderPass {
-        self._renderpass
+impl<A:RenderpassAttachmentSource + Clone, R:RenderPassSource<A> + DeviceSource + Clone> FramebufferFactory<Arc<Framebuffer<A, R>>> for R{
+    fn create_framebuffer(&self, render_area: vk::Rect2D, flags: Option<vk::FramebufferCreateFlags>) -> Arc<Framebuffer<A, R>> {
+        let mut info = vk::FramebufferCreateInfo::builder();
+        if let Some(flags) = flags{
+            info = info.flags(flags);
+        }
+        let attachments:Vec<vk::ImageView> = self.attachments().iter().map(|a| a.view()).collect();
+        info = info
+        .render_pass(self.renderpass())
+        .attachments(&attachments)
+        .width(render_area.extent.width)
+        .height(render_area.extent.height)
+        .layers(1);
+
+        let framebuffer;
+        unsafe{
+            framebuffer = self.device().create_framebuffer(&info, None).unwrap();
+        }
+        info!("Created framebuffer {:?}", framebuffer);
+
+        Arc::new(
+            Framebuffer{
+                renderpass: self.clone(),
+                _attachments: self.attachments().to_vec(),
+                framebuffer,
+                render_area,
+                clear_vales: self.clear_values(),
+            }
+        )
     }
 }
 
+impl<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource> FramebufferSource for Arc<Framebuffer<A,R>>{
+    
+}
+impl<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource> Drop for Framebuffer<A,R>{
+    fn drop(&mut self) {
+        debug!("Destroyed framebuffer {:?}", self.framebuffer);
+        unsafe{
+            self.renderpass.device().destroy_framebuffer(self.framebuffer, None);
+        }
+    }
+}
+
+impl<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource> BeginRenderPassFactory for Arc<Framebuffer<A,R>>{
+    fn renderpass(&self) -> vk::RenderPass {
+        self.renderpass.renderpass()
+    }
+
+    fn framebuffer(&self) -> vk::Framebuffer {
+        self.framebuffer
+    }
+
+    fn render_area(&self) -> vk::Rect2D {
+        self.render_area
+    }
+
+    fn clear_values(&self) -> &[vk::ClearValue] {
+        &self.clear_vales
+    }
+
+    fn subpass_contents(&self) -> vk::SubpassContents {
+        vk::SubpassContents::INLINE
+    }
+}
+
+impl<D: DeviceSource, A: RenderpassAttachmentSource> RenderPassSource<A> for Arc<Renderpass<D, A>> {
+    fn renderpass(&self) -> ash::vk::RenderPass {
+        self.renderpass
+    }
+
+    fn attachments(&self) -> &[A] {
+        &self.image_views
+    }
+
+    fn clear_values(&self) -> Vec<vk::ClearValue> {
+        self.image_views.iter().map(|a| a.clear_value()).collect()
+    }
+}
+
+
 impl<D: DeviceSource, A: RenderpassAttachmentSource> Drop for Renderpass<D, A> {
     fn drop(&mut self) {
-        debug!("Destroyed renderpass {:?}", self._renderpass);
+        debug!("Destroyed renderpass {:?}", self.renderpass);
         unsafe {
-            self._device
+            self.device
                 .device()
-                .destroy_render_pass(self._renderpass, None);
+                .destroy_render_pass(self.renderpass, None);
         }
     }
 }
@@ -127,6 +202,7 @@ impl<D: DeviceSource, A: RenderpassAttachmentSource> Drop for Renderpass<D, A> {
 impl<IV: ImageViewSource + Clone> RenderPassAttachment<IV> {
     pub fn new(
         view: &IV,
+        clear_value: vk::ClearValue,
         initial_layout: vk::ImageLayout,
         subpass_layout: vk::ImageLayout,
         final_layout: vk::ImageLayout,
@@ -136,6 +212,7 @@ impl<IV: ImageViewSource + Clone> RenderPassAttachment<IV> {
         Arc::new(RenderPassAttachment {
             index: Mutex::new(0),
             view: Mutex::new(view.clone()),
+            clear_value: Mutex::new(clear_value),
             initial_layout,
             subpass_layout,
             final_layout,
@@ -191,6 +268,10 @@ impl<IV: ImageViewSource + Clone> RenderpassAttachmentSource for Arc<RenderPassA
 
     fn view(&self) -> vk::ImageView {
         self.view.lock().unwrap().view()
+    }
+
+    fn clear_value(&self) -> vk::ClearValue {
+        *self.clear_value.lock().unwrap()
     }
 }
 
@@ -386,5 +467,50 @@ impl<A: RenderpassAttachmentSource> SubpassDescriptionSource for SubpassDescript
             return Some(&self.dependencies);
         }
         None
+    }
+}
+impl<A:RenderpassAttachmentSource, D: DeviceSource> DeviceSource for Arc<Renderpass<D,A>> {
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
     }
 }

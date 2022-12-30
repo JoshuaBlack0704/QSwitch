@@ -22,3 +22,4 @@ pub mod descriptor;
 pub mod pipelines;
 pub mod memory;
 pub mod image;
+pub mod math;

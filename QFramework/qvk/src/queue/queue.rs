@@ -112,6 +112,20 @@ impl<D: DeviceSource + Clone> QueueOps for Arc<Queue<D>> {
     fn wait_idle(&self) {
         unsafe { self.device.device().queue_wait_idle(self.queue).unwrap() };
     }
+
+    fn gpu_submit<C: CommandBufferSource + Clone, S: SubmitInfoSource<C>>(
+        &self,
+        submits: &[S],
+    ) -> Result<(), vk::Result> {
+        let submits: Vec<vk::SubmitInfo2> = submits.iter().map(|s| s.info()).collect();
+
+        let device = self.device.device();
+
+        unsafe {
+            let mut _fence = vk::Fence::null();
+            device.queue_submit2(self.queue, &submits, _fence)
+        }
+    }
 }
 
 impl<D: DeviceSource> QueueSource for Arc<Queue<D>> {

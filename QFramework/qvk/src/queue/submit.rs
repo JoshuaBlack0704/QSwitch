@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use ash::vk;
 
 use crate::command::CommandBufferSource;
@@ -41,7 +39,7 @@ impl<C: CommandBufferSource + Clone> SubmitInfoSource<C> for SubmitSet<C> {
 
     fn add_wait<S: SemaphoreSource>(
         &mut self,
-        semaphore_provider: &Arc<S>,
+        semaphore_provider: &S,
         stage: vk::PipelineStageFlags2,
     ) {
         let info = semaphore_provider.submit_info(stage);
@@ -50,7 +48,7 @@ impl<C: CommandBufferSource + Clone> SubmitInfoSource<C> for SubmitSet<C> {
 
     fn add_signal<S: SemaphoreSource>(
         &mut self,
-        semaphore_provider: &Arc<S>,
+        semaphore_provider: &S,
         stage: vk::PipelineStageFlags2,
     ) {
         let info = semaphore_provider.submit_info(stage);

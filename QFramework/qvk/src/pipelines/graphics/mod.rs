@@ -1,4 +1,4 @@
-use std::sync::{Mutex, MutexGuard};
+use std::{sync::{Mutex, MutexGuard}, marker::PhantomData};
 
 use ash::vk;
 
@@ -20,6 +20,7 @@ pub trait RenderpassAttachmentSource {
     fn stencil_load(&self) -> Option<vk::AttachmentLoadOp>;
     fn stencil_store(&self) -> Option<vk::AttachmentStoreOp>;
     fn view(&self) -> vk::ImageView;
+    fn clear_value(&self) -> vk::ClearValue;
 }
 pub trait SubpassDescriptionSource {
     fn index(&self) -> MutexGuard<u32>;
@@ -32,7 +33,7 @@ pub trait SubpassDescriptionSource {
     fn preserve_attachments(&self) -> Option<&[u32]>;
     fn dependencies(&self) -> Option<&[vk::SubpassDependency]>;
 }
-pub trait RenderpassFactory<R: RenderPassSource, A: RenderpassAttachmentSource> {
+pub trait RenderpassFactory<R: RenderPassSource<A>, A: RenderpassAttachmentSource> {
     fn create_renderpass<S: SubpassDescriptionSource>(
         &self,
         attachments: &[&A],
@@ -40,20 +41,33 @@ pub trait RenderpassFactory<R: RenderPassSource, A: RenderpassAttachmentSource> 
         flags: Option<vk::RenderPassCreateFlags>,
     ) -> R;
 }
-pub trait RenderPassSource {
+pub trait RenderPassSource<A:RenderpassAttachmentSource> {
     fn renderpass(&self) -> vk::RenderPass;
+    fn attachments(&self) -> &[A];
+    fn clear_values(&self) -> Vec<vk::ClearValue>;
 }
 pub trait FramebufferSource {}
+pub trait FramebufferFactory<F:FramebufferSource>{
+    fn create_framebuffer(&self, render_area: vk::Rect2D, flags: Option<vk::FramebufferCreateFlags>) -> F;
+}
 pub struct Renderpass<D: DeviceSource, A: RenderpassAttachmentSource> {
-    _device: D,
-    _renderpass: vk::RenderPass,
+    device: D,
+    renderpass: vk::RenderPass,
     _attachments: Vec<vk::AttachmentDescription>,
     _subpass_refs: Vec<vk::SubpassDescription>,
-    _image_views: Vec<A>,
+    image_views: Vec<A>,
+}
+pub struct Framebuffer<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource>{
+    renderpass: R,
+    _attachments: Vec<A>,
+    framebuffer: vk::Framebuffer,
+    render_area: vk::Rect2D,
+    clear_vales: Vec<vk::ClearValue>,
 }
 pub struct RenderPassAttachment<IV: ImageViewSource> {
     index: Mutex<u32>,
     view: Mutex<IV>,
+    clear_value: Mutex<vk::ClearValue>,
     initial_layout: vk::ImageLayout,
     subpass_layout: vk::ImageLayout,
     final_layout: vk::ImageLayout,
@@ -92,10 +106,11 @@ pub trait GraphicsPipelineState {
 }
 pub trait GraphicsPipelineSource {}
 pub trait GraphicsPipelineFactory<
+    A: RenderpassAttachmentSource,
     G: GraphicsPipelineSource,
     S: GraphicsPipelineState,
     L: PipelineLayoutSource,
-    R: RenderPassSource,
+    R: RenderPassSource<A>,
 >
 {
     fn create_graphics_pipeline(
@@ -179,9 +194,10 @@ pub trait DynamicStateFactory {
     fn flags(&self) -> Option<vk::PipelineDynamicStateCreateFlags>;
     fn dynamics(&self) -> Option<Vec<vk::DynamicState>>;
 }
-pub struct Graphics<D: DeviceSource, R: RenderPassSource, L: PipelineLayoutSource> {
+pub struct Graphics<D: DeviceSource, A:RenderpassAttachmentSource, R: RenderPassSource<A>, L: PipelineLayoutSource> {
     device: D,
     _render_pass: R,
     _layout: L,
     pipeline: vk::Pipeline,
+    _attch: PhantomData<A>,
 }

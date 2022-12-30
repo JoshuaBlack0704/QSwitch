@@ -15,9 +15,16 @@ struct VSOutput{
     [[vk::location(0)]] float3 color: COLOR0;
 };
 
-VSOutput main(VSInput input){
+float3 verticies[3] = {
+    float3(0.5, 0.0, 0.0),
+    float3(0.0, 0.5, 0.0),
+    float3(-0.5, 0.0, 0.0),
+};
+
+VSOutput main(VSInput input, uint index : SV_VERTEXID){
     VSOutput  output = (VSOutput)0;
-    output.color = input.color;
-    output.pos = mul(ubo.projection, float4(input.pos.xyz, 1.0));
+    output.color = float3(1.0,1.0,1.0);
+
+    output.pos = float4(verticies[index].xyz, 1.0);
     return output;
 }

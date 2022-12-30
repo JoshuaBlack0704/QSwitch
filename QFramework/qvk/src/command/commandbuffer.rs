@@ -363,6 +363,47 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
 
         *old_layout = new_layout;
     }
+
+    fn bind_vertex_bufer(&self, factory: &impl super::BindVertexBufferFactory) {
+        let buffers = [factory.buffer()];
+        let offset = [factory.offset()];
+        unsafe{
+            self.device().cmd_bind_vertex_buffers(self.cmd(), 0, &buffers, &offset);
+        }
+    }
+
+    fn bind_index_bufer(&self, factory: &impl super::BindIndexBufferFactory) {
+        unsafe{
+            self.device().cmd_bind_index_buffer(self.cmd(), factory.buffer(), factory.offset(), factory.index_type());
+        }
+    }
+
+    fn begin_render_pass(&self, factory: &impl super::BeginRenderPassFactory) {
+        let info = vk::RenderPassBeginInfo::builder()
+        .render_pass(factory.renderpass())
+        .framebuffer(factory.framebuffer())
+        .render_area(factory.render_area())
+        .clear_values(factory.clear_values());
+        unsafe{
+            self
+            .device()
+            .cmd_begin_render_pass(self.cmd(), &info, factory.subpass_contents());
+        }
+    }
+
+    fn draw_indexed(&self) {
+        todo!()
+    }
+
+    fn end_render_pass(&self) {
+        unsafe{
+            self.device().cmd_end_render_pass(self.cmd());
+        }
+    }
+
+    fn mem_barrier(&self, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2) {
+        todo!()
+    }
 }
 
 impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<CommandBuffer<D>> {

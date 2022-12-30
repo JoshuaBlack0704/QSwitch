@@ -67,6 +67,14 @@ impl<D: DeviceSource + Clone> QueueOps for Executor<D> {
     fn wait_idle(&self) {
         self.queue.wait_idle();
     }
+
+    fn gpu_submit<C: CommandBufferSource + Clone, S: SubmitInfoSource<C>>(
+        &self,
+        submits: &[S],
+    ) -> Result<(), vk::Result> {
+        self.queue.gpu_submit(submits)
+    }
+
 }
 
 impl<D: DeviceSource + Clone> CommandBufferFactory<Arc<CommandBuffer<D>>> for Executor<D> {
