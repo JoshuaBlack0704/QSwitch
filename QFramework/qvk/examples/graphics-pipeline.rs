@@ -26,7 +26,7 @@ use qvk::{
         PipelineLayoutFactory,
     },
     queue::{QueueOps, SubmitInfoSource, SubmitSet},
-    shader::{ShaderFactory, HLSL},
+    shader::{ShaderFactory, HLSL, GLSL},
     sync::SemaphoreFactory,
 };
 use raw_window_handle::HasRawDisplayHandle;
@@ -60,8 +60,8 @@ fn main() {
         .create_memory(1024 * 1024 * 100, device.host_memory_index(), None)
         .unwrap();
     let extent = vk::Extent3D::builder()
-        .width(100)
-        .height(100)
+        .width(1920)
+        .height(1080)
         .depth(1)
         .build();
     let extent2d = vk::Extent2D::builder()
@@ -69,7 +69,7 @@ fn main() {
         .height(extent.height)
         .build();
     let clear_value_color = vk::ClearColorValue {
-        float32: [0.0, 1.0, 0.0, 1.0],
+        float32: [0.0, 0.0, 0.0, 1.0],
     };
     let clear_depth_value = vk::ClearDepthStencilValue {
         depth: 1.0,
@@ -153,13 +153,13 @@ fn main() {
     let perspective = [glam::Mat4::perspective_rh(fov, aspect, 0.1, 10.0)];
     let triangle = [
         DefaultVertex {
-            data: [1.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            data: [0.5, -0.5, 0.0, 1.0, 0.0, 0.0],
         },
         DefaultVertex {
-            data: [0.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+            data: [0.0, 0.5, 0.0, 0.0, 1.0, 0.0],
         },
         DefaultVertex {
-            data: [-1.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            data: [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0],
         },
     ];
     let indices = [0, 1, 2];
@@ -212,14 +212,20 @@ fn main() {
     let mut subpass = SubpassDescription::new(vk::PipelineBindPoint::GRAPHICS, &depth_attch, None);
     subpass.add_color_attachment(&color_attch);
     subpass.add_depth_stencil_attachment(&depth_attch);
-    subpass.add_start_dependency();
-    subpass.add_depth_dependency();
+    subpass.add_dependency(
+        None,
+        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+        vk::AccessFlags::NONE,
+        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+        vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE, None
+    );
     let attachments = [&color_attch, &depth_attch];
     let subpasses = [&subpass];
     let renderpass = device.create_renderpass(&attachments, &subpasses, None);
     let framebuffer =
         renderpass.create_framebuffer(vk::Rect2D::builder().extent(extent2d).build(), None);
     let layouts = [&dlayout];
+    // let playout = device.create_pipeline_layout_empty();
     let playout = device.create_pipeline_layout(&layouts, &[], None);
 
     let code = HLSL::new(
@@ -229,8 +235,8 @@ fn main() {
         None,
     );
     let vertex_shd = device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
-    let code = HLSL::new(
-        "examples/resources/shaders/gp-fragment.hlsl",
+    let code = GLSL::new(
+        "examples/resources/shaders/gp-fragment.frag",
         shaderc::ShaderKind::Fragment,
         "main",
         None,
@@ -289,11 +295,11 @@ fn main() {
                 *ImageResourceSource::layout(&depth_rsc) = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
                 let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
                 cmd.begin(None).unwrap();
+                cmd.begin_render_pass(&framebuffer);
                 cmd.bind_pipeline(&graphics);
                 cmd.bind_vertex_bufer(&v_buff);
                 cmd.bind_index_bufer(&i_buff);
                 cmd.bind_set(&dset, 0, &graphics);
-                cmd.begin_render_pass(&framebuffer);
                 unsafe {
                     device
                         .device()

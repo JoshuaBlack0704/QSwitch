@@ -32,3 +32,7 @@ pub struct HLSL {
     code: Vec<u32>,
     entry_name: String,
 }
+pub struct GLSL {
+    code: Vec<u32>,
+    entry_name: String,
+}

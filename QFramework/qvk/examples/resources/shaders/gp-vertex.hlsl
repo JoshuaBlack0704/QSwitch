@@ -17,7 +17,7 @@ struct VSOutput{
 
 VSOutput main(VSInput input){
     VSOutput  output = (VSOutput)0;
-    output.color = float3(1.0,1.0,1.0);
-    output.pos = mul(ubo.projection, float4(input.pos.xyz, 1.0));
+    output.color = input.color;
+    output.pos = float4(input.pos.xyz, 1.0);
     return output;
 }

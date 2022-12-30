@@ -374,9 +374,9 @@ impl GraphicsDefaultState<DefaultVertex> {
     pub fn new(viewport_extent: vk::Extent3D) -> GraphicsDefaultState<DefaultVertex> {
         let viewport = vk::Viewport::builder()
             .x(0.0)
-            .y(0.0)
+            .y(viewport_extent.height as f32)
             .width(viewport_extent.width as f32)
-            .height(viewport_extent.height as f32)
+            .height(-(viewport_extent.height as f32))
             .min_depth(0.0)
             .max_depth(viewport_extent.depth as f32)
             .build();
