@@ -402,7 +402,20 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
     }
 
     fn mem_barrier(&self, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2) {
-        todo!()
+        let barrier = [vk::MemoryBarrier2::builder()
+        .src_stage_mask(src_stage)
+        .src_access_mask(src_access)
+        .dst_stage_mask(dst_stage)
+        .dst_access_mask(dst_access)
+        .build()];
+
+        let info = vk::DependencyInfo::builder()
+        .memory_barriers(&barrier);
+
+        unsafe{
+            self.device.device()
+            .cmd_pipeline_barrier2(self.cmd(), &info);
+        }
     }
 }
 

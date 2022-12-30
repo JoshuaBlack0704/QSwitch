@@ -5,7 +5,9 @@ use qvk::{
     descriptor::{
         ApplyWriteFactory, DescriptorLayoutFactory, DescriptorPoolFactory, SetFactory, SetSource,
     },
-    image::{ImageFactory, ImageResourceFactory, ImageResourceSource, ImageViewFactory},
+    image::{
+        ImageFactory, ImageResourceFactory, ImageResourceSource, ImageSource, ImageViewFactory,
+    },
     init::{
         device, instance,
         swapchain::{self, SwapchainSource},
@@ -66,6 +68,13 @@ fn main() {
         .width(extent.width)
         .height(extent.height)
         .build();
+    let clear_value_color = vk::ClearColorValue {
+        float32: [0.0, 1.0, 0.0, 1.0],
+    };
+    let clear_depth_value = vk::ClearDepthStencilValue {
+        depth: 1.0,
+        stencil: 0,
+    };
     let color_image = gpu_memory
         .create_image(
             &device,
@@ -73,7 +82,7 @@ fn main() {
             extent,
             1,
             1,
-            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
             None,
         )
         .unwrap();
@@ -93,10 +102,12 @@ fn main() {
     );
     let color_attch = RenderPassAttachment::new(
         &color_view,
-        vk::ClearValue::default(),
+        vk::ClearValue {
+            color: clear_value_color,
+        },
         vk::ImageLayout::UNDEFINED,
         vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         vk::AttachmentLoadOp::CLEAR,
         vk::AttachmentStoreOp::STORE,
     );
@@ -127,12 +138,14 @@ fn main() {
     );
     let depth_attch = RenderPassAttachment::new(
         &depth_view,
-        vk::ClearValue::default(),
+        vk::ClearValue {
+            depth_stencil: clear_depth_value,
+        },
         vk::ImageLayout::UNDEFINED,
         vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-        vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+        vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         vk::AttachmentLoadOp::CLEAR,
-        vk::AttachmentStoreOp::DONT_CARE,
+        vk::AttachmentStoreOp::STORE,
     );
 
     let fov = 70.0 * (3.14 / 180.0);
@@ -235,6 +248,15 @@ fn main() {
     let exe = qvk::command::Executor::new(&device, vk::QueueFlags::GRAPHICS);
     let aquire = device.create_semaphore();
     let render = device.create_semaphore();
+    let dbuff = gpu_memory
+        .create_buffer(
+            1024 * 1024 * 50,
+            vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST,
+            None,
+            None,
+        )
+        .unwrap();
+    let dbuff = dbuff.create_segment(1024 * 1024 * 50, None).unwrap();
     let mut images = swapchain.images();
     event_loop.run(move |event, _, flow| {
         flow.set_poll();
@@ -250,26 +272,21 @@ fn main() {
                     swapchain.resize();
                     images = swapchain.images();
                     println!("{:?}", swapchain.extent());
-                    // let image_settings = &mut image_settings;
-                    // *image_settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, swapchain.extent(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));
-                    // let image = &mut image;
-                    // *image = image::Image::new(&device, &dev_mem, image_settings).unwrap();
-                    // let resource = &mut resource;
-                    // *resource = image::ImageResource::new(&image, vk::ImageAspectFlags::COLOR, 0, 0, 1, vk::Offset3D::default(), image.extent()).unwrap();
-                    // ImageResource::load_image(resource, &file);
                 }
             }
             Event::MainEventsCleared => {
                 let index = swapchain.gpu_aquire_next_image(u64::MAX, &aquire);
-                let color_tgt = images[index as usize]
+                let color_tgt = images[index as usize].clone();
+                let color_tgt = color_tgt
                     .create_resource(
                         vk::Offset3D::default(),
-                        extent,
+                        color_tgt.extent(),
                         0,
                         vk::ImageAspectFlags::COLOR,
                     )
                     .unwrap();
-                *color_rsc.layout() = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+                *ImageResourceSource::layout(&color_rsc) = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+                *ImageResourceSource::layout(&depth_rsc) = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
                 let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
                 cmd.begin(None).unwrap();
                 cmd.bind_pipeline(&graphics);
@@ -280,12 +297,28 @@ fn main() {
                 unsafe {
                     device
                         .device()
-                        .cmd_draw_indexed(cmd.cmd(), indices.len() as u32, 1, 0, 0, 0);
+                        .cmd_draw(cmd.cmd(), triangle.len() as u32, 1, 0, 0);
                 }
                 cmd.end_render_pass();
                 cmd.transition_img(
                     &color_tgt,
                     vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    vk::PipelineStageFlags2::TRANSFER,
+                    vk::AccessFlags2::MEMORY_WRITE,
+                    vk::PipelineStageFlags2::TRANSFER,
+                    vk::AccessFlags2::MEMORY_READ,
+                );
+                // cmd.image_buffer_copy(&depth_rsc, &dbuff, None).unwrap();
+                // cmd.mem_barrier(
+                //     vk::PipelineStageFlags2::TRANSFER,
+                //     vk::AccessFlags2::TRANSFER_WRITE,
+                //     vk::PipelineStageFlags2::TRANSFER,
+                //     vk::AccessFlags2::MEMORY_READ,
+                // );
+                // cmd.buffer_image_copy(&dbuff, &color_rsc, None).unwrap();
+                cmd.transition_img(
+                    &color_rsc,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                     vk::PipelineStageFlags2::TRANSFER,
                     vk::AccessFlags2::MEMORY_WRITE,
                     vk::PipelineStageFlags2::TRANSFER,
