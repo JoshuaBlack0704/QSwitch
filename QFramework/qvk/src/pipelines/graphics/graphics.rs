@@ -1,4 +1,4 @@
-use std::{mem::size_of, sync::Arc};
+use std::{mem::size_of, sync::Arc, marker::PhantomData};
 
 use ash::vk;
 use log::{debug, info};
@@ -335,9 +335,9 @@ pub struct DefaultVertex {
 }
 #[derive(Clone)]
 pub struct GraphicsDefaultState<V: VertexStateFactory> {
-    vertex_type: V,
     viewports: Vec<vk::Viewport>,
     scissors: Vec<vk::Rect2D>,
+    vertex_type: V,
 }
 impl VertexStateFactory for DefaultVertex {
     fn flags(&self) -> Option<vk::PipelineVertexInputStateCreateFlags> {
@@ -370,8 +370,8 @@ impl VertexStateFactory for DefaultVertex {
         vec![att1, att2]
     }
 }
-impl GraphicsDefaultState<DefaultVertex> {
-    pub fn new(viewport_extent: vk::Extent3D) -> GraphicsDefaultState<DefaultVertex> {
+impl<V:VertexStateFactory + Default> GraphicsDefaultState<V> {
+    pub fn new(viewport_extent: vk::Extent3D) -> GraphicsDefaultState<V> {
         let viewport = vk::Viewport::builder()
             .x(0.0)
             .y(viewport_extent.height as f32)
@@ -391,9 +391,9 @@ impl GraphicsDefaultState<DefaultVertex> {
             )
             .build();
         GraphicsDefaultState {
-            vertex_type: DefaultVertex { data: [0.0; 6] },
             viewports: vec![viewport],
             scissors: vec![scissor],
+            vertex_type: V::default(),
         }
     }
     pub fn create_state<Shd: ShaderSource + Clone>(&self, shaders: &[&Shd]) -> State<Shd> {
@@ -688,5 +688,13 @@ impl<Shd: ShaderSource + Clone> GraphicsPipelineState for State<Shd> {
 
     fn dynamic_state(&self) -> Option<vk::PipelineDynamicStateCreateInfo> {
         self.dynamic_state
+    }
+}
+
+impl Default for DefaultVertex{
+    fn default() -> Self {
+        Self{
+            data: [0.0;6],
+        }
     }
 }

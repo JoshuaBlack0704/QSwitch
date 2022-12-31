@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use ash::vk;
-use log::debug;
 
 use crate::init::{DeviceSource, InstanceSource};
 
@@ -146,13 +145,13 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
 
         unsafe {
             let device = self.device.device();
-            debug!(
-                "Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}",
-                src.size(),
-                src.buffer(),
-                dst.subresource(),
-                image
-            );
+            // debug!(
+            //     "Copying {:?} bytes from buffer {:?} to layer {:?} of image {:?}",
+            //     src.size(),
+            //     src.buffer(),
+            //     dst.subresource(),
+            //     image
+            // );
             device.cmd_copy_buffer_to_image(self.cmd, src.buffer(), image, *layout, &info);
         }
 
@@ -195,12 +194,12 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
 
         let src_image = src.image();
         let dst_image = dst.image();
-        debug!(
-            "Copying layer {:?} for image {:?} to image {:?}",
-            src.subresource(),
-            src_image,
-            dst_image
-        );
+        // debug!(
+        //     "Copying layer {:?} for image {:?} to image {:?}",
+        //     src.subresource(),
+        //     src_image,
+        //     dst_image
+        // );
 
         unsafe {
             let device = self.device.device();
@@ -313,12 +312,12 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
         unsafe {
             let device = self.device.device();
             let buffer = dst.buffer();
-            debug!(
-                "Copying image layer {:?} from image {:?} to buffer {:?}",
-                src.subresource(),
-                image,
-                buffer
-            );
+            // debug!(
+            //     "Copying image layer {:?} from image {:?} to buffer {:?}",
+            //     src.subresource(),
+            //     image,
+            //     buffer
+            // );
             device.cmd_copy_image_to_buffer(self.cmd, image, *layout, buffer, &info);
         }
         Ok(())
@@ -364,7 +363,7 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
         *old_layout = new_layout;
     }
 
-    fn bind_vertex_bufer(&self, factory: &impl super::BindVertexBufferFactory) {
+    fn bind_vertex_buffer(&self, factory: &impl super::BindVertexBufferFactory) {
         let buffers = [factory.buffer()];
         let offset = [factory.offset()];
         unsafe{
@@ -372,7 +371,7 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
         }
     }
 
-    fn bind_index_bufer(&self, factory: &impl super::BindIndexBufferFactory) {
+    fn bind_index_buffer(&self, factory: &impl super::BindIndexBufferFactory) {
         unsafe{
             self.device().cmd_bind_index_buffer(self.cmd(), factory.buffer(), factory.offset(), factory.index_type());
         }

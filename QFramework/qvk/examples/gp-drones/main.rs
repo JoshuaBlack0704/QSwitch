@@ -1,45 +1,37 @@
 use std::mem::size_of;
 
 use ash::vk;
-use qvk::{
-    self,
-    command::{CommandBufferFactory, CommandBufferSource, CommandPoolOps},
-    descriptor::{
-        ApplyWriteFactory, DescriptorLayoutFactory, DescriptorPoolFactory, SetFactory, SetSource,
-    },
-    image::{
-        ImageFactory, ImageResourceFactory, ImageResourceSource, ImageSource, ImageViewFactory,
-    },
-    init::{
-        device, instance,
-        swapchain::{self, SwapchainSource},
-        DeviceFactory, DeviceSource, InstanceFactory, Swapchain,
-    },
-    memory::{
-        buffer::{BufferFactory, BufferSegmentFactory, BufferSegmentSource},
-        MemoryFactory,
-    },
-    pipelines::{
-        graphics::{
-            graphics::{DefaultVertex, GraphicsDefaultState},
-            FramebufferFactory, GraphicsPipelineFactory, RenderPassAttachment, RenderpassFactory,
-            SubpassDescription,
-        },
-        PipelineLayoutFactory,
-    },
-    queue::{QueueOps, SubmitInfoSource, SubmitSet},
-    shader::{ShaderFactory, HLSL},
-    sync::SemaphoreFactory,
-};
+use glam::{Mat4, Vec4};
+use qvk::{init::{instance, device, InstanceFactory, DeviceFactory, swapchain::{self, SwapchainSource}, Swapchain, DeviceSource}, memory::{MemoryFactory, buffer::{BufferFactory, BufferSegmentFactory, BufferSegmentSource}}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageResourceSource, ImageSource}, pipelines::{graphics::{RenderPassAttachment, SubpassDescription, RenderpassFactory, FramebufferFactory, graphics::GraphicsDefaultState, GraphicsPipelineFactory}, PipelineLayoutFactory}, shapes::{Shape, ShapeVertex}, descriptor::{DescriptorLayoutFactory, DescriptorPoolFactory, ApplyWriteFactory, SetFactory, SetSource}, shader::{HLSL, ShaderFactory}, sync::SemaphoreFactory, command::{CommandBufferFactory, CommandBufferSource, CommandPoolOps}, queue::{SubmitSet, QueueOps, SubmitInfoSource}};
+use rand::{thread_rng, Rng};
 use raw_window_handle::HasRawDisplayHandle;
-use winit::{
-    event::{Event, WindowEvent, VirtualKeyCode},
-    event_loop::EventLoop,
-    window::WindowBuilder,
-};
+use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent, VirtualKeyCode}};
 
-fn main() {
-    pretty_env_logger::init();
+const VERT_PATH: &str = "examples/resources/gp-drone/vert.hlsl";
+const FRAG_PATH: &str = "examples/resources/gp-drone/frag.hlsl";
+
+#[derive(Clone)]
+pub struct InstanceData{
+    model_matrix: Mat4,
+    target_pos: Vec4,
+}
+
+fn generate_targets(max_x: f32, max_y: f32, max_z: f32, count: usize) -> Vec<Vec4> {
+    let mut targets:Vec<Vec4> = vec![];
+
+    for i in 0..count{
+        let x:f32 = thread_rng().gen_range(0.0..max_x);
+        let y:f32 = thread_rng().gen_range(0.0..max_y);
+        let z:f32 = thread_rng().gen_range(0.0..max_z);
+        let target = Vec4::new(x,y,z,1.0);
+        targets.push(target);
+    }
+
+    targets
+}
+
+fn main(){
+    
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -150,63 +142,56 @@ fn main() {
         vk::AttachmentStoreOp::DONT_CARE,
     );
 
-    // let perspective = [glam::Mat4::from_rotation_z(3.14)];
-    let triangle = [
-        DefaultVertex {
-            data: [0.5, -0.5, 1.5, 1.0, 0.0, 0.0],
-        },
-        DefaultVertex {
-            data: [0.0, 0.5, 1.5, 0.0, 1.0, 0.0],
-        },
-        DefaultVertex {
-            data: [-0.5, -0.5, 1.5, 0.0, 0.0, 1.0],
-        },
-    ];
-    let indices = [0, 1, 2];
 
-    let ubuff = cpu_memory
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::UNIFORM_BUFFER,
-            None,
-            None,
-        )
-        .unwrap();
-    let ubuff = ubuff.create_segment(1024, None).unwrap();
-    let v_buff = cpu_memory
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::VERTEX_BUFFER,
-            None,
-            None,
-        )
-        .unwrap();
-    let v_buff = v_buff.create_segment(1024, None).unwrap();
-    let i_buff = cpu_memory
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::INDEX_BUFFER,
-            None,
-            None,
-        )
-        .unwrap();
-    let i_buff = i_buff.create_segment(1024, None).unwrap();
-    // ubuff.copy_from_ram(&perspective).unwrap();
-    v_buff.copy_from_ram(&triangle).unwrap();
-    i_buff.copy_from_ram(&indices).unwrap();
+    // Memory preperation
+    let object_count = 100;
+    let target_count = 10;
+    let max_x = 10.0;
+    let max_y = 10.0;
+    let max_z = 10.0;
+    
+    let cpu_storage = cpu_memory.create_buffer(1024*1024*50, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
+    let gpu_storage = gpu_memory.create_buffer(1024*1024*50, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
+    let cpu_uniform = cpu_memory.create_buffer(1024*1024, vk::BufferUsageFlags::UNIFORM_BUFFER, None, None).unwrap();
+    
+    let uniform = cpu_uniform.create_segment(1024, None).unwrap();
+    let instance_data = gpu_storage.create_segment(size_of::<InstanceData>() as u64 * object_count as u64, None).unwrap();
+    let target_data = gpu_storage.create_segment(size_of::<Vec4>() as u64 * target_count as u64, None).unwrap();
+    let v_buffer = gpu_memory.create_buffer(1024*1024, vk::BufferUsageFlags::VERTEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
+    let v_buffer = v_buffer.create_segment(1024*1024, None).unwrap();
+    let i_buffer = gpu_memory.create_buffer(1024*1024, vk::BufferUsageFlags::INDEX_BUFFER | vk::BufferUsageFlags::TRANSFER_DST, None, None).unwrap();
+    let i_buffer = i_buffer.create_segment(1024*1024, None).unwrap();
 
+    let mut vertex_data = vec![];
+    let mut index_data = vec![];
+    let shape = Shape::tetrahedron(&mut vertex_data, &mut index_data);
+    
+    let stage = cpu_storage.create_segment(v_buffer.get_partition().size, None).unwrap();
+    stage.copy_from_ram(&vertex_data).unwrap();
+    stage.copy_to_segment_internal(&v_buffer).unwrap();
+    
+    let stage = cpu_storage.create_segment(i_buffer.get_partition().size, None).unwrap();
+    stage.copy_from_ram(&index_data).unwrap();
+    stage.copy_to_segment_internal(&i_buffer).unwrap();
+
+    let temp_data = vec![InstanceData{ model_matrix: Mat4::IDENTITY, target_pos: Vec4::new(0.0,0.0,0.0,1.0) };object_count];
+    let stage = cpu_storage.create_segment(instance_data.get_partition().size, None).unwrap();
+    stage.copy_from_ram(&temp_data).unwrap();
+    stage.copy_to_segment_internal(&instance_data).unwrap();
+
+    let temp_data = generate_targets(max_x, max_y, max_z, target_count);
+    let stage = cpu_storage.create_segment(target_data.get_partition().size, None).unwrap();
+    stage.copy_from_ram(&temp_data).unwrap();
+    stage.copy_to_segment_internal(&target_data).unwrap();
+    
+
+    
     let dlayout = device.create_descriptor_layout(None);
-    let uniform_write = dlayout.form_binding(&ubuff, vk::ShaderStageFlags::VERTEX);
+    let uniform_write = dlayout.form_binding(&uniform, vk::ShaderStageFlags::VERTEX);
     let layouts = [(&dlayout, 1)];
     let dpool = device.create_descriptor_pool(&layouts, None);
     let dset = dpool.create_set(&dlayout);
-    ubuff.apply(&uniform_write);
+    uniform.apply(&uniform_write);
     dset.update();
 
     let mut subpass = SubpassDescription::new(vk::PipelineBindPoint::GRAPHICS, &depth_attch, None);
@@ -229,14 +214,14 @@ fn main() {
     let playout = device.create_pipeline_layout(&layouts, &[], None);
 
     let code = HLSL::new(
-        "examples/resources/shaders/gp-vertex.hlsl",
+        VERT_PATH,
         shaderc::ShaderKind::Vertex,
         "main",
         None,
     );
     let vertex_shd = device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
     let code = HLSL::new(
-        "examples/resources/shaders/gp-fragment.hlsl",
+        FRAG_PATH,
         shaderc::ShaderKind::Fragment,
         "main",
         None,
@@ -244,7 +229,7 @@ fn main() {
     let fragment_shd = device.create_shader(&code, vk::ShaderStageFlags::FRAGMENT, None);
 
     let shaders = [&vertex_shd, &fragment_shd];
-    let def_state = GraphicsDefaultState::<DefaultVertex>::new(extent);
+    let def_state = GraphicsDefaultState::<ShapeVertex>::new(extent);
     let mut state = def_state.create_state(&shaders);
 
     let mut graphics = device
@@ -268,14 +253,14 @@ fn main() {
                             
                             println!("Recompiling shaders");
                             let code = HLSL::new(
-                                "examples/resources/shaders/gp-vertex.hlsl",
+                                VERT_PATH,
                                 shaderc::ShaderKind::Vertex,
                                 "main",
                                 None,
                             );
                             let vertex_shd = device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
                             let code = HLSL::new(
-                                "examples/resources/shaders/gp-fragment.hlsl",
+                                FRAG_PATH,
                                 shaderc::ShaderKind::Fragment,
                                 "main",
                                 None,
@@ -323,20 +308,20 @@ fn main() {
                 let z = glam::Vec4::new(0.0, 0.0, f/(f-n), 1.0);
                 let w = glam::Vec4::new(0.0, 0.0, -(f*n)/(f-n), 0.0);
                 let perspective = [glam::Mat4::from_cols(x,y,z,w)];
-                ubuff.copy_from_ram(&perspective).unwrap();
+                uniform.copy_from_ram(&perspective).unwrap();
                 
                 *ImageResourceSource::layout(&color_rsc) = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
                 let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
                 cmd.begin(None).unwrap();
                 cmd.begin_render_pass(&framebuffer);
                 cmd.bind_pipeline(&graphics);
-                cmd.bind_vertex_buffer(&v_buff);
-                cmd.bind_index_buffer(&i_buff);
+                cmd.bind_vertex_buffer(&v_buffer);
+                cmd.bind_index_buffer(&i_buffer);
                 cmd.bind_set(&dset, 0, &graphics);
                 unsafe {
                     device
                         .device()
-                        .cmd_draw_indexed(cmd.cmd(), indices.len() as u32, 1, 0, 0, 0);
+                        .cmd_draw_indexed(cmd.cmd(), index_data.len() as u32, 1, 0, 0, 0);
                 }
                 cmd.end_render_pass();
                 cmd.transition_img(

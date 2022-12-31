@@ -87,8 +87,8 @@ pub trait CommandBufferSource {
     fn begin_render_pass(&self, factory: &impl BeginRenderPassFactory);
     fn draw_indexed(&self);
     fn end_render_pass(&self);
-    fn bind_vertex_bufer(&self, buffer: &impl BindVertexBufferFactory);
-    fn bind_index_bufer(&self, buffer: &impl BindIndexBufferFactory);
+    fn bind_vertex_buffer(&self, buffer: &impl BindVertexBufferFactory);
+    fn bind_index_buffer(&self, buffer: &impl BindIndexBufferFactory);
     fn bind_set<BP: BindPipelineFactory, BS: BindSetFactory>(
         &self,
         set: &BS,

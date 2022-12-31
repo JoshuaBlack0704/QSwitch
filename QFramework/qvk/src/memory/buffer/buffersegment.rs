@@ -1,7 +1,7 @@
 use std::{mem::size_of, sync::Arc};
 
 use ash::vk::{self, BufferUsageFlags};
-use log::{debug, info};
+use log::info;
 
 use crate::command::{CommandBufferFactory, BindVertexBufferFactory, BindIndexBufferFactory};
 use crate::descriptor::DescriptorLayoutBindingFactory;
@@ -94,12 +94,12 @@ impl<B: BufferSource + MemorySource + DeviceSource + InstanceSource + Clone> Buf
             .size(vk::WHOLE_SIZE)
             .build()];
 
-        debug!(
-            "Copying {:?} bytes to buffer {:?} at offset {:?} from ram",
-            needed_size,
-            *self.buffer.buffer(),
-            target_offset
-        );
+        // debug!(
+        //     "Copying {:?} bytes to buffer {:?} at offset {:?} from ram",
+        //     needed_size,
+        //     *self.buffer.buffer(),
+        //     target_offset
+        // );
         unsafe {
             let device = self.device();
             let dst = device
@@ -133,12 +133,12 @@ impl<B: BufferSource + MemorySource + DeviceSource + InstanceSource + Clone> Buf
             .size(vk::WHOLE_SIZE)
             .build()];
 
-        debug!(
-            "Copying {:?} bytes from buffer {:?} at offset {:?} to ram",
-            needed_size,
-            *self.buffer.buffer(),
-            target_offset
-        );
+        // debug!(
+        //     "Copying {:?} bytes from buffer {:?} at offset {:?} to ram",
+        //     needed_size,
+        //     *self.buffer.buffer(),
+        //     target_offset
+        // );
         unsafe {
             let device = self.device();
             let src = device
