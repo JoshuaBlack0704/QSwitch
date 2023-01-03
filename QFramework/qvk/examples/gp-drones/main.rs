@@ -1,25 +1,41 @@
 use std::mem::size_of;
+use std::time::Instant;
 
 use ash::vk;
-use glam::{Mat4, Vec4};
-use qvk::{init::{instance, device, InstanceFactory, DeviceFactory, swapchain::{self, SwapchainSource}, Swapchain, DeviceSource}, memory::{MemoryFactory, buffer::{BufferFactory, BufferSegmentFactory, BufferSegmentSource}}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageResourceSource, ImageSource}, pipelines::{graphics::{RenderPassAttachment, SubpassDescription, RenderpassFactory, FramebufferFactory, graphics::GraphicsDefaultState, GraphicsPipelineFactory}, PipelineLayoutFactory}, shapes::{Shape, ShapeVertex}, descriptor::{DescriptorLayoutFactory, DescriptorPoolFactory, ApplyWriteFactory, SetFactory, SetSource}, shader::{HLSL, ShaderFactory}, sync::SemaphoreFactory, command::{CommandBufferFactory, CommandBufferSource, CommandPoolOps}, queue::{SubmitSet, QueueOps, SubmitInfoSource}};
+use glam::{Mat4, Vec4, Vec3};
+use qvk::{init::{instance, device, InstanceFactory, DeviceFactory, swapchain::{self, SwapchainSource}, Swapchain, DeviceSource}, memory::{MemoryFactory, buffer::{BufferFactory, BufferSegmentFactory, BufferSegmentSource}}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageResourceSource, ImageSource}, pipelines::{graphics::{RenderPassAttachment, SubpassDescription, RenderpassFactory, FramebufferFactory, graphics::GraphicsDefaultState, GraphicsPipelineFactory}, PipelineLayoutFactory, ComputePipelineFactory}, shapes::{Shape, ShapeVertex}, descriptor::{DescriptorLayoutFactory, DescriptorPoolFactory, ApplyWriteFactory, SetFactory, SetSource}, shader::{HLSL, ShaderFactory}, sync::SemaphoreFactory, command::{CommandBufferFactory, CommandBufferSource, CommandPoolOps}, queue::{SubmitSet, QueueOps, SubmitInfoSource}};
 use rand::{thread_rng, Rng};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{event_loop::EventLoop, window::WindowBuilder, event::{Event, WindowEvent, VirtualKeyCode}};
 
 const VERT_PATH: &str = "examples/resources/gp-drone/vert.hlsl";
 const FRAG_PATH: &str = "examples/resources/gp-drone/frag.hlsl";
+const COMP_PATH: &str = "examples/resources/gp-drone/update.hlsl";
+const CAMSPEED: f32 = 30.0;
+const CAMRATE: f32 = 1.0;
 
 #[derive(Clone)]
+#[repr(C)]
 pub struct InstanceData{
-    model_matrix: Mat4,
+    mvp_matrix: Mat4,
     target_pos: Vec4,
+    current_pos: Vec4,
+}
+
+#[repr(C)]
+struct UniformData{
+    projection: Mat4,
+    view: Mat4,
+    object_count: u32,
+    target_count: u32,
+    delta_time: f32,
+    frame: u32,
 }
 
 fn generate_targets(max_x: f32, max_y: f32, max_z: f32, count: usize) -> Vec<Vec4> {
     let mut targets:Vec<Vec4> = vec![];
 
-    for i in 0..count{
+    for _ in 0..count{
         let x:f32 = thread_rng().gen_range(0.0..max_x);
         let y:f32 = thread_rng().gen_range(0.0..max_y);
         let z:f32 = thread_rng().gen_range(0.0..max_z);
@@ -31,6 +47,8 @@ fn generate_targets(max_x: f32, max_y: f32, max_z: f32, count: usize) -> Vec<Vec
 }
 
 fn main(){
+
+    pretty_env_logger::init();
     
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new().build(&event_loop).unwrap();
@@ -48,10 +66,10 @@ fn main(){
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
 
     let gpu_memory = device
-        .create_memory(1024 * 1024 * 100, device.device_memory_index(), None)
+        .create_memory(1024 * 1024 * 1024 * 3, device.device_memory_index(), None)
         .unwrap();
     let cpu_memory = device
-        .create_memory(1024 * 1024 * 100, device.host_memory_index(), None)
+        .create_memory(1024 * 1024 * 1024 * 3, device.host_memory_index(), None)
         .unwrap();
     let extent = vk::Extent3D::builder()
         .width(1920)
@@ -144,14 +162,14 @@ fn main(){
 
 
     // Memory preperation
-    let object_count = 100;
-    let target_count = 10;
-    let max_x = 10.0;
-    let max_y = 10.0;
-    let max_z = 10.0;
+    let object_count = 200000 as u32;
+    let target_count = 200 as u32;
+    let max_x = 1000.0;
+    let max_y = 1000.0;
+    let max_z = 1000.0;
     
-    let cpu_storage = cpu_memory.create_buffer(1024*1024*50, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
-    let gpu_storage = gpu_memory.create_buffer(1024*1024*50, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
+    let cpu_storage = cpu_memory.create_buffer(1024*1024*1024, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
+    let gpu_storage = gpu_memory.create_buffer(1024*1024*1024 * 2, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
     let cpu_uniform = cpu_memory.create_buffer(1024*1024, vk::BufferUsageFlags::UNIFORM_BUFFER, None, None).unwrap();
     
     let uniform = cpu_uniform.create_segment(1024, None).unwrap();
@@ -164,7 +182,7 @@ fn main(){
 
     let mut vertex_data = vec![];
     let mut index_data = vec![];
-    let shape = Shape::tetrahedron(&mut vertex_data, &mut index_data);
+    let _shape = Shape::tetrahedron(&mut vertex_data, &mut index_data);
     
     let stage = cpu_storage.create_segment(v_buffer.get_partition().size, None).unwrap();
     stage.copy_from_ram(&vertex_data).unwrap();
@@ -174,26 +192,54 @@ fn main(){
     stage.copy_from_ram(&index_data).unwrap();
     stage.copy_to_segment_internal(&i_buffer).unwrap();
 
-    let temp_data = vec![InstanceData{ model_matrix: Mat4::IDENTITY, target_pos: Vec4::new(0.0,0.0,0.0,1.0) };object_count];
-    let stage = cpu_storage.create_segment(instance_data.get_partition().size, None).unwrap();
-    stage.copy_from_ram(&temp_data).unwrap();
-    stage.copy_to_segment_internal(&instance_data).unwrap();
-
-    let temp_data = generate_targets(max_x, max_y, max_z, target_count);
+    let temp_data = generate_targets(max_x, max_y, max_z, target_count as usize);
     let stage = cpu_storage.create_segment(target_data.get_partition().size, None).unwrap();
     stage.copy_from_ram(&temp_data).unwrap();
     stage.copy_to_segment_internal(&target_data).unwrap();
     
 
-    
-    let dlayout = device.create_descriptor_layout(None);
-    let uniform_write = dlayout.form_binding(&uniform, vk::ShaderStageFlags::VERTEX);
-    let layouts = [(&dlayout, 1)];
-    let dpool = device.create_descriptor_pool(&layouts, None);
-    let dset = dpool.create_set(&dlayout);
-    uniform.apply(&uniform_write);
-    dset.update();
+    // Descriptor preperation
+    let comp_dlayout = device.create_descriptor_layout(None);
+    let vert_dlayout = device.create_descriptor_layout(None);
 
+    let comp_uniform_write = comp_dlayout.form_binding(&uniform, vk::ShaderStageFlags::COMPUTE);
+    let comp_instance_write = comp_dlayout.form_binding(&instance_data, vk::ShaderStageFlags::COMPUTE);
+    let comp_target_write = comp_dlayout.form_binding(&target_data, vk::ShaderStageFlags::COMPUTE);
+
+    let vert_uniform_write = vert_dlayout.form_binding(&uniform, vk::ShaderStageFlags::VERTEX);
+    let vert_instance_write = vert_dlayout.form_binding(&instance_data, vk::ShaderStageFlags::VERTEX);
+
+    uniform.apply(&comp_uniform_write);
+    uniform.apply(&vert_uniform_write);
+
+    instance_data.apply(&comp_instance_write);
+    instance_data.apply(&vert_instance_write);
+
+    target_data.apply(&comp_target_write);
+
+    let layouts = [(&comp_dlayout, 1), (&vert_dlayout, 1)];
+    let dpool = device.create_descriptor_pool(&layouts, None);
+
+    let comp_dset = dpool.create_set(&comp_dlayout);
+    comp_dset.update();
+    let vert_dset = dpool.create_set(&vert_dlayout);
+    vert_dset.update();
+
+    // Compute pipeline preparation
+    let code = HLSL::new(
+        COMP_PATH,
+        shaderc::ShaderKind::Compute,
+        "main",
+        None,
+    );
+    let compute_shd = device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
+
+    let layouts = [&comp_dlayout];
+    let cplayout = device.create_pipeline_layout(&layouts, &[], None);
+    let mut compute_pipeline = cplayout.create_compute_pipeline(&compute_shd, None);
+
+    
+    // Graphics pipeline preparation
     let mut subpass = SubpassDescription::new(vk::PipelineBindPoint::GRAPHICS, &depth_attch, None);
     subpass.add_color_attachment(&color_attch);
     subpass.add_depth_stencil_attachment(&depth_attch);
@@ -209,7 +255,7 @@ fn main(){
     let renderpass = device.create_renderpass(&attachments, &subpasses, None);
     let framebuffer =
         renderpass.create_framebuffer(vk::Rect2D::builder().extent(extent2d).build(), None);
-    let layouts = [&dlayout];
+    let layouts = [&vert_dlayout];
     // let playout = device.create_pipeline_layout_empty();
     let playout = device.create_pipeline_layout(&layouts, &[], None);
 
@@ -240,6 +286,11 @@ fn main(){
     let aquire = device.create_semaphore();
     let render = device.create_semaphore();
     let mut images = swapchain.images();
+    let mut camera = qvk::camera::Camera::new(Vec3::new(max_x/2.0, max_y/2.0, 0.0), CAMSPEED, CAMRATE);
+    // let mut camera = qvk::camera::Camera::new(Vec3::new(0.0,0.0,0.0), CAMSPEED, CAMRATE);
+    let mut time_at_last_frame = Instant::now();
+    let mut frame:u32 = 0;
+    let mut delta_time = 0.0;
     event_loop.run(move |event, _, flow| {
         flow.set_poll();
         match event {
@@ -248,6 +299,7 @@ fn main(){
                 event,
             } => {
                 if let WindowEvent::KeyboardInput { device_id: _, input, is_synthetic: _ } = event{
+                    camera.process_input(input.clone());
                     if let Some(code) = input.virtual_keycode{
                         if code == VirtualKeyCode::Space{
                             
@@ -274,6 +326,18 @@ fn main(){
                                 .create_graphics_pipeline(state, &playout, &renderpass, 0)
                                 .unwrap();
                             
+                            let code = HLSL::new(
+                                COMP_PATH,
+                                shaderc::ShaderKind::Compute,
+                                "main",
+                                None,
+                            );
+                            let compute_shd = device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
+
+                            let layouts = [&comp_dlayout];
+                            let cplayout = device.create_pipeline_layout(&layouts, &[], None);
+                            compute_pipeline = cplayout.create_compute_pipeline(&compute_shd, None);
+                            
                             
                         }
                     }
@@ -288,6 +352,10 @@ fn main(){
                 }
             }
             Event::MainEventsCleared => {
+                let delta_time = &mut delta_time;
+                *delta_time = time_at_last_frame.elapsed().as_secs_f32();
+                println!("Frame time: {delta_time}, FPS: {}", 1.0/(*delta_time));
+                time_at_last_frame = Instant::now();
                 let index = swapchain.gpu_aquire_next_image(u64::MAX, &aquire);
                 let color_tgt = images[index as usize].clone();
                 let color_tgt = color_tgt
@@ -301,27 +369,31 @@ fn main(){
                 
                 let fov:f32 = 70.0 * (3.14 / 180.0);
                 let aspect:f32 = ImageResourceSource::extent(&color_tgt).width as f32 / ImageResourceSource::extent(&color_tgt).height as f32;
-                let n = 0.1;
-                let f = 10.0;
-                let x = glam::Vec4::new(1.0/((aspect) * (fov/2.0).tan()), 0.0, 0.0, 0.0);
-                let y = glam::Vec4::new(0.0, 1.0/(fov/2.0).tan(), 0.0, 0.0);
-                let z = glam::Vec4::new(0.0, 0.0, f/(f-n), 1.0);
-                let w = glam::Vec4::new(0.0, 0.0, -(f*n)/(f-n), 0.0);
-                let perspective = [glam::Mat4::from_cols(x,y,z,w)];
-                uniform.copy_from_ram(&perspective).unwrap();
+                let u_data = [UniformData{
+                    projection: camera.perspective(fov, aspect),
+                    view: camera.view(*delta_time),
+                    object_count: object_count as u32,
+                    target_count: target_count as u32,
+                    delta_time: *delta_time,
+                    frame,
+                }];
+                uniform.copy_from_ram(&u_data).unwrap();
                 
                 *ImageResourceSource::layout(&color_rsc) = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
                 let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
                 cmd.begin(None).unwrap();
+                cmd.bind_pipeline(&compute_pipeline);
+                cmd.bind_set(&comp_dset, 0, &compute_pipeline);
+                cmd.dispatch(object_count, 1, 1);
                 cmd.begin_render_pass(&framebuffer);
                 cmd.bind_pipeline(&graphics);
                 cmd.bind_vertex_buffer(&v_buffer);
                 cmd.bind_index_buffer(&i_buffer);
-                cmd.bind_set(&dset, 0, &graphics);
+                cmd.bind_set(&vert_dset, 0, &graphics);
                 unsafe {
                     device
                         .device()
-                        .cmd_draw_indexed(cmd.cmd(), index_data.len() as u32, 1, 0, 0, 0);
+                        .cmd_draw_indexed(cmd.cmd(), index_data.len() as u32, object_count, 0, 0, 0);
                 }
                 cmd.end_render_pass();
                 cmd.transition_img(
@@ -353,6 +425,7 @@ fn main(){
                 swapchain.wait_present(index as u32, Some(&waits));
                 
                 exe.reset_cmdpool();
+                frame += 1;
             }
             _ => {}
         }

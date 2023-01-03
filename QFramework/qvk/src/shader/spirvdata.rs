@@ -23,9 +23,14 @@ impl HLSL {
             _options = CompileOptions::new().unwrap();
         }
         _options.set_source_language(shaderc::SourceLanguage::HLSL);
+        _options.set_optimization_level(shaderc::OptimizationLevel::Performance);
         let binary = compiler
-            .compile_into_spirv(&source, shader_kind, &file, entry_name, Some(&_options))
-            .unwrap();
+            .compile_into_spirv(&source, shader_kind, &file, entry_name, Some(&_options));
+        if let Err(e) = &binary{
+            println!("{e}");
+        }
+        let binary = binary.unwrap();
+            
         let code = binary.as_binary();
         Self {
             code: code.to_vec(),
@@ -62,6 +67,7 @@ impl GLSL {
             _options = CompileOptions::new().unwrap();
         }
         _options.set_source_language(shaderc::SourceLanguage::GLSL);
+        _options.set_optimization_level(shaderc::OptimizationLevel::Performance);
         let binary = compiler
             .compile_into_spirv(&source, shader_kind, &file, entry_name, Some(&_options))
             .unwrap();

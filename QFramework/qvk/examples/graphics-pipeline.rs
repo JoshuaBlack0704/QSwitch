@@ -1,5 +1,3 @@
-use std::mem::size_of;
-
 use ash::vk;
 use qvk::{
     self,

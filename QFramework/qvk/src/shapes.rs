@@ -1,12 +1,12 @@
 use std::mem::size_of;
 
 use ash::vk;
-use glam::Vec3;
+use glam::{Vec3, Mat3};
 use crate::pipelines::graphics::VertexStateFactory;
 
 pub struct Shape{
-    starting_index: u32,
-    starting_vertex: u32,
+    _starting_index: u32,
+    _starting_vertex: u32,
 }
 impl Shape{
     pub fn new(vertex_data: &mut Vec<ShapeVertex>, index_data: &mut Vec<u32>, vertices: &[ShapeVertex], indices: &[u32]) -> Shape {
@@ -15,17 +15,18 @@ impl Shape{
         vertex_data.extend_from_slice(vertices);
         index_data.extend_from_slice(indices);
         Shape{
-            starting_index,
-            starting_vertex,
+            _starting_index: starting_index,
+            _starting_vertex: starting_vertex,
         }
     }
 
     pub fn tetrahedron(vertex_data: &mut Vec<ShapeVertex>, index_data: &mut Vec<u32>) -> Shape {
-        let _offset = Vec3::new(0.0,0.0,5.0);
-        let f = Vec3::new(0.0, -0.5, -0.5) + _offset;
-        let br = Vec3::new(0.5, -0.5, 0.5) + _offset;
-        let bl = Vec3::new(-0.5, -0.5, 0.5) + _offset;
-        let t = Vec3::new(0.0,0.5,0.0) + _offset;
+        let rotation = Mat3::from_rotation_x(3.14/2.0);
+        let _offset = Vec3::new(0.0,0.0,0.0);
+        let f = rotation * Vec3::new(0.0, -0.5, -0.5) + _offset;
+        let br = rotation * Vec3::new(0.5, -0.5, 0.5) + _offset;
+        let bl = rotation * Vec3::new(-0.5, -0.5, 0.5) + _offset;
+        let t = rotation * Vec3::new(0.0,1.0,0.0) + _offset;
         let color = Vec3::new(1.0,1.0,1.0);
 
         let p1 = Primiative::new(f,br,t,color).vertices();

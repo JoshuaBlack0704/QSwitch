@@ -1,4 +1,4 @@
-use std::{mem::size_of, sync::Arc, marker::PhantomData};
+use std::{mem::size_of, sync::Arc};
 
 use ash::vk;
 use log::{debug, info};
