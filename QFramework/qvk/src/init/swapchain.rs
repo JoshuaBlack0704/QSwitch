@@ -35,11 +35,11 @@ pub trait SwapchainSource<D: DeviceSource> {
         &self,
         timeout: u64,
         fence: Option<&F>,
-        semaphore: Option<&S>,
+       semaphore: Option<&S>,
     ) -> u32;
     fn gpu_aquire_next_image<S:SemaphoreSource>(&self, timeout: u64, semaphore: &S) -> u32;
     fn cpu_aquire_next_image<F:FenceSource>(&self, timeout: u64, fence: &F) -> u32;
-    fn resize(&self);
+    fn resize(&self, size: Option<(u32,u32)>);
     fn extent(&self) -> vk::Extent3D;
     fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>>;
     fn present_image<IR: ImageResourceSource + ImageSource, Q: QueueOps>(
@@ -174,7 +174,16 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         }
         info = info.image_format(chosen_format.format);
         info = info.image_color_space(chosen_format.color_space);
-        info = info.image_extent(capabilities.current_extent);
+
+        let mut adjusted_extent = capabilities.current_extent;
+        if adjusted_extent.width > capabilities.max_image_extent.width || adjusted_extent.width < capabilities.min_image_extent.width{
+            adjusted_extent.width = capabilities.min_image_extent.width;
+        }
+        if adjusted_extent.height > capabilities.max_image_extent.height || adjusted_extent.height < capabilities.min_image_extent.height{
+            adjusted_extent.height = capabilities.min_image_extent.height;
+        }
+
+        info = info.image_extent(adjusted_extent);
         if let Some(e) = settings.custom_image_extent() {
             info = info.image_extent(e);
         }
@@ -260,9 +269,9 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         };
     }
 
-    fn resize(&self) {
+    fn resize(&self, extent: Option<(u32, u32)>) {
         let mut swapchain_lock = self.swapchain.lock().unwrap();
-        let capabilites = unsafe {
+        let capabilities = unsafe {
             self.surface_loader
                 .get_physical_device_surface_capabilities(
                     self.device.physical_device().physical_device,
@@ -272,12 +281,25 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         };
         debug!(
             "Resizing swapchain {:?} to {:?}",
-            *swapchain_lock, capabilites.current_extent
+            *swapchain_lock, capabilities.current_extent
         );
         let mut info = self.create_info.lock().unwrap();
-        info.image_extent = capabilites.current_extent;
+        info.image_extent = capabilities.current_extent;
         info.old_swapchain = *swapchain_lock;
-        info.image_extent = capabilites.current_extent;
+        let mut adjusted_extent = capabilities.current_extent;
+        if let Some((width, height)) = extent{
+            adjusted_extent.width = width;
+            adjusted_extent.height = height;
+        }
+        else{
+            if adjusted_extent.width > capabilities.max_image_extent.width || adjusted_extent.width < capabilities.min_image_extent.width{
+                adjusted_extent.width = capabilities.min_image_extent.width;
+            }
+            if adjusted_extent.height > capabilities.max_image_extent.height || adjusted_extent.height < capabilities.min_image_extent.height{
+                adjusted_extent.height = capabilities.min_image_extent.height;
+            }
+        }
+        info.image_extent = adjusted_extent;
         let new_swapchain = unsafe { self.swapchain_loader.create_swapchain(&info, None).unwrap() };
         unsafe {
             self.swapchain_loader
@@ -320,7 +342,7 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR) {
                 todo!();
             }
-            self.resize();
+            self.resize(None);
             swapchain = *self.swapchain.lock().unwrap();
             next_image = unsafe {
                 self.swapchain_loader.acquire_next_image(
@@ -336,7 +358,7 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             return next_image;
         }
 
-        self.resize();
+        self.resize(None);
         swapchain = *self.swapchain.lock().unwrap();
         let (next_image, _) = unsafe {
             self.swapchain_loader
@@ -425,7 +447,7 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR) {
                 todo!();
             }
-            self.resize();
+            self.resize(None);
             swapchain = *self.swapchain.lock().unwrap();
             next_image = unsafe {
                 self.swapchain_loader.acquire_next_image(
@@ -441,7 +463,7 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             return next_image;
         }
 
-        self.resize();
+        self.resize(None);
         swapchain = *self.swapchain.lock().unwrap();
         let (next_image, _) = unsafe {
             self.swapchain_loader
@@ -467,7 +489,7 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             if !(e == vk::Result::ERROR_OUT_OF_DATE_KHR) {
                 todo!();
             }
-            self.resize();
+            self.resize(None);
             swapchain = *self.swapchain.lock().unwrap();
             next_image = unsafe {
                 self.swapchain_loader.acquire_next_image(
@@ -483,7 +505,7 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             return next_image;
         }
 
-        self.resize();
+        self.resize(None);
         swapchain = *self.swapchain.lock().unwrap();
         let (next_image, _) = unsafe {
             self.swapchain_loader.acquire_next_image(

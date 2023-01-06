@@ -78,8 +78,8 @@ fn main() {
                 if let WindowEvent::CloseRequested = event {
                     flow.set_exit();
                 }
-                if let WindowEvent::Resized(_) = event {
-                    swapchain.resize();
+                if let WindowEvent::Resized(size) = event {
+                    swapchain.resize(Some((size.width, size.height)));
                     println!("{:?}", swapchain.extent());
                     // let image_settings = &mut image_settings;
                     // *image_settings = image::image::SettingsProvider::new_simple(vk::Format::B8G8R8A8_SRGB, swapchain.extent(), vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST, Some(vk::ImageLayout::TRANSFER_DST_OPTIMAL));

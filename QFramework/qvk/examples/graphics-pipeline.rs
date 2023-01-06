@@ -294,8 +294,8 @@ fn main() {
                 if let WindowEvent::CloseRequested = event {
                     flow.set_exit();
                 }
-                if let WindowEvent::Resized(_) = event {
-                    swapchain.resize();
+                if let WindowEvent::Resized(size) = event {
+                    swapchain.resize(Some((size.width, size.height)));
                     images = swapchain.images();
                     println!("{:?}", swapchain.extent());
                 }

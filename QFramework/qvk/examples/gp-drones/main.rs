@@ -66,10 +66,10 @@ fn main(){
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
 
     let gpu_memory = device
-        .create_memory(1024 * 1024 * 1024 * 3, device.device_memory_index(), None)
+        .create_memory(1024 * 1024 * 50, device.device_memory_index(), None)
         .unwrap();
     let cpu_memory = device
-        .create_memory(1024 * 1024 * 1024 * 3, device.host_memory_index(), None)
+        .create_memory(1024 * 1024 * 50, device.host_memory_index(), None)
         .unwrap();
     let extent = vk::Extent3D::builder()
         .width(1920)
@@ -162,14 +162,14 @@ fn main(){
 
 
     // Memory preperation
-    let object_count = 200000 as u32;
-    let target_count = 200 as u32;
-    let max_x = 1000.0;
-    let max_y = 1000.0;
-    let max_z = 1000.0;
+    let object_count = 100 as u32;
+    let target_count = 10 as u32;
+    let max_x = 100.0;
+    let max_y = 100.0;
+    let max_z = 100.0;
     
-    let cpu_storage = cpu_memory.create_buffer(1024*1024*1024, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
-    let gpu_storage = gpu_memory.create_buffer(1024*1024*1024 * 2, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
+    let cpu_storage = cpu_memory.create_buffer(1024*1024 * 5, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
+    let gpu_storage = gpu_memory.create_buffer(1024*1024 * 5, vk::BufferUsageFlags::TRANSFER_SRC | vk::BufferUsageFlags::TRANSFER_DST | vk::BufferUsageFlags::STORAGE_BUFFER, None, None).unwrap();    
     let cpu_uniform = cpu_memory.create_buffer(1024*1024, vk::BufferUsageFlags::UNIFORM_BUFFER, None, None).unwrap();
     
     let uniform = cpu_uniform.create_segment(1024, None).unwrap();
@@ -345,8 +345,8 @@ fn main(){
                 if let WindowEvent::CloseRequested = event {
                     flow.set_exit();
                 }
-                if let WindowEvent::Resized(_) = event {
-                    swapchain.resize();
+                if let WindowEvent::Resized(size) = event {
+                    swapchain.resize(Some((size.width, size.height)));
                     images = swapchain.images();
                     println!("{:?}", swapchain.extent());
                 }
