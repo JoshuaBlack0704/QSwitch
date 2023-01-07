@@ -15,6 +15,7 @@ pub mod command;
 pub mod descriptor;
 pub mod pipelines;
 pub mod memory;
+pub mod allocator;
 pub mod image;
 pub mod math;
 pub mod shapes;
