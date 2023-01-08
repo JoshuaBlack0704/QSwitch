@@ -57,7 +57,7 @@ impl PartitionSystem {
         self.partitions = active_queue;
     }
 
-    fn partition<F: Fn(u64) -> bool>(
+    pub fn partition<F: Fn(u64) -> bool>(
         &mut self,
         size: u64,
         alignment_fn: F,

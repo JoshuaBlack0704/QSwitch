@@ -4,6 +4,8 @@ use ash::vk;
 
 use crate::init::DeviceSource;
 
+use self::partitionsystem::PartitionError;
+
 pub mod partitionsystem;
 #[derive(Clone)]
 pub struct Partition {
@@ -17,7 +19,7 @@ pub struct PartitionSystem {
 
 #[derive(Clone)]
 pub enum MemoryExtensions{
-    
+    Flags(vk::MemoryAllocateFlagsInfo)
 }
 #[derive(Clone)]
 pub enum BufferExtensions{
@@ -28,9 +30,19 @@ pub enum ImageExtensions{
     
 }
 
-type MemAlloc = (vk::DeviceMemory, PartitionSystem);
-type BufAlloc = (vk::Buffer, PartitionSystem);
+type MemAlloc = (vk::DeviceMemory, Mutex<PartitionSystem>);
+type BufAlloc = (vk::Buffer, Mutex<PartitionSystem>);
+fn test_partition(partition: &Mutex<PartitionSystem>, size:u64, alignment: Option<u64>) -> Result<Partition, PartitionError>{
+    let mut lock = partition.lock().unwrap();
+    lock.partition(size, |offset| {
+            if let Some(a) = alignment{
+                return offset % a == 0;
+            }
+            true
+    })
+}
 
+pub mod memallocator;
 pub struct MemoryAllocator<D:DeviceSource>{
     device: D,
     min_size: u64,
