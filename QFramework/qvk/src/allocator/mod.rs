@@ -31,7 +31,10 @@ pub enum ImageExtensions{
 }
 
 type MemAlloc = (vk::DeviceMemory, Mutex<PartitionSystem>);
-type BufAlloc = (vk::Buffer, Mutex<PartitionSystem>);
+type MemPart = (vk::DeviceMemory, Partition);
+type BufAlloc = ((vk::DeviceMemory, Partition), vk::Buffer, Mutex<PartitionSystem>);
+type BufPart = (vk::Buffer, Partition);
+
 fn test_partition(partition: &Mutex<PartitionSystem>, size:u64, alignment: Option<u64>) -> Result<Partition, PartitionError>{
     let mut lock = partition.lock().unwrap();
     lock.partition(size, |offset| {
@@ -50,6 +53,15 @@ pub struct MemoryAllocator<D:DeviceSource>{
     extensions: Vec<MemoryExtensions>,
     allocations: Mutex<Vec<MemAlloc>>,
 }
+
+pub mod bufferallocator;
+pub trait BufferSegmentFactory{
+    type Segment: BufferSegmentSource;
+    fn get_segment(&self, size: u64, alignment: Option<u64>) -> Self::Segment;
+}
+pub trait BufferSegmentSource{
+    
+}
 pub struct BufferAllocator<D:DeviceSource>{
     device: D,
     min_size: u64,
@@ -59,6 +71,13 @@ pub struct BufferAllocator<D:DeviceSource>{
     share: Option<Vec<u32>>,
     mem: Arc<MemoryAllocator<D>>,
     buffers: Mutex<Vec<BufAlloc>>,
+}
+
+pub mod buffersegment;
+pub struct BufferSegment<D:DeviceSource>{
+    buffer: Arc<BufferAllocator<D>>,
+    mem_part: MemPart,
+    buf_part: BufPart,
 }
 pub struct ImageAllocator<D:DeviceSource>{
     device: D,

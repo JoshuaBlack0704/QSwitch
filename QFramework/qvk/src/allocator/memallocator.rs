@@ -1,9 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use ash::vk;
-use log::info;
+use log::{info, debug};
 
-use crate::{init::DeviceSource, allocator::PartitionSystem};
+use crate::{init::DeviceSource, allocator::{PartitionSystem, Partition}};
 
 use super::{MemoryAllocator, MemoryExtensions, test_partition};
 
@@ -20,13 +20,13 @@ impl<D:DeviceSource + Clone> MemoryAllocator<D>{
         )
     }
 
-    pub fn get_space(&self, size: u64, alignment: Option<u64>) -> crate::allocator::Partition {
+    pub fn get_space(&self, size: u64, alignment: Option<u64>) -> (vk::DeviceMemory, Partition) {
         //First we need to loop through all of the memory allocations
         //and attempt to find a block of space large enough
         let mut allocs = self.allocations.lock().unwrap();
-        for (_,p) in allocs.iter(){
+        for (m,p) in allocs.iter(){
             if let Ok(p) = test_partition(p, size, alignment){
-                return p;
+                return (*m,p);
             }
         }
 
@@ -56,7 +56,7 @@ impl<D:DeviceSource + Clone> MemoryAllocator<D>{
         let p = test_partition(&p_sys, size, alignment).unwrap();
         let allocation = (memory, p_sys);
         allocs.push(allocation);
-        p
+        (memory,p)
 
     }
 }
@@ -67,5 +67,17 @@ impl MemoryExtensions{
             MemoryExtensions::Flags(f) => builder = builder.push_next(f),
         }
         builder
+    }
+}
+
+impl<D:DeviceSource> Drop for MemoryAllocator<D>{
+    fn drop(&mut self) {
+        let allocs = self.allocations.lock().unwrap();
+        for (m,_) in allocs.iter(){
+            debug!("Freed memory {:?}", m);
+            unsafe{
+                self.device.device().free_memory(*m, None);
+            }
+        }
     }
 }
