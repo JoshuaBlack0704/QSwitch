@@ -2,20 +2,23 @@ use std::sync::Arc;
 
 use crate::init::DeviceSource;
 
-use super::{BufferSegmentSource, BufferSegment, MemPart, BufPart, BufferAllocator};
+use super::{BufferSegmentSource, BufferSegment, BufferSource, BufferSegmentFactory};
 
-impl<D:DeviceSource> BufferSegmentSource for Arc<BufferSegment<D>>{
-    
-}
+impl<B:DeviceSource + BufferSource + Clone> BufferSegmentFactory for B{
+    type Segment = Arc<BufferSegment<B>>;
 
-impl<D:DeviceSource> BufferSegment<D>{
-    pub fn new(buf: Arc<BufferAllocator<D>>, mem_part: MemPart, buf_part: BufPart) -> Arc<BufferSegment<D>> {
+    fn get_segment(&self, size: u64, alignment: Option<u64>) -> Self::Segment {
+        let partition = self.get_space(size,alignment);
         Arc::new(
-            Self{
-                buffer: buf.clone(),
-                mem_part,
-                buf_part,
+            BufferSegment{
+                buffer: self.clone(),
+                mem_part: partition.0,
+                buf_part: partition.1,
             }
         )
     }
+}
+
+impl<B:DeviceSource + BufferSource> BufferSegmentSource for Arc<BufferSegment<B>>{
+    
 }

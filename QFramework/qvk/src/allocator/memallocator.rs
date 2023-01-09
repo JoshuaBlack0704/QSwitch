@@ -3,24 +3,27 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{info, debug};
 
-use crate::{init::DeviceSource, allocator::{PartitionSystem, Partition}};
+use crate::{init::{DeviceSource, InstanceSource}, allocator::{PartitionSystem, Partition}};
 
-use super::{MemoryAllocator, MemoryExtensions, test_partition};
+use super::{MemoryAllocator, MemoryExtensions, test_partition, MemoryALlocatorFactory, MemorySource};
 
-impl<D:DeviceSource + Clone> MemoryAllocator<D>{
-    pub fn new(device_source: &D, min_size: u64, type_index: u32, extensions: Vec<MemoryExtensions>) -> Arc<MemoryAllocator<D>> {
+impl<D:DeviceSource + Clone> MemoryALlocatorFactory for D{
+    type Memory = Arc<MemoryAllocator<D>>;
+
+    fn create_memory(&self, min_size: u64, type_index: u32, extensions: &[MemoryExtensions]) -> Self::Memory {
         Arc::new(
-            Self{
-                device: device_source.clone(),
+            MemoryAllocator{
+                device: self.clone(),
                 min_size,
                 type_index,
-                extensions,
+                extensions: extensions.to_vec(),
                 allocations: Mutex::new(vec![]),
             }
         )
     }
-
-    pub fn get_space(&self, size: u64, alignment: Option<u64>) -> (vk::DeviceMemory, Partition) {
+}
+impl<D:DeviceSource + Clone> MemorySource for Arc<MemoryAllocator<D>>{
+    fn get_space(&self, size: u64, alignment: Option<u64>) -> (vk::DeviceMemory, Partition) {
         //First we need to loop through all of the memory allocations
         //and attempt to find a block of space large enough
         let mut allocs = self.allocations.lock().unwrap();
@@ -79,5 +82,61 @@ impl<D:DeviceSource> Drop for MemoryAllocator<D>{
                 self.device.device().free_memory(*m, None);
             }
         }
+    }
+}
+
+impl<D: DeviceSource> DeviceSource for Arc<MemoryAllocator<D>> {
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
+    }
+}
+
+impl<D: DeviceSource + InstanceSource> InstanceSource for Arc<MemoryAllocator<D>> {
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
     }
 }

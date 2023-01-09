@@ -46,6 +46,13 @@ fn test_partition(partition: &Mutex<PartitionSystem>, size:u64, alignment: Optio
 }
 
 pub mod memallocator;
+pub trait MemoryALlocatorFactory{
+    type Memory: MemorySource;
+    fn create_memory(&self, min_size: u64, type_index: u32, extensions: &[MemoryExtensions]) -> Self::Memory;
+}
+pub trait MemorySource{
+    fn get_space(&self, size: u64, alignment: Option<u64>) -> MemPart;
+}
 pub struct MemoryAllocator<D:DeviceSource>{
     device: D,
     min_size: u64,
@@ -55,6 +62,30 @@ pub struct MemoryAllocator<D:DeviceSource>{
 }
 
 pub mod bufferallocator;
+pub trait BufferAllocatorFactory{
+    type Buffer: BufferSource;
+    fn create_buffer(
+        &self, 
+        min_size: u64, 
+        usage: vk::BufferUsageFlags, 
+        flags: Option<vk::BufferCreateFlags>, 
+        extensions: &[BufferExtensions], 
+        share: Option<Vec<u32>>) -> Self::Buffer;
+}
+pub trait BufferSource{
+    fn get_space(&self, size: u64, alignment: Option<u64>) -> (MemPart,BufPart);
+}
+pub struct BufferAllocator<M:DeviceSource + MemorySource>{
+    mem_alloc: M,
+    min_size: u64,
+    usage: vk::BufferUsageFlags,
+    flags: Option<vk::BufferCreateFlags>,
+    extensions: Vec<BufferExtensions>,
+    share: Option<Vec<u32>>,
+    buffers: Mutex<Vec<BufAlloc>>,
+}
+
+pub mod buffersegment;
 pub trait BufferSegmentFactory{
     type Segment: BufferSegmentSource;
     fn get_segment(&self, size: u64, alignment: Option<u64>) -> Self::Segment;
@@ -62,25 +93,18 @@ pub trait BufferSegmentFactory{
 pub trait BufferSegmentSource{
     
 }
-pub struct BufferAllocator<D:DeviceSource>{
-    device: D,
-    min_size: u64,
-    usage: vk::BufferUsageFlags,
-    flags: Option<vk::BufferCreateFlags>,
-    extensions: Vec<BufferExtensions>,
-    share: Option<Vec<u32>>,
-    mem: Arc<MemoryAllocator<D>>,
-    buffers: Mutex<Vec<BufAlloc>>,
-}
-
-pub mod buffersegment;
-pub struct BufferSegment<D:DeviceSource>{
-    buffer: Arc<BufferAllocator<D>>,
+pub struct BufferSegment<B:DeviceSource + BufferSource>{
+    buffer: B,
     mem_part: MemPart,
     buf_part: BufPart,
 }
-pub struct ImageAllocator<D:DeviceSource>{
-    device: D,
+
+pub mod imageallocator;
+pub trait ImageAllocatorFactory{
+    
+}
+pub struct ImageAllocator<M:DeviceSource + MemorySource>{
+    mem_alloc: M,
     format: vk::Format,
     levels: u32,
     layers: u32,
@@ -91,6 +115,4 @@ pub struct ImageAllocator<D:DeviceSource>{
     share: Option<Vec<u32>>,
     flags: Option<vk::ImageCreateFlags>,
     extensions: Vec<ImageExtensions>,
-    mem: Arc<MemoryAllocator<D>>,
-
 }
