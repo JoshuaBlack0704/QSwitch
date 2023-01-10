@@ -261,7 +261,7 @@ RWStructuredBuffer<InstanceData> i_data;
 RWStructuredBuffer<float4> target_data;
 
 [numthreads(1,1,1)]
-void main(uint3 GlobalInvocationID : SV_DISPATCHTHREADID){
+void main(uint3 GlobalInvocationID : SV_DispatchThreadID){
     uint index = GlobalInvocationID.x;
     if (index > ubo.object_count){
         return;
@@ -276,7 +276,7 @@ void main(uint3 GlobalInvocationID : SV_DISPATCHTHREADID){
         current_pos = target_pos;
     }
 
-    float velocity = 100;
+    float velocity = 10;
     float3 dir = target_pos.xyz - current_pos.xyz;
     dir = normalize(dir);
 

@@ -3,7 +3,7 @@ use std::fs;
 use crate::shader::SpirvStore;
 use shaderc::{self, CompileOptions, Compiler, ShaderKind};
 
-use super::{GLSL, HLSL};
+use super::{GLSL, HLSL, SPV};
 
 impl HLSL {
     pub fn new<'a>(
@@ -26,6 +26,8 @@ impl HLSL {
         _options.set_optimization_level(shaderc::OptimizationLevel::Performance);
         let binary =
             compiler.compile_into_spirv(&source, shader_kind, &file, entry_name, Some(&_options));
+        let assemply = compiler.compile_into_spirv_assembly(&source, shader_kind, &file, entry_name, Some(&_options)).unwrap();
+        println!("{:?}", assemply.as_text());
         if let Err(e) = &binary {
             println!("{e}");
         }
@@ -80,6 +82,31 @@ impl GLSL {
 }
 
 impl SpirvStore for GLSL {
+    fn code(&self) -> &[u32] {
+        &self.code
+    }
+
+    fn entry_name(&self) -> &str {
+        &self.entry_name
+    }
+}
+
+impl SPV {
+    pub fn new<'a>(
+        file: &str,
+        entry_name: &str,
+    ) -> SPV {
+        let source = fs::read(&file).unwrap();
+        let code = source.chunks_exact(4).map(|c| unsafe{*(c.as_ptr() as *const u32).clone()}).collect();
+
+        Self {
+            code,
+            entry_name: entry_name.to_string(),
+        }
+    }
+}
+
+impl SpirvStore for SPV {
     fn code(&self) -> &[u32] {
         &self.code
     }

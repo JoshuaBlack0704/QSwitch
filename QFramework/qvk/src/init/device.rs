@@ -468,8 +468,11 @@ impl PhysicalDeviceData {
     }
 
     fn more_mem(a: &Self, b: &Self) -> Ordering {
+
+        
         let mut a_max: DeviceSize = 0;
         let mut b_max: DeviceSize = 0;
+        
 
         for mem_type in a.mem_props.memory_types.iter() {
             let heap = a.mem_props.memory_heaps[mem_type.heap_index as usize];
@@ -482,6 +485,13 @@ impl PhysicalDeviceData {
             if heap.size > b_max {
                 b_max = heap.size
             }
+        }
+        
+        if a.properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU{
+            a_max = 0;
+        }
+        if b.properties.device_type == vk::PhysicalDeviceType::INTEGRATED_GPU{
+            b_max = 0;
         }
 
         if a_max > b_max {

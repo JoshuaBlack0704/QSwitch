@@ -36,3 +36,7 @@ pub struct GLSL {
     code: Vec<u32>,
     entry_name: String,
 }
+pub struct SPV{
+    code: Vec<u32>,
+    entry_name: String,
+}

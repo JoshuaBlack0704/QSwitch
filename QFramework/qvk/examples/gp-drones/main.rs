@@ -21,9 +21,9 @@ use qvk::{
         ComputePipelineFactory, PipelineLayoutFactory,
     },
     queue::{QueueOps, SubmitInfoSource, SubmitSet},
-    shader::{ShaderFactory, HLSL},
+    shader::{ShaderFactory, HLSL, SPV},
     shapes::{Shape, ShapeVertex},
-    sync::SemaphoreFactory, memory::{allocators::{MemoryAllocatorFactory, ImageAllocatorFactory, BufferAllocatorFactory}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageSource, ImageResourceSource}, buffer::{BufferSegmentFactory, BufferSegmentSource}},
+    sync::SemaphoreFactory, memory::{allocators::{MemoryAllocatorFactory, ImageAllocatorFactory, BufferAllocatorFactory, TRANSFER}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageSource, ImageResourceSource}, buffer::{BufferSegmentFactory, BufferSegmentSource}},
 };
 use rand::{thread_rng, Rng};
 use raw_window_handle::HasRawDisplayHandle;
@@ -36,6 +36,9 @@ use winit::{
 const VERT_PATH: &str = "examples/resources/gp-drone/vert.hlsl";
 const FRAG_PATH: &str = "examples/resources/gp-drone/frag.hlsl";
 const COMP_PATH: &str = "examples/resources/gp-drone/update.hlsl";
+const VERT_PATH_SPV: &str = "examples/resources/gp-drone/vert.spv";
+const FRAG_PATH_SPV: &str = "examples/resources/gp-drone/frag.spv";
+const COMP_PATH_SPV: &str = "examples/resources/gp-drone/update.spv";
 const CAMSPEED: f32 = 30.0;
 const CAMRATE: f32 = 1.0;
 
@@ -103,26 +106,13 @@ fn main() {
             | vk::ImageUsageFlags::TRANSFER_DST
             | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
     );
-    let cpu_storage = cpu_memory.create_buffer(
-        1024 * 1024 * 5,
-        vk::BufferUsageFlags::TRANSFER_SRC
-            | vk::BufferUsageFlags::TRANSFER_DST
-            | vk::BufferUsageFlags::STORAGE_BUFFER,
-        None,
-        &[],
-        None,
+    let cpu_storage = cpu_memory.create_storage_buffer(
+        1024 * 1024 * 5, Some(TRANSFER())
     );
-    let gpu_storage = cpu_memory.create_buffer(
-        1024 * 1024 * 5,
-        vk::BufferUsageFlags::TRANSFER_SRC
-            | vk::BufferUsageFlags::TRANSFER_DST
-            | vk::BufferUsageFlags::STORAGE_BUFFER,
-        None,
-        &[],
-        None,
+    let gpu_storage = gpu_memory.create_storage_buffer(
+        1024 * 1024 * 5, Some(TRANSFER())
     );
-    let cpu_uniform =
-        cpu_memory.create_uniform_buffer(1024 * 1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
+    let cpu_uniform = cpu_memory.create_uniform_buffer(1024 * 1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
     let v_buffer = gpu_memory.create_vertex_buffer(1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
     let i_buffer = gpu_memory.create_index_buffer(1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
 
@@ -328,10 +318,12 @@ fn main() {
                             println!("Recompiling shaders");
                             let code =
                                 HLSL::new(VERT_PATH, shaderc::ShaderKind::Vertex, "main", None);
+                                // SPV::new(VERT_PATH_SPV,  "main");
                             let vertex_shd =
                                 device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
                             let code =
                                 HLSL::new(FRAG_PATH, shaderc::ShaderKind::Fragment, "main", None);
+                                // SPV::new(FRAG_PATH_SPV, "main");
                             let fragment_shd =
                                 device.create_shader(&code, vk::ShaderStageFlags::FRAGMENT, None);
 
@@ -344,6 +336,7 @@ fn main() {
 
                             let code =
                                 HLSL::new(COMP_PATH, shaderc::ShaderKind::Compute, "main", None);
+                                // SPV::new(COMP_PATH_SPV, "main");
                             let compute_shd =
                                 device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
 
