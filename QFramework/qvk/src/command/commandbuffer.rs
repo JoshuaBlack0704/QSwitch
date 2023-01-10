@@ -366,27 +366,32 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
     fn bind_vertex_buffer(&self, factory: &impl super::BindVertexBufferFactory) {
         let buffers = [factory.buffer()];
         let offset = [factory.offset()];
-        unsafe{
-            self.device().cmd_bind_vertex_buffers(self.cmd(), 0, &buffers, &offset);
+        unsafe {
+            self.device()
+                .cmd_bind_vertex_buffers(self.cmd(), 0, &buffers, &offset);
         }
     }
 
     fn bind_index_buffer(&self, factory: &impl super::BindIndexBufferFactory) {
-        unsafe{
-            self.device().cmd_bind_index_buffer(self.cmd(), factory.buffer(), factory.offset(), factory.index_type());
+        unsafe {
+            self.device().cmd_bind_index_buffer(
+                self.cmd(),
+                factory.buffer(),
+                factory.offset(),
+                factory.index_type(),
+            );
         }
     }
 
     fn begin_render_pass(&self, factory: &impl super::BeginRenderPassFactory) {
         let info = vk::RenderPassBeginInfo::builder()
-        .render_pass(factory.renderpass())
-        .framebuffer(factory.framebuffer())
-        .render_area(factory.render_area())
-        .clear_values(factory.clear_values());
-        unsafe{
-            self
-            .device()
-            .cmd_begin_render_pass(self.cmd(), &info, factory.subpass_contents());
+            .render_pass(factory.renderpass())
+            .framebuffer(factory.framebuffer())
+            .render_area(factory.render_area())
+            .clear_values(factory.clear_values());
+        unsafe {
+            self.device()
+                .cmd_begin_render_pass(self.cmd(), &info, factory.subpass_contents());
         }
     }
 
@@ -395,25 +400,31 @@ impl<D: DeviceSource> CommandBufferSource for Arc<CommandBuffer<D>> {
     }
 
     fn end_render_pass(&self) {
-        unsafe{
+        unsafe {
             self.device().cmd_end_render_pass(self.cmd());
         }
     }
 
-    fn mem_barrier(&self, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2) {
+    fn mem_barrier(
+        &self,
+        src_stage: vk::PipelineStageFlags2,
+        src_access: vk::AccessFlags2,
+        dst_stage: vk::PipelineStageFlags2,
+        dst_access: vk::AccessFlags2,
+    ) {
         let barrier = [vk::MemoryBarrier2::builder()
-        .src_stage_mask(src_stage)
-        .src_access_mask(src_access)
-        .dst_stage_mask(dst_stage)
-        .dst_access_mask(dst_access)
-        .build()];
+            .src_stage_mask(src_stage)
+            .src_access_mask(src_access)
+            .dst_stage_mask(dst_stage)
+            .dst_access_mask(dst_access)
+            .build()];
 
-        let info = vk::DependencyInfo::builder()
-        .memory_barriers(&barrier);
+        let info = vk::DependencyInfo::builder().memory_barriers(&barrier);
 
-        unsafe{
-            self.device.device()
-            .cmd_pipeline_barrier2(self.cmd(), &info);
+        unsafe {
+            self.device
+                .device()
+                .cmd_pipeline_barrier2(self.cmd(), &info);
         }
     }
 }

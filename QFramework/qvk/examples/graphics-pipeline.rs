@@ -5,17 +5,10 @@ use qvk::{
     descriptor::{
         ApplyWriteFactory, DescriptorLayoutFactory, DescriptorPoolFactory, SetFactory, SetSource,
     },
-    image::{
-        ImageFactory, ImageResourceFactory, ImageResourceSource, ImageSource, ImageViewFactory,
-    },
     init::{
         device, instance,
         swapchain::{self, SwapchainSource},
         DeviceFactory, DeviceSource, InstanceFactory, Swapchain,
-    },
-    memory::{
-        buffer::{BufferFactory, BufferSegmentFactory, BufferSegmentSource},
-        MemoryFactory,
     },
     pipelines::{
         graphics::{
@@ -27,11 +20,11 @@ use qvk::{
     },
     queue::{QueueOps, SubmitInfoSource, SubmitSet},
     shader::{ShaderFactory, HLSL},
-    sync::SemaphoreFactory,
+    sync::SemaphoreFactory, memory::{allocators::{MemoryAllocatorFactory, ImageAllocatorFactory, BufferAllocatorFactory}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageSource, ImageResourceSource}, buffer::{BufferSegmentFactory, BufferSegmentSource}},
 };
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{
-    event::{Event, WindowEvent, VirtualKeyCode},
+    event::{Event, VirtualKeyCode, WindowEvent},
     event_loop::EventLoop,
     window::WindowBuilder,
 };
@@ -53,12 +46,24 @@ fn main() {
     let settings = swapchain::SettingsStore::default();
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
 
-    let gpu_memory = device
-        .create_memory(1024 * 1024 * 100, device.device_memory_index(), None)
-        .unwrap();
-    let cpu_memory = device
-        .create_memory(1024 * 1024 * 100, device.host_memory_index(), None)
-        .unwrap();
+    let gpu_memory = device.create_gpu_mem(1024 * 1024 * 10);
+    let cpu_memory = device.create_cpu_mem(1024 * 1024 * 10);
+    let color_image_alloc = gpu_memory.create_image_allocator_simple(
+        vk::Format::B8G8R8A8_SRGB,
+        vk::ImageUsageFlags::TRANSFER_SRC
+            | vk::ImageUsageFlags::TRANSFER_DST
+            | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+    );
+    let depth_image_alloc = gpu_memory.create_image_allocator_simple(
+        vk::Format::D32_SFLOAT,
+        vk::ImageUsageFlags::TRANSFER_SRC
+            | vk::ImageUsageFlags::TRANSFER_DST
+            | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+    );
+    let u_buff = cpu_memory.create_uniform_buffer(1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
+    let v_buff = cpu_memory.create_vertex_buffer(1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
+    let i_buff = cpu_memory.create_index_buffer(1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
+
     let extent = vk::Extent3D::builder()
         .width(1920)
         .height(1080)
@@ -75,17 +80,7 @@ fn main() {
         depth: 1.0,
         stencil: 0,
     };
-    let color_image = gpu_memory
-        .create_image(
-            &device,
-            vk::Format::B8G8R8A8_SRGB,
-            extent,
-            1,
-            1,
-            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
-            None,
-        )
-        .unwrap();
+    let color_image = color_image_alloc.create_image(extent);
     let color_rsc = color_image
         .create_resource(
             vk::Offset3D::default(),
@@ -111,17 +106,7 @@ fn main() {
         vk::AttachmentLoadOp::CLEAR,
         vk::AttachmentStoreOp::STORE,
     );
-    let depth_image = gpu_memory
-        .create_image(
-            &device,
-            vk::Format::D32_SFLOAT,
-            extent,
-            1,
-            1,
-            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-            None,
-        )
-        .unwrap();
+    let depth_image = depth_image_alloc.create_image(extent);
     let depth_rsc = depth_image
         .create_resource(
             vk::Offset3D::default(),
@@ -162,49 +147,19 @@ fn main() {
     ];
     let indices = [0, 1, 2];
 
-    let ubuff = cpu_memory
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::UNIFORM_BUFFER,
-            None,
-            None,
-        )
-        .unwrap();
-    let ubuff = ubuff.create_segment(1024, None).unwrap();
-    let v_buff = cpu_memory
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::VERTEX_BUFFER,
-            None,
-            None,
-        )
-        .unwrap();
-    let v_buff = v_buff.create_segment(1024, None).unwrap();
-    let i_buff = cpu_memory
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST
-                | vk::BufferUsageFlags::INDEX_BUFFER,
-            None,
-            None,
-        )
-        .unwrap();
-    let i_buff = i_buff.create_segment(1024, None).unwrap();
-    // ubuff.copy_from_ram(&perspective).unwrap();
+    let u_buff = u_buff.get_segment(1024, None);
+    let v_buff = v_buff.get_segment(1024, None);
+    let i_buff = i_buff.get_segment(1024, None);
+    // u_buff.copy_from_ram(&perspective).unwrap();
     v_buff.copy_from_ram(&triangle).unwrap();
     i_buff.copy_from_ram(&indices).unwrap();
 
     let dlayout = device.create_descriptor_layout(None);
-    let uniform_write = dlayout.form_binding(&ubuff, vk::ShaderStageFlags::VERTEX);
+    let uniform_write = dlayout.form_binding(&u_buff, vk::ShaderStageFlags::VERTEX);
     let layouts = [(&dlayout, 1)];
     let dpool = device.create_descriptor_pool(&layouts, None);
     let dset = dpool.create_set(&dlayout);
-    ubuff.apply(&uniform_write);
+    u_buff.apply(&uniform_write);
     dset.update();
 
     let mut subpass = SubpassDescription::new(vk::PipelineBindPoint::GRAPHICS, &depth_attch, None);
@@ -212,10 +167,13 @@ fn main() {
     subpass.add_depth_stencil_attachment(&depth_attch);
     subpass.add_dependency(
         None,
-        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+            | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
         vk::AccessFlags::NONE,
-        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
-        vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE, None
+        vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT
+            | vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS,
+        vk::AccessFlags::COLOR_ATTACHMENT_WRITE | vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+        None,
     );
     let attachments = [&color_attch, &depth_attch];
     let subpasses = [&subpass];
@@ -260,10 +218,14 @@ fn main() {
                 window_id: _,
                 event,
             } => {
-                if let WindowEvent::KeyboardInput { device_id: _, input, is_synthetic: _ } = event{
-                    if let Some(code) = input.virtual_keycode{
-                        if code == VirtualKeyCode::Space{
-                            
+                if let WindowEvent::KeyboardInput {
+                    device_id: _,
+                    input,
+                    is_synthetic: _,
+                } = event
+                {
+                    if let Some(code) = input.virtual_keycode {
+                        if code == VirtualKeyCode::Space {
                             println!("Recompiling shaders");
                             let code = HLSL::new(
                                 "examples/resources/shaders/gp-vertex.hlsl",
@@ -271,14 +233,16 @@ fn main() {
                                 "main",
                                 None,
                             );
-                            let vertex_shd = device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
+                            let vertex_shd =
+                                device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
                             let code = HLSL::new(
                                 "examples/resources/shaders/gp-fragment.hlsl",
                                 shaderc::ShaderKind::Fragment,
                                 "main",
                                 None,
                             );
-                            let fragment_shd = device.create_shader(&code, vk::ShaderStageFlags::FRAGMENT, None);
+                            let fragment_shd =
+                                device.create_shader(&code, vk::ShaderStageFlags::FRAGMENT, None);
 
                             let shaders = [&vertex_shd, &fragment_shd];
                             let state = &mut state;
@@ -286,8 +250,6 @@ fn main() {
                             graphics = device
                                 .create_graphics_pipeline(state, &playout, &renderpass, 0)
                                 .unwrap();
-                            
-                            
                         }
                     }
                 }
@@ -311,18 +273,19 @@ fn main() {
                         vk::ImageAspectFlags::COLOR,
                     )
                     .unwrap();
-                
-                let fov:f32 = 70.0 * (3.14 / 180.0);
-                let aspect:f32 = ImageResourceSource::extent(&color_tgt).width as f32 / ImageResourceSource::extent(&color_tgt).height as f32;
+
+                let fov: f32 = 70.0 * (3.14 / 180.0);
+                let aspect: f32 = ImageResourceSource::extent(&color_tgt).width as f32
+                    / ImageResourceSource::extent(&color_tgt).height as f32;
                 let n = 0.1;
                 let f = 10.0;
-                let x = glam::Vec4::new(1.0/((aspect) * (fov/2.0).tan()), 0.0, 0.0, 0.0);
-                let y = glam::Vec4::new(0.0, 1.0/(fov/2.0).tan(), 0.0, 0.0);
-                let z = glam::Vec4::new(0.0, 0.0, f/(f-n), 1.0);
-                let w = glam::Vec4::new(0.0, 0.0, -(f*n)/(f-n), 0.0);
-                let perspective = [glam::Mat4::from_cols(x,y,z,w)];
-                ubuff.copy_from_ram(&perspective).unwrap();
-                
+                let x = glam::Vec4::new(1.0 / ((aspect) * (fov / 2.0).tan()), 0.0, 0.0, 0.0);
+                let y = glam::Vec4::new(0.0, 1.0 / (fov / 2.0).tan(), 0.0, 0.0);
+                let z = glam::Vec4::new(0.0, 0.0, f / (f - n), 1.0);
+                let w = glam::Vec4::new(0.0, 0.0, -(f * n) / (f - n), 0.0);
+                let perspective = [glam::Mat4::from_cols(x, y, z, w)];
+                u_buff.copy_from_ram(&perspective).unwrap();
+
                 *ImageResourceSource::layout(&color_rsc) = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
                 let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
                 cmd.begin(None).unwrap();
@@ -364,7 +327,7 @@ fn main() {
 
                 let waits = [&render];
                 swapchain.wait_present(index as u32, Some(&waits));
-                
+
                 exe.reset_cmdpool();
             }
             _ => {}

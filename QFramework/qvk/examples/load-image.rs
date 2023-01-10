@@ -1,14 +1,12 @@
 use ash::vk;
-use qvk::image::ImageSource;
-use qvk::init::DeviceSource;
+use qvk::memory::allocators::{ImageAllocatorFactory, MemoryAllocatorFactory};
+use qvk::memory::image::{ImageFactory, ImageResource, ImageResourceFactory, ImageSource};
 use qvk::{
-    image::{ImageFactory, ImageResource, ImageResourceFactory},
     init::{
         device, instance,
         swapchain::{self, SwapchainSource},
         DeviceFactory, InstanceFactory, Swapchain,
     },
-    memory::MemoryFactory,
     queue::QueueFactory,
 };
 use raw_window_handle::HasRawDisplayHandle;
@@ -37,26 +35,22 @@ fn main() {
     let settings = swapchain::SettingsStore::default();
     let swapchain = Swapchain::new(&device, &settings, None).expect("Could not create swapchain");
 
-    let dev_mem = device
-        .create_memory(1024 * 1024 * 100, device.device_memory_index(), None)
-        .unwrap();
+    let dev_mem = device.create_gpu_mem(1024 * 1024);
+
+    let extent = vk::Extent3D::builder()
+        .width(1920)
+        .height(1080)
+        .depth(1)
+        .build();
 
     let image = dev_mem
-        .create_image(
-            &device,
-            vk::Format::B8G8R8A8_SRGB,
-            vk::Extent3D::builder()
-                .width(1920)
-                .height(1080)
-                .depth(1)
-                .build(),
-            1,
-            1,
+        .create_image_allocator_simple(
+            vk::Format::R8G8B8A8_SRGB,
             vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
-            None,
         )
-        .unwrap();
-    image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
+        .create_image(extent);
+
+    image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL);
     let resource = image
         .create_resource(
             vk::Offset3D::default(),

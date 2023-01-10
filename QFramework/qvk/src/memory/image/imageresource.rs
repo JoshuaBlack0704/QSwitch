@@ -5,21 +5,16 @@ use image::{self, EncodableLayout};
 use ash::vk;
 
 use crate::command::CommandBufferFactory;
-use crate::image::{ImageResourceSource, ImageSource};
-use crate::init::{DeviceSource, InstanceSource};
-use crate::memory::buffer::{BufferSegmentFactory, BufferSource};
-use crate::{
-    command::{
-        BufferCopyFactory, CommandBufferSource, Executor, ImageCopyFactory, ImageTransitionFactory,
-    },
-    image::ImageResource,
-    memory::{
-        buffer::{BufferFactory, BufferSegmentSource},
-        MemoryFactory, MemorySource,
-    },
+use crate::command::{
+    BufferCopyFactory, CommandBufferSource, Executor, ImageCopyFactory, ImageTransitionFactory,
 };
+use crate::init::{DeviceSource, InstanceSource};
+use crate::memory::allocators::{
+    BufferAllocatorFactory, ImageAllocatorFactory, MemoryAllocatorFactory,
+};
+use crate::memory::buffer::{BufferSegmentFactory, BufferSegmentSource};
 
-use super::{ImageFactory, ImageResourceFactory};
+use super::{ImageFactory, ImageResource, ImageResourceFactory, ImageResourceSource, ImageSource};
 
 #[derive(Debug)]
 pub enum ImageResourceCreateError {
@@ -88,26 +83,13 @@ impl<Img: ImageSource + DeviceSource + InstanceSource + Clone> ImageResource<Img
             .depth(1)
             .build();
 
-        let dev_mem = tgt
-            .image
-            .create_memory(
-                bytes.len() as u64 * 2,
-                tgt.image.device_memory_index(),
-                None,
-            )
-            .unwrap();
-        let image = dev_mem
-            .create_image(
-                &tgt.image,
-                vk::Format::R8G8B8A8_SRGB,
-                image_extent,
-                1,
-                1,
-                vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
-                None,
-            )
-            .unwrap();
-        image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
+        let dev_mem = tgt.image.create_gpu_mem(1024 * 1024 * 10);
+        let image_alloc = dev_mem.create_image_allocator_simple(
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::TRANSFER_DST,
+        );
+        let image = image_alloc.create_image(image_extent);
+        image.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL);
         let resource = image
             .create_resource(
                 vk::Offset3D::default(),
@@ -117,25 +99,21 @@ impl<Img: ImageSource + DeviceSource + InstanceSource + Clone> ImageResource<Img
             )
             .unwrap();
 
-        let host_mem = tgt
-            .image
-            .create_memory(bytes.len() as u64 * 2, tgt.image.host_memory_index(), None)
-            .unwrap();
-        let buf = host_mem
-            .create_buffer(
-                bytes.len() as u64 * 2,
-                vk::BufferUsageFlags::STORAGE_BUFFER
-                    | vk::BufferUsageFlags::TRANSFER_SRC
-                    | vk::BufferUsageFlags::TRANSFER_DST,
-                None,
-                None,
-            )
-            .unwrap();
-        let seg = buf.create_segment(bytes.len() as u64, None).unwrap();
+        let host_mem = tgt.image.create_cpu_mem(bytes.len() as u64 * 2);
+        let buf = host_mem.create_buffer(
+            1024 * 1024,
+            vk::BufferUsageFlags::STORAGE_BUFFER
+                | vk::BufferUsageFlags::TRANSFER_SRC
+                | vk::BufferUsageFlags::TRANSFER_DST,
+            None,
+            &[],
+            None,
+        );
+        let seg = buf.get_segment(bytes.len() as u64, None);
         seg.copy_from_ram(&bytes).unwrap();
         seg.copy_to_image_internal(&resource, None).unwrap();
 
-        image.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
+        image.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
         resource
             .blit_to_image_internal(tgt, vk::Filter::LINEAR)
             .unwrap();
@@ -161,7 +139,7 @@ impl<Img: ImageSource + DeviceSource + InstanceSource + Clone> ImageResourceSour
         self.layout.lock().unwrap()
     }
 
-    fn copy_to_buffer_internal<BP: BufferCopyFactory + BufferSource>(
+    fn copy_to_buffer_internal<BP: BufferCopyFactory>(
         &self,
         dst: &BP,
         buffer_addressing: Option<(u32, u32)>,
@@ -280,33 +258,8 @@ impl<Img: ImageSource + DeviceSource + InstanceSource> ImageCopyFactory
 }
 
 impl<Img: ImageSource + DeviceSource + InstanceSource> ImageSource for Arc<ImageResource<Img>> {
-    fn transition<C: CommandBufferSource>(
-        &self,
-        cmd: &C,
-        new_layout: vk::ImageLayout,
-        src_stage: Option<vk::PipelineStageFlags2>,
-        dst_stage: Option<vk::PipelineStageFlags2>,
-        src_access: Option<vk::AccessFlags2>,
-        dst_access: Option<vk::AccessFlags2>,
-        subresources: Option<vk::ImageSubresourceRange>,
-    ) {
-        self.image.transition(
-            cmd,
-            new_layout,
-            src_stage,
-            dst_stage,
-            src_access,
-            dst_access,
-            subresources,
-        );
-    }
-
-    fn internal_transistion(
-        &self,
-        new_layout: vk::ImageLayout,
-        subresources: Option<vk::ImageSubresourceRange>,
-    ) {
-        self.image.internal_transistion(new_layout, subresources);
+    fn internal_transistion(&self, new_layout: vk::ImageLayout) {
+        self.image.internal_transistion(new_layout);
     }
 
     fn image(&self) -> &vk::Image {
@@ -359,22 +312,6 @@ impl<Img: ImageSource + DeviceSource + InstanceSource> InstanceSource for Arc<Im
 
     fn entry(&self) -> &ash::Entry {
         self.image.entry()
-    }
-}
-
-impl<Img: ImageSource + DeviceSource + InstanceSource + MemorySource> MemorySource
-    for Arc<ImageResource<Img>>
-{
-    fn partition(
-        &self,
-        size: u64,
-        alignment: Option<u64>,
-    ) -> Result<crate::memory::Partition, crate::memory::partitionsystem::PartitionError> {
-        self.image.partition(size, alignment)
-    }
-
-    fn memory(&self) -> &vk::DeviceMemory {
-        self.image.memory()
     }
 }
 

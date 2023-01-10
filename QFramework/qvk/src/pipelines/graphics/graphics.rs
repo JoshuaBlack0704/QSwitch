@@ -4,16 +4,16 @@ use ash::vk;
 use log::{debug, info};
 
 use crate::{
-    init::DeviceSource,
-    pipelines::PipelineLayoutSource,
-    shader::ShaderSource, command::BindPipelineFactory,
+    command::BindPipelineFactory, init::DeviceSource, pipelines::PipelineLayoutSource,
+    shader::ShaderSource,
 };
 
 use super::{
     ColorBlendAttachmentFactory, ColorBlendStateFactory, DepthStencilStateFactory,
     DynamicStateFactory, Graphics, GraphicsPipelineFactory, GraphicsPipelineSource,
     GraphicsPipelineState, InputStateFactory, MultisampleStateFactory, RasterizationStateFactory,
-    RenderPassSource, TesselationStateFactory, VertexStateFactory, ViewportStateFactory, RenderpassAttachmentSource,
+    RenderPassSource, RenderpassAttachmentSource, TesselationStateFactory, VertexStateFactory,
+    ViewportStateFactory,
 };
 
 pub struct State<Shd: ShaderSource> {
@@ -39,7 +39,7 @@ pub struct State<Shd: ShaderSource> {
 }
 
 impl<
-        A:RenderpassAttachmentSource,
+        A: RenderpassAttachmentSource,
         D: DeviceSource + Clone,
         R: RenderPassSource<A> + Clone,
         L: PipelineLayoutSource + Clone,
@@ -123,7 +123,13 @@ impl<
     }
 }
 
-impl<A:RenderpassAttachmentSource, D: DeviceSource, R: RenderPassSource<A>, L: PipelineLayoutSource> Drop for Graphics<D, A, R, L> {
+impl<
+        A: RenderpassAttachmentSource,
+        D: DeviceSource,
+        R: RenderPassSource<A>,
+        L: PipelineLayoutSource,
+    > Drop for Graphics<D, A, R, L>
+{
     fn drop(&mut self) {
         debug!("Destroyed graphics pipeline {:?}", self.pipeline);
         unsafe {
@@ -308,12 +314,22 @@ impl<Shd: ShaderSource + Clone> State<Shd> {
     }
 }
 
-impl<A:RenderpassAttachmentSource, D: DeviceSource, L: PipelineLayoutSource, R: RenderPassSource<A>> GraphicsPipelineSource
-    for Arc<Graphics<D, A, R, L>>
+impl<
+        A: RenderpassAttachmentSource,
+        D: DeviceSource,
+        L: PipelineLayoutSource,
+        R: RenderPassSource<A>,
+    > GraphicsPipelineSource for Arc<Graphics<D, A, R, L>>
 {
 }
 
-impl<A:RenderpassAttachmentSource, D:DeviceSource, L:PipelineLayoutSource, R:RenderPassSource<A>> BindPipelineFactory for Arc<Graphics<D, A, R,L>>{
+impl<
+        A: RenderpassAttachmentSource,
+        D: DeviceSource,
+        L: PipelineLayoutSource,
+        R: RenderPassSource<A>,
+    > BindPipelineFactory for Arc<Graphics<D, A, R, L>>
+{
     fn layout(&self) -> vk::PipelineLayout {
         self._layout.layout()
     }
@@ -370,7 +386,7 @@ impl VertexStateFactory for DefaultVertex {
         vec![att1, att2]
     }
 }
-impl<V:VertexStateFactory + Default> GraphicsDefaultState<V> {
+impl<V: VertexStateFactory + Default> GraphicsDefaultState<V> {
     pub fn new(viewport_extent: vk::Extent3D) -> GraphicsDefaultState<V> {
         let viewport = vk::Viewport::builder()
             .x(0.0)
@@ -691,10 +707,8 @@ impl<Shd: ShaderSource + Clone> GraphicsPipelineState for State<Shd> {
     }
 }
 
-impl Default for DefaultVertex{
+impl Default for DefaultVertex {
     fn default() -> Self {
-        Self{
-            data: [0.0;6],
-        }
+        Self { data: [0.0; 6] }
     }
 }

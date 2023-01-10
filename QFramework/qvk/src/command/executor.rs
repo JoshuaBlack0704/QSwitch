@@ -74,7 +74,6 @@ impl<D: DeviceSource + Clone> QueueOps for Executor<D> {
     ) -> Result<(), vk::Result> {
         self.queue.gpu_submit(submits)
     }
-
 }
 
 impl<D: DeviceSource + Clone> CommandBufferFactory<Arc<CommandBuffer<D>>> for Executor<D> {

@@ -96,7 +96,6 @@ impl PartitionSystem {
         self.partitions = new_queue;
         res
     }
-    
 }
 
 impl Partition {

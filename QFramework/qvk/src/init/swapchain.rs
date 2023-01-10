@@ -3,15 +3,15 @@ use std::sync::{Arc, Mutex};
 use ash::vk;
 use log::{debug, info};
 
+use crate::command::{CommandBufferFactory, CommandBufferSource, Executor, ImageTransitionFactory};
+use crate::memory::image::{ImageResourceFactory, ImageResourceSource, ImageSource};
 use crate::sync::SemaphoreFactory;
 use crate::{
-    image::{Image, ImageResourceFactory, ImageResourceSource, ImageSource},
-    memory::{Memory, PartitionSystem},
     queue::{Queue, QueueFactory, QueueOps, QueueSource},
     sync::{self, FenceSource, SemaphoreSource},
 };
 
-use super::{DeviceSource, InstanceSource, Swapchain};
+use super::{DeviceSource, InstanceSource, Swapchain, SwapchainImage};
 
 pub trait SwapchainSettingsStore {
     fn extensions(&self) -> Option<Vec<SwapchainCreateExtension>>;
@@ -35,13 +35,13 @@ pub trait SwapchainSource<D: DeviceSource> {
         &self,
         timeout: u64,
         fence: Option<&F>,
-       semaphore: Option<&S>,
+        semaphore: Option<&S>,
     ) -> u32;
-    fn gpu_aquire_next_image<S:SemaphoreSource>(&self, timeout: u64, semaphore: &S) -> u32;
-    fn cpu_aquire_next_image<F:FenceSource>(&self, timeout: u64, fence: &F) -> u32;
-    fn resize(&self, size: Option<(u32,u32)>);
+    fn gpu_aquire_next_image<S: SemaphoreSource>(&self, timeout: u64, semaphore: &S) -> u32;
+    fn cpu_aquire_next_image<F: FenceSource>(&self, timeout: u64, fence: &F) -> u32;
+    fn resize(&self, size: Option<(u32, u32)>);
     fn extent(&self) -> vk::Extent3D;
-    fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>>;
+    fn images(&self) -> Vec<SwapchainImage<D>>;
     fn present_image<IR: ImageResourceSource + ImageSource, Q: QueueOps>(
         &self,
         src: &IR,
@@ -176,10 +176,14 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         info = info.image_color_space(chosen_format.color_space);
 
         let mut adjusted_extent = capabilities.current_extent;
-        if adjusted_extent.width > capabilities.max_image_extent.width || adjusted_extent.width < capabilities.min_image_extent.width{
+        if adjusted_extent.width > capabilities.max_image_extent.width
+            || adjusted_extent.width < capabilities.min_image_extent.width
+        {
             adjusted_extent.width = capabilities.min_image_extent.width;
         }
-        if adjusted_extent.height > capabilities.max_image_extent.height || adjusted_extent.height < capabilities.min_image_extent.height{
+        if adjusted_extent.height > capabilities.max_image_extent.height
+            || adjusted_extent.height < capabilities.min_image_extent.height
+        {
             adjusted_extent.height = capabilities.min_image_extent.height;
         }
 
@@ -287,15 +291,18 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         info.image_extent = capabilities.current_extent;
         info.old_swapchain = *swapchain_lock;
         let mut adjusted_extent = capabilities.current_extent;
-        if let Some((width, height)) = extent{
+        if let Some((width, height)) = extent {
             adjusted_extent.width = width;
             adjusted_extent.height = height;
-        }
-        else{
-            if adjusted_extent.width > capabilities.max_image_extent.width || adjusted_extent.width < capabilities.min_image_extent.width{
+        } else {
+            if adjusted_extent.width > capabilities.max_image_extent.width
+                || adjusted_extent.width < capabilities.min_image_extent.width
+            {
                 adjusted_extent.width = capabilities.min_image_extent.width;
             }
-            if adjusted_extent.height > capabilities.max_image_extent.height || adjusted_extent.height < capabilities.min_image_extent.height{
+            if adjusted_extent.height > capabilities.max_image_extent.height
+                || adjusted_extent.height < capabilities.min_image_extent.height
+            {
                 adjusted_extent.height = capabilities.min_image_extent.height;
             }
         }
@@ -383,16 +390,16 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             .build()
     }
 
-    fn images(&self) -> Vec<Arc<Image<D, Arc<Memory<D, PartitionSystem>>>>> {
+    fn images(&self) -> Vec<SwapchainImage<D>> {
         let mut images = vec![];
-        let info = self.create_info.lock().unwrap();
         let lock = self.images.lock().unwrap();
         for img in lock.iter() {
-            let img = Image::<D, Arc<Memory<D, PartitionSystem>>>::from_swapchain_image(
-                &self.device,
-                *img,
-                info.image_extent,
-            );
+            let img = SwapchainImage {
+                device: self.device.clone(),
+                image: *img,
+                layout: Arc::new(Mutex::new(vk::ImageLayout::UNDEFINED)),
+                extent: self.extent(),
+            };
             images.push(img);
         }
         images
@@ -411,8 +418,8 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
             self.aquire_next_image(u64::MAX, None::<&Arc<sync::Fence<D>>>, Some(&aquire));
         let dst = &images[dst_index as usize];
 
-        src.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL, None);
-        dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL, None);
+        src.internal_transistion(vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+        dst.internal_transistion(vk::ImageLayout::TRANSFER_DST_OPTIMAL);
 
         let dst_res = dst
             .create_resource(
@@ -425,14 +432,14 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         src.blit_to_image_internal(&dst_res, vk::Filter::LINEAR)
             .unwrap();
 
-        dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR, None);
+        dst.internal_transistion(vk::ImageLayout::PRESENT_SRC_KHR);
 
         let waits = [&aquire];
         self.present(dst_index, Some(&waits));
         queue.wait_idle();
     }
 
-    fn gpu_aquire_next_image<Sem:SemaphoreSource>(&self, timeout: u64, semaphore: &Sem) -> u32 {
+    fn gpu_aquire_next_image<Sem: SemaphoreSource>(&self, timeout: u64, semaphore: &Sem) -> u32 {
         let mut swapchain = *self.swapchain.lock().unwrap();
 
         let mut next_image = unsafe {
@@ -467,14 +474,19 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         swapchain = *self.swapchain.lock().unwrap();
         let (next_image, _) = unsafe {
             self.swapchain_loader
-                .acquire_next_image(swapchain, timeout, *semaphore.semaphore(), vk::Fence::null())
+                .acquire_next_image(
+                    swapchain,
+                    timeout,
+                    *semaphore.semaphore(),
+                    vk::Fence::null(),
+                )
                 .unwrap()
         };
 
         next_image
     }
 
-    fn cpu_aquire_next_image<F:FenceSource>(&self, timeout: u64, fence: &F) -> u32 {
+    fn cpu_aquire_next_image<F: FenceSource>(&self, timeout: u64, fence: &F) -> u32 {
         let mut swapchain = *self.swapchain.lock().unwrap();
 
         let mut next_image = unsafe {
@@ -508,12 +520,9 @@ impl<D: DeviceSource + InstanceSource + Clone, S: SwapchainSettingsStore + Clone
         self.resize(None);
         swapchain = *self.swapchain.lock().unwrap();
         let (next_image, _) = unsafe {
-            self.swapchain_loader.acquire_next_image(
-                swapchain,
-                timeout,
-                vk::Semaphore::null(),
-                *fence.fence(),
-            ).unwrap()
+            self.swapchain_loader
+                .acquire_next_image(swapchain, timeout, vk::Semaphore::null(), *fence.fence())
+                .unwrap()
         };
 
         next_image
@@ -700,5 +709,125 @@ impl<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore, Q: QueueSource
 
     fn entry(&self) -> &ash::Entry {
         self.device.entry()
+    }
+}
+
+impl<D: DeviceSource + Clone> ImageSource for SwapchainImage<D> {
+    fn internal_transistion(&self, new_layout: vk::ImageLayout) {
+        {
+            let old_layout = *ImageSource::layout(self).lock().unwrap();
+            if old_layout == new_layout {
+                return;
+            }
+        }
+        let executor = Executor::new(&self.device, vk::QueueFlags::GRAPHICS);
+        let cmd = executor.next_cmd(vk::CommandBufferLevel::PRIMARY);
+        cmd.begin(None).unwrap();
+        cmd.transition_img(
+            self,
+            new_layout,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::AccessFlags2::MEMORY_WRITE,
+            vk::PipelineStageFlags2::TRANSFER,
+            vk::AccessFlags2::MEMORY_READ,
+        );
+        cmd.end().unwrap();
+        executor.wait_submit_internal();
+    }
+
+    fn image(&self) -> &vk::Image {
+        &self.image
+    }
+
+    fn layout(&self) -> Arc<Mutex<vk::ImageLayout>> {
+        self.layout.clone()
+    }
+
+    fn mip_levels(&self) -> u32 {
+        1
+    }
+
+    fn array_layers(&self) -> u32 {
+        1
+    }
+
+    fn extent(&self) -> vk::Extent3D {
+        self.extent
+    }
+}
+
+impl<D: DeviceSource> DeviceSource for SwapchainImage<D> {
+    fn device(&self) -> &ash::Device {
+        self.device.device()
+    }
+
+    fn surface(&self) -> &Option<vk::SurfaceKHR> {
+        self.device.surface()
+    }
+
+    fn physical_device(&self) -> &crate::init::PhysicalDeviceData {
+        self.device.physical_device()
+    }
+
+    fn get_queue(&self, target_flags: vk::QueueFlags) -> Option<(vk::Queue, u32)> {
+        self.device.get_queue(target_flags)
+    }
+
+    fn grahics_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.grahics_queue()
+    }
+
+    fn compute_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.compute_queue()
+    }
+
+    fn transfer_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.transfer_queue()
+    }
+
+    fn present_queue(&self) -> Option<(vk::Queue, u32)> {
+        self.device.present_queue()
+    }
+
+    fn memory_type(&self, properties: vk::MemoryPropertyFlags) -> u32 {
+        self.device.memory_type(properties)
+    }
+
+    fn device_memory_index(&self) -> u32 {
+        self.device.device_memory_index()
+    }
+
+    fn host_memory_index(&self) -> u32 {
+        self.device.host_memory_index()
+    }
+}
+
+impl<D: DeviceSource + InstanceSource> InstanceSource for SwapchainImage<D> {
+    fn instance(&self) -> &ash::Instance {
+        self.device.instance()
+    }
+
+    fn entry(&self) -> &ash::Entry {
+        self.device.entry()
+    }
+}
+
+impl<D: DeviceSource> ImageTransitionFactory for SwapchainImage<D> {
+    fn image(&self) -> vk::Image {
+        self.image
+    }
+
+    fn range(&self) -> vk::ImageSubresourceRange {
+        vk::ImageSubresourceRange::builder()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .base_mip_level(0)
+            .level_count(1)
+            .base_array_layer(0)
+            .layer_count(1)
+            .build()
+    }
+
+    fn old_layout(&self) -> Arc<Mutex<vk::ImageLayout>> {
+        self.layout.clone()
     }
 }

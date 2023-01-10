@@ -61,16 +61,16 @@ pub trait ImageTransitionFactory {
     fn range(&self) -> vk::ImageSubresourceRange;
     fn old_layout(&self) -> Arc<Mutex<vk::ImageLayout>>;
 }
-pub trait BindVertexBufferFactory{
+pub trait BindVertexBufferFactory {
     fn buffer(&self) -> vk::Buffer;
     fn offset(&self) -> u64;
 }
-pub trait BindIndexBufferFactory{
+pub trait BindIndexBufferFactory {
     fn buffer(&self) -> vk::Buffer;
     fn offset(&self) -> u64;
     fn index_type(&self) -> vk::IndexType;
 }
-pub trait BeginRenderPassFactory{
+pub trait BeginRenderPassFactory {
     fn renderpass(&self) -> vk::RenderPass;
     fn framebuffer(&self) -> vk::Framebuffer;
     fn render_area(&self) -> vk::Rect2D;
@@ -82,7 +82,13 @@ pub trait CommandBufferSource {
     fn begin(&self, info: Option<vk::CommandBufferBeginInfo>) -> Result<(), vk::Result>;
     fn end(&self) -> Result<(), vk::Result>;
     fn barrier(&self, info: vk::DependencyInfo);
-    fn mem_barrier(&self, src_stage: vk::PipelineStageFlags2, src_access: vk::AccessFlags2, dst_stage: vk::PipelineStageFlags2, dst_access: vk::AccessFlags2);
+    fn mem_barrier(
+        &self,
+        src_stage: vk::PipelineStageFlags2,
+        src_access: vk::AccessFlags2,
+        dst_stage: vk::PipelineStageFlags2,
+        dst_access: vk::AccessFlags2,
+    );
     fn bind_pipeline<BP: BindPipelineFactory>(&self, pipeline: &BP);
     fn begin_render_pass(&self, factory: &impl BeginRenderPassFactory);
     fn draw_indexed(&self);

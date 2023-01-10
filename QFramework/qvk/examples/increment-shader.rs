@@ -2,7 +2,8 @@ use std::mem::size_of;
 
 use ash::vk;
 use qvk::descriptor::SetFactory;
-use qvk::init::DeviceSource;
+use qvk::memory::allocators::{BufferAllocatorFactory, MemoryAllocatorFactory, TRANSFER};
+use qvk::memory::buffer::{BufferSegmentFactory, BufferSegmentSource};
 use qvk::{
     command::{CommandBufferFactory, CommandBufferSource, Executor},
     descriptor::{
@@ -10,10 +11,6 @@ use qvk::{
         SetSource,
     },
     init::{device, instance, DeviceFactory, InstanceFactory},
-    memory::{
-        buffer::{BufferFactory, BufferSegmentFactory, BufferSegmentSource},
-        MemoryFactory,
-    },
     pipelines::{ComputePipelineFactory, PipelineLayoutFactory},
     shader::{ShaderFactory, HLSL},
 };
@@ -28,39 +25,17 @@ fn main() {
     settings.add_extension(ash::extensions::khr::BufferDeviceAddress::name().as_ptr());
     let device = settings.create_device().expect("Could not create device");
 
-    let host_mem = device
-        .create_memory(1024 * 1024 * 10, device.host_memory_index(), None)
-        .unwrap();
+    let host_mem = device.create_cpu_mem(1024 * 1024 * 10);
+    let storage = host_mem.create_storage_buffer(1024 * 1024, Some(TRANSFER()));
+    let uniform = host_mem.create_uniform_buffer(1024, Some(TRANSFER()));
 
     let src = [0u32; 100];
     let mut dst = [10u32; 100];
     let data = [src.len() as u32];
 
-    let storage = host_mem
-        .create_buffer(
-            1024 * 1024,
-            vk::BufferUsageFlags::STORAGE_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST,
-            None,
-            None,
-        )
-        .unwrap();
-    let storage_access = storage
-        .create_segment((size_of::<u32>() * src.len()) as u64, None)
-        .unwrap();
+    let storage_access = storage.get_segment((size_of::<u32>() * src.len()) as u64, None);
     storage_access.copy_from_ram(&src).unwrap();
-    let uniform = host_mem
-        .create_buffer(
-            1024,
-            vk::BufferUsageFlags::UNIFORM_BUFFER
-                | vk::BufferUsageFlags::TRANSFER_SRC
-                | vk::BufferUsageFlags::TRANSFER_DST,
-            None,
-            None,
-        )
-        .unwrap();
-    let uniform_access = uniform.create_segment(10, None).unwrap();
+    let uniform_access = uniform.get_segment(10, None);
     uniform_access.copy_from_ram(&data).unwrap();
 
     let dlayout = device.create_descriptor_layout(None);

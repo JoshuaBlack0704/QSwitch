@@ -1,69 +1,22 @@
-use std::{
-    ffi::c_void,
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
 use std::sync::MutexGuard;
 
-use crate::command::CommandBufferSource;
-use crate::image::imageresource::ImageResourceMemOpError;
+use crate::command::{BufferCopyFactory, ImageCopyFactory};
 use crate::init::{DeviceSource, InstanceSource};
-use crate::memory::buffer::BufferSource;
-use crate::memory::MemorySource;
-use crate::{
-    command::{BufferCopyFactory, ImageCopyFactory},
-    memory::Partition,
-};
 
-use self::{image::ImageCreateError, imageresource::ImageResourceCreateError};
+use self::imageresource::{ImageResourceCreateError, ImageResourceMemOpError};
+
+use super::allocators::MemPart;
 
 pub mod image;
-pub trait ImageFactory<D: DeviceSource, Img: ImageSource> {
-    fn image_type(&self) -> vk::ImageType {
-        vk::ImageType::TYPE_2D
-    }
-    fn samples(&self) -> vk::SampleCountFlags {
-        vk::SampleCountFlags::TYPE_1
-    }
-    fn tiling(&self) -> vk::ImageTiling {
-        vk::ImageTiling::OPTIMAL
-    }
-    fn share(&self) -> Option<Vec<u32>> {
-        None
-    }
-    fn create_flags(&self) -> Option<vk::ImageCreateFlags> {
-        None
-    }
-    fn create_image(
-        &self,
-        device_source: &D,
-        format: vk::Format,
-        extent: vk::Extent3D,
-        levels: u32,
-        layers: u32,
-        usage: vk::ImageUsageFlags,
-        extensions: Option<*const c_void>,
-    ) -> Result<Img, ImageCreateError>;
+pub trait ImageFactory {
+    type Image: ImageSource;
+    fn create_image(&self, extent: vk::Extent3D) -> Self::Image;
 }
 pub trait ImageSource {
-    /// Returns the old layout
-    fn transition<C: CommandBufferSource>(
-        &self,
-        cmd: &C,
-        new_layout: vk::ImageLayout,
-        src_stage: Option<vk::PipelineStageFlags2>,
-        dst_stage: Option<vk::PipelineStageFlags2>,
-        src_access: Option<vk::AccessFlags2>,
-        dst_access: Option<vk::AccessFlags2>,
-        subresources: Option<vk::ImageSubresourceRange>,
-    );
-    /// Creates and uses an internal command pool and buffer
-    fn internal_transistion(
-        &self,
-        new_layout: vk::ImageLayout,
-        subresources: Option<vk::ImageSubresourceRange>,
-    );
+    fn internal_transistion(&self, new_layout: vk::ImageLayout);
     fn image(&self) -> &vk::Image;
     fn layout(&self) -> Arc<Mutex<vk::ImageLayout>>;
     fn mip_levels(&self) -> u32;
@@ -71,10 +24,9 @@ pub trait ImageSource {
     fn extent(&self) -> vk::Extent3D;
 }
 
-pub struct Image<D: DeviceSource, M: MemorySource + DeviceSource> {
+pub struct Image<D: DeviceSource> {
     device: D,
-    memory: Option<M>,
-    _partition: Option<Partition>,
+    _mem_part: MemPart,
     image: vk::Image,
     create_info: vk::ImageCreateInfo,
     current_layout: Arc<Mutex<vk::ImageLayout>>,
@@ -95,7 +47,7 @@ pub trait ImageResourceSource {
     fn offset(&self) -> vk::Offset3D;
     fn extent(&self) -> vk::Extent3D;
     fn layout(&self) -> MutexGuard<vk::ImageLayout>;
-    fn copy_to_buffer_internal<BP: BufferCopyFactory + BufferSource>(
+    fn copy_to_buffer_internal<BP: BufferCopyFactory>(
         &self,
         dst: &BP,
         buffer_addressing: Option<(u32, u32)>,

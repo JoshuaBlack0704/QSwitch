@@ -3,11 +3,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ash::vk;
 use log::{debug, info};
 
-use crate::{image::ImageViewSource, init::DeviceSource, command::BeginRenderPassFactory};
+use crate::{command::BeginRenderPassFactory, init::DeviceSource, memory::image::ImageViewSource};
 
 use super::{
-    RenderPassAttachment, RenderPassSource, Renderpass, RenderpassAttachmentSource,
-    RenderpassFactory, SubpassDescription, SubpassDescriptionSource, FramebufferFactory, Framebuffer, FramebufferSource,
+    Framebuffer, FramebufferFactory, FramebufferSource, RenderPassAttachment, RenderPassSource,
+    Renderpass, RenderpassAttachmentSource, RenderpassFactory, SubpassDescription,
+    SubpassDescriptionSource,
 };
 
 impl<D: DeviceSource + Clone, A: RenderpassAttachmentSource + Clone>
@@ -107,51 +108,62 @@ impl<D: DeviceSource + Clone, A: RenderpassAttachmentSource + Clone>
     }
 }
 
-impl<A:RenderpassAttachmentSource + Clone, R:RenderPassSource<A> + DeviceSource + Clone> FramebufferFactory<Arc<Framebuffer<A, R>>> for R{
-    fn create_framebuffer(&self, render_area: vk::Rect2D, flags: Option<vk::FramebufferCreateFlags>) -> Arc<Framebuffer<A, R>> {
+impl<A: RenderpassAttachmentSource + Clone, R: RenderPassSource<A> + DeviceSource + Clone>
+    FramebufferFactory<Arc<Framebuffer<A, R>>> for R
+{
+    fn create_framebuffer(
+        &self,
+        render_area: vk::Rect2D,
+        flags: Option<vk::FramebufferCreateFlags>,
+    ) -> Arc<Framebuffer<A, R>> {
         let mut info = vk::FramebufferCreateInfo::builder();
-        if let Some(flags) = flags{
+        if let Some(flags) = flags {
             info = info.flags(flags);
         }
-        let attachments:Vec<vk::ImageView> = self.attachments().iter().map(|a| a.view()).collect();
+        let attachments: Vec<vk::ImageView> = self.attachments().iter().map(|a| a.view()).collect();
         info = info
-        .render_pass(self.renderpass())
-        .attachments(&attachments)
-        .width(render_area.extent.width)
-        .height(render_area.extent.height)
-        .layers(1);
+            .render_pass(self.renderpass())
+            .attachments(&attachments)
+            .width(render_area.extent.width)
+            .height(render_area.extent.height)
+            .layers(1);
 
         let framebuffer;
-        unsafe{
+        unsafe {
             framebuffer = self.device().create_framebuffer(&info, None).unwrap();
         }
         info!("Created framebuffer {:?}", framebuffer);
 
-        Arc::new(
-            Framebuffer{
-                renderpass: self.clone(),
-                _attachments: self.attachments().to_vec(),
-                framebuffer,
-                render_area,
-                clear_vales: self.clear_values(),
-            }
-        )
+        Arc::new(Framebuffer {
+            renderpass: self.clone(),
+            _attachments: self.attachments().to_vec(),
+            framebuffer,
+            render_area,
+            clear_vales: self.clear_values(),
+        })
     }
 }
 
-impl<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource> FramebufferSource for Arc<Framebuffer<A,R>>{
-    
+impl<A: RenderpassAttachmentSource, R: RenderPassSource<A> + DeviceSource> FramebufferSource
+    for Arc<Framebuffer<A, R>>
+{
 }
-impl<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource> Drop for Framebuffer<A,R>{
+impl<A: RenderpassAttachmentSource, R: RenderPassSource<A> + DeviceSource> Drop
+    for Framebuffer<A, R>
+{
     fn drop(&mut self) {
         debug!("Destroyed framebuffer {:?}", self.framebuffer);
-        unsafe{
-            self.renderpass.device().destroy_framebuffer(self.framebuffer, None);
+        unsafe {
+            self.renderpass
+                .device()
+                .destroy_framebuffer(self.framebuffer, None);
         }
     }
 }
 
-impl<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource> BeginRenderPassFactory for Arc<Framebuffer<A,R>>{
+impl<A: RenderpassAttachmentSource, R: RenderPassSource<A> + DeviceSource> BeginRenderPassFactory
+    for Arc<Framebuffer<A, R>>
+{
     fn renderpass(&self) -> vk::RenderPass {
         self.renderpass.renderpass()
     }
@@ -186,7 +198,6 @@ impl<D: DeviceSource, A: RenderpassAttachmentSource> RenderPassSource<A> for Arc
         self.image_views.iter().map(|a| a.clear_value()).collect()
     }
 }
-
 
 impl<D: DeviceSource, A: RenderpassAttachmentSource> Drop for Renderpass<D, A> {
     fn drop(&mut self) {
@@ -469,7 +480,7 @@ impl<A: RenderpassAttachmentSource> SubpassDescriptionSource for SubpassDescript
         None
     }
 }
-impl<A:RenderpassAttachmentSource, D: DeviceSource> DeviceSource for Arc<Renderpass<D,A>> {
+impl<A: RenderpassAttachmentSource, D: DeviceSource> DeviceSource for Arc<Renderpass<D, A>> {
     fn device(&self) -> &ash::Device {
         self.device.device()
     }

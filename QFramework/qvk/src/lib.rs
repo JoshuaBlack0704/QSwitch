@@ -4,19 +4,17 @@
 /// We an object needs a particular dependency it will simply call the provider to give it the data
 /// How the data is aquired is completley opaque to the requester
 
-pub trait SettingsStore<'a, B>{
+pub trait SettingsStore<'a, B> {
     fn add_to_builder(&'a self, builder: B) -> B;
 }
-pub mod init;
-pub mod sync;
-pub mod shader;
-pub mod queue;
+pub mod camera;
 pub mod command;
 pub mod descriptor;
-pub mod pipelines;
-pub mod memory;
-pub mod allocator;
-pub mod image;
+pub mod init;
 pub mod math;
+pub mod memory;
+pub mod pipelines;
+pub mod queue;
+pub mod shader;
 pub mod shapes;
-pub mod camera;
+pub mod sync;

@@ -3,11 +3,9 @@ use std::sync::Arc;
 use ash::vk;
 use log::{debug, info};
 
-use crate::image::{ImageSource, ImageViewSource};
 use crate::init::{DeviceSource, InstanceSource};
-use crate::memory::MemorySource;
 
-use super::{ImageResourceSource, ImageView, ImageViewFactory};
+use super::{ImageResourceSource, ImageSource, ImageView, ImageViewFactory, ImageViewSource};
 
 impl<Factory: DeviceSource + ImageSource + ImageResourceSource + Clone>
     ImageViewFactory<Arc<ImageView<Factory>>> for Factory
@@ -83,22 +81,6 @@ impl<IR: ImageResourceSource + DeviceSource + ImageSource + InstanceSource> Inst
 
     fn entry(&self) -> &ash::Entry {
         self._image_resource.entry()
-    }
-}
-
-impl<IR: ImageResourceSource + DeviceSource + ImageSource + MemorySource> MemorySource
-    for Arc<ImageView<IR>>
-{
-    fn partition(
-        &self,
-        size: u64,
-        alignment: Option<u64>,
-    ) -> Result<crate::memory::Partition, crate::memory::partitionsystem::PartitionError> {
-        self._image_resource.partition(size, alignment)
-    }
-
-    fn memory(&self) -> &vk::DeviceMemory {
-        self._image_resource.memory()
     }
 }
 

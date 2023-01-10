@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use ash::vk;
 
@@ -66,4 +66,11 @@ pub struct Swapchain<D: DeviceSource + InstanceSource, S: SwapchainSettingsStore
     swapchain: Mutex<vk::SwapchainKHR>,
     images: Mutex<Vec<vk::Image>>,
     present_queue: Q,
+}
+#[derive(Clone)]
+pub struct SwapchainImage<D: DeviceSource> {
+    device: D,
+    image: vk::Image,
+    layout: Arc<Mutex<vk::ImageLayout>>,
+    extent: vk::Extent3D,
 }

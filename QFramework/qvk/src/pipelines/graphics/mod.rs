@@ -1,8 +1,11 @@
-use std::{sync::{Mutex, MutexGuard}, marker::PhantomData};
+use std::{
+    marker::PhantomData,
+    sync::{Mutex, MutexGuard},
+};
 
 use ash::vk;
 
-use crate::{image::ImageViewSource, init::DeviceSource};
+use crate::{init::DeviceSource, memory::image::ImageViewSource};
 
 use super::PipelineLayoutSource;
 
@@ -41,14 +44,18 @@ pub trait RenderpassFactory<R: RenderPassSource<A>, A: RenderpassAttachmentSourc
         flags: Option<vk::RenderPassCreateFlags>,
     ) -> R;
 }
-pub trait RenderPassSource<A:RenderpassAttachmentSource> {
+pub trait RenderPassSource<A: RenderpassAttachmentSource> {
     fn renderpass(&self) -> vk::RenderPass;
     fn attachments(&self) -> &[A];
     fn clear_values(&self) -> Vec<vk::ClearValue>;
 }
 pub trait FramebufferSource {}
-pub trait FramebufferFactory<F:FramebufferSource>{
-    fn create_framebuffer(&self, render_area: vk::Rect2D, flags: Option<vk::FramebufferCreateFlags>) -> F;
+pub trait FramebufferFactory<F: FramebufferSource> {
+    fn create_framebuffer(
+        &self,
+        render_area: vk::Rect2D,
+        flags: Option<vk::FramebufferCreateFlags>,
+    ) -> F;
 }
 pub struct Renderpass<D: DeviceSource, A: RenderpassAttachmentSource> {
     device: D,
@@ -57,7 +64,7 @@ pub struct Renderpass<D: DeviceSource, A: RenderpassAttachmentSource> {
     _subpass_refs: Vec<vk::SubpassDescription>,
     image_views: Vec<A>,
 }
-pub struct Framebuffer<A:RenderpassAttachmentSource, R:RenderPassSource<A> + DeviceSource>{
+pub struct Framebuffer<A: RenderpassAttachmentSource, R: RenderPassSource<A> + DeviceSource> {
     renderpass: R,
     _attachments: Vec<A>,
     framebuffer: vk::Framebuffer,
@@ -194,7 +201,12 @@ pub trait DynamicStateFactory {
     fn flags(&self) -> Option<vk::PipelineDynamicStateCreateFlags>;
     fn dynamics(&self) -> Option<Vec<vk::DynamicState>>;
 }
-pub struct Graphics<D: DeviceSource, A:RenderpassAttachmentSource, R: RenderPassSource<A>, L: PipelineLayoutSource> {
+pub struct Graphics<
+    D: DeviceSource,
+    A: RenderpassAttachmentSource,
+    R: RenderPassSource<A>,
+    L: PipelineLayoutSource,
+> {
     device: D,
     _render_pass: R,
     _layout: L,
