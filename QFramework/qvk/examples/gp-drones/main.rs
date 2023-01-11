@@ -297,6 +297,7 @@ fn main() {
         qvk::camera::Camera::new(Vec3::new(max_x / 2.0, max_y / 2.0, 0.0), CAMSPEED, CAMRATE);
     // let mut camera = qvk::camera::Camera::new(Vec3::new(0.0,0.0,0.0), CAMSPEED, CAMRATE);
     let mut time_at_last_frame = Instant::now();
+    let mut watch = Instant::now();
     let mut frame: u32 = 0;
     let mut delta_time = 0.0;
     event_loop.run(move |event, _, flow| {
@@ -358,7 +359,10 @@ fn main() {
             Event::MainEventsCleared => {
                 let delta_time = &mut delta_time;
                 *delta_time = time_at_last_frame.elapsed().as_secs_f32();
-                println!("Frame time: {delta_time}, FPS: {}", 1.0 / (*delta_time));
+                if watch.elapsed().as_secs() >= 3 {
+                    watch = Instant::now();
+                    println!("Frame time: {delta_time}, FPS: {}", 1.0 / (*delta_time));
+                }
                 time_at_last_frame = Instant::now();
                 let index = swapchain.gpu_aquire_next_image(u64::MAX, &aquire);
                 let color_tgt = images[index as usize].clone();

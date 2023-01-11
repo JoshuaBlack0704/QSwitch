@@ -153,15 +153,15 @@ fn main() {
     );
 
     // Memory preperation
-    let max_x = 1;
-    let max_z = 1;
+    let max_x = 100;
+    let max_z = 100;
 
     let uniform = cpu_uniform.get_segment(1024, None);
 
     let mut vertex_data = vec![];
     let mut index_data = vec![];
     let perlin = Perlin::new(1);
-    qgen::flatterrain::make_terrain(max_x,max_z, 10.0,glam::Mat3::IDENTITY,&perlin,None,&mut vertex_data, &mut index_data);
+    qgen::flatterrain::make_terrain(max_x,max_z, 10.0,10.0,&perlin,None,&mut vertex_data, &mut index_data);
     let v_buffer = v_buffer.get_segment((size_of::<ShapeVertex>() * vertex_data.len()) as u64, None);
     let i_buffer = i_buffer.get_segment((size_of::<u32>() * index_data.len()) as u64, None);
 

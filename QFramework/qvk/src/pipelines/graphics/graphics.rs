@@ -500,7 +500,7 @@ impl<V: VertexStateFactory> RasterizationStateFactory for GraphicsDefaultState<V
     }
 
     fn cull_mode(&self) -> vk::CullModeFlags {
-        vk::CullModeFlags::NONE
+        vk::CullModeFlags::BACK
     }
 
     fn front_face(&self) -> vk::FrontFace {

@@ -1,9 +1,8 @@
-use std::{mem::size_of, collections::HashMap};
+use std::mem::size_of;
 
 use qvk::pipelines::graphics::VertexStateFactory;
 use ash::vk;
 use glam::{Mat3, Vec3};
-
 pub struct Shape {
     _starting_index: u32,
     _starting_vertex: u32,
@@ -31,7 +30,7 @@ impl Shape {
         for p in primatives.iter(){
             for v in p.vertices().iter(){
                 if smooth{
-                    if let Some(i) = vertices.iter().position(|vp| vp.pos == v.pos){
+                    if let Some(i) = vertices.iter().position(|vp| v.pos == vp.pos){
                         indices.push(i as u32);
                         continue;
                     }
