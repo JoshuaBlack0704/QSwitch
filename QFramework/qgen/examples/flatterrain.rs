@@ -2,8 +2,9 @@ use std::mem::size_of;
 use std::time::Instant;
 
 use ash::vk;
-use glam::{Mat4, Vec3, Vec4};
-use qprimitives::{Shape, ShapeVertex};
+use glam::{Mat4, Vec3};
+use noise::Perlin;
+use qprimitives::ShapeVertex;
 use qvk::{
     command::{CommandBufferFactory, CommandBufferSource, CommandPoolOps},
     descriptor::{
@@ -18,14 +19,12 @@ use qvk::{
         graphics::{
             graphics::GraphicsDefaultState, FramebufferFactory, GraphicsPipelineFactory,
             RenderPassAttachment, RenderpassFactory, SubpassDescription,
-        },
-        ComputePipelineFactory, PipelineLayoutFactory,
+        }, PipelineLayoutFactory,
     },
     queue::{QueueOps, SubmitInfoSource, SubmitSet},
-    shader::{ShaderFactory, HLSL, SPV},
+    shader::{ShaderFactory, HLSL},
     sync::SemaphoreFactory, memory::{allocators::{MemoryAllocatorFactory, ImageAllocatorFactory, BufferAllocatorFactory, TRANSFER}, image::{ImageFactory, ImageResourceFactory, ImageViewFactory, ImageSource, ImageResourceSource}, buffer::{BufferSegmentFactory, BufferSegmentSource}},
 };
-use rand::{thread_rng, Rng};
 use raw_window_handle::HasRawDisplayHandle;
 use winit::{
     event::{Event, VirtualKeyCode, WindowEvent},
@@ -33,45 +32,16 @@ use winit::{
     window::WindowBuilder,
 };
 
-const VERT_PATH: &str = "examples/resources/gp-drone/vert.hlsl";
-const FRAG_PATH: &str = "examples/resources/gp-drone/frag.hlsl";
-const COMP_PATH: &str = "examples/resources/gp-drone/update.hlsl";
-const VERT_PATH_SPV: &str = "examples/resources/gp-drone/vert.spv";
-const FRAG_PATH_SPV: &str = "examples/resources/gp-drone/frag.spv";
-const COMP_PATH_SPV: &str = "examples/resources/gp-drone/update.spv";
+const VERT_PATH: &str = "examples/resources/flatterrain/vert.hlsl";
+const FRAG_PATH: &str = "examples/resources/flatterrain/frag.hlsl";
 const CAMSPEED: f32 = 30.0;
 const CAMRATE: f32 = 1.0;
 
-#[derive(Clone)]
-#[repr(C)]
-pub struct InstanceData {
-    mvp_matrix: Mat4,
-    target_pos: Vec4,
-    current_pos: Vec4,
-}
 
 #[repr(C)]
 struct UniformData {
     projection: Mat4,
     view: Mat4,
-    object_count: u32,
-    target_count: u32,
-    delta_time: f32,
-    frame: u32,
-}
-
-fn generate_targets(max_x: f32, max_y: f32, max_z: f32, count: usize) -> Vec<Vec4> {
-    let mut targets: Vec<Vec4> = vec![];
-
-    for _ in 0..count {
-        let x: f32 = thread_rng().gen_range(0.0..max_x);
-        let y: f32 = thread_rng().gen_range(0.0..max_y);
-        let z: f32 = thread_rng().gen_range(0.0..max_z);
-        let target = Vec4::new(x, y, z, 1.0);
-        targets.push(target);
-    }
-
-    targets
 }
 
 fn main() {
@@ -107,9 +77,6 @@ fn main() {
             | vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
     );
     let cpu_storage = cpu_memory.create_storage_buffer(
-        1024 * 1024 * 5, Some(TRANSFER())
-    );
-    let gpu_storage = gpu_memory.create_storage_buffer(
         1024 * 1024 * 5, Some(TRANSFER())
     );
     let cpu_uniform = cpu_memory.create_uniform_buffer(1024 * 1024, Some(vk::BufferUsageFlags::TRANSFER_DST));
@@ -186,22 +153,17 @@ fn main() {
     );
 
     // Memory preperation
-    let object_count = 100 as u32;
-    let target_count = 10 as u32;
-    let max_x = 100.0;
-    let max_y = 100.0;
-    let max_z = 100.0;
+    let max_x = 1;
+    let max_z = 1;
 
     let uniform = cpu_uniform.get_segment(1024, None);
-    let instance_data =
-        gpu_storage.get_segment(size_of::<InstanceData>() as u64 * object_count as u64, None);
-    let target_data = gpu_storage.get_segment(size_of::<Vec4>() as u64 * target_count as u64, None);
-    let v_buffer = v_buffer.get_segment(1024 * 1024, None);
-    let i_buffer = i_buffer.get_segment(1024 * 1024, None);
 
     let mut vertex_data = vec![];
     let mut index_data = vec![];
-    let _shape = Shape::tetrahedron(&mut vertex_data, &mut index_data);
+    let perlin = Perlin::new(1);
+    qgen::flatterrain::make_terrain(max_x,max_z, 10.0,glam::Mat3::IDENTITY,&perlin,None,&mut vertex_data, &mut index_data);
+    let v_buffer = v_buffer.get_segment((size_of::<ShapeVertex>() * vertex_data.len()) as u64, None);
+    let i_buffer = i_buffer.get_segment((size_of::<u32>() * index_data.len()) as u64, None);
 
     let stage = cpu_storage.get_segment(v_buffer.size(), None);
     stage.copy_from_ram(&vertex_data).unwrap();
@@ -211,47 +173,18 @@ fn main() {
     stage.copy_from_ram(&index_data).unwrap();
     stage.copy_to_segment_internal(&i_buffer).unwrap();
 
-    let temp_data = generate_targets(max_x, max_y, max_z, target_count as usize);
-    let stage = cpu_storage.get_segment(target_data.size(), None);
-    stage.copy_from_ram(&temp_data).unwrap();
-    stage.copy_to_segment_internal(&target_data).unwrap();
-
     // Descriptor preperation
-    let comp_dlayout = device.create_descriptor_layout(None);
     let vert_dlayout = device.create_descriptor_layout(None);
 
-    let comp_uniform_write = comp_dlayout.form_binding(&uniform, vk::ShaderStageFlags::COMPUTE);
-    let comp_instance_write =
-        comp_dlayout.form_binding(&instance_data, vk::ShaderStageFlags::COMPUTE);
-    let comp_target_write = comp_dlayout.form_binding(&target_data, vk::ShaderStageFlags::COMPUTE);
-
     let vert_uniform_write = vert_dlayout.form_binding(&uniform, vk::ShaderStageFlags::VERTEX);
-    let vert_instance_write =
-        vert_dlayout.form_binding(&instance_data, vk::ShaderStageFlags::VERTEX);
 
-    uniform.apply(&comp_uniform_write);
     uniform.apply(&vert_uniform_write);
 
-    instance_data.apply(&comp_instance_write);
-    instance_data.apply(&vert_instance_write);
-
-    target_data.apply(&comp_target_write);
-
-    let layouts = [(&comp_dlayout, 1), (&vert_dlayout, 1)];
+    let layouts = [(&vert_dlayout, 1)];
     let dpool = device.create_descriptor_pool(&layouts, None);
 
-    let comp_dset = dpool.create_set(&comp_dlayout);
-    comp_dset.update();
     let vert_dset = dpool.create_set(&vert_dlayout);
     vert_dset.update();
-
-    // Compute pipeline preparation
-    let code = HLSL::new(COMP_PATH, shaderc::ShaderKind::Compute, "main", None);
-    let compute_shd = device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
-
-    let layouts = [&comp_dlayout];
-    let cplayout = device.create_pipeline_layout(&layouts, &[], None);
-    let mut compute_pipeline = cplayout.create_compute_pipeline(&compute_shd, None);
 
     // Graphics pipeline preparation
     let mut subpass = SubpassDescription::new(vk::PipelineBindPoint::GRAPHICS, &depth_attch, None);
@@ -273,7 +206,6 @@ fn main() {
     let framebuffer =
         renderpass.create_framebuffer(vk::Rect2D::builder().extent(extent2d).build(), None);
     let layouts = [&vert_dlayout];
-    // let playout = device.create_pipeline_layout_empty();
     let playout = device.create_pipeline_layout(&layouts, &[], None);
 
     let code = HLSL::new(VERT_PATH, shaderc::ShaderKind::Vertex, "main", None);
@@ -294,10 +226,9 @@ fn main() {
     let render = device.create_semaphore();
     let mut images = swapchain.images();
     let mut camera =
-        qvk::camera::Camera::new(Vec3::new(max_x / 2.0, max_y / 2.0, 0.0), CAMSPEED, CAMRATE);
+        qvk::camera::Camera::new(Vec3::new(max_x as f32 / 2.0, 2.0, 0.0), CAMSPEED, CAMRATE);
     // let mut camera = qvk::camera::Camera::new(Vec3::new(0.0,0.0,0.0), CAMSPEED, CAMRATE);
     let mut time_at_last_frame = Instant::now();
-    let mut frame: u32 = 0;
     let mut delta_time = 0.0;
     event_loop.run(move |event, _, flow| {
         flow.set_poll();
@@ -317,13 +248,11 @@ fn main() {
                         if code == VirtualKeyCode::Space {
                             println!("Recompiling shaders");
                             let code =
-                                // HLSL::new(VERT_PATH, shaderc::ShaderKind::Vertex, "main", None);
-                                SPV::new(VERT_PATH_SPV,  "main");
+                                HLSL::new(VERT_PATH, shaderc::ShaderKind::Vertex, "main", None);
                             let vertex_shd =
                                 device.create_shader(&code, vk::ShaderStageFlags::VERTEX, None);
                             let code =
-                                // HLSL::new(FRAG_PATH, shaderc::ShaderKind::Fragment, "main", None);
-                                SPV::new(FRAG_PATH_SPV, "main");
+                                HLSL::new(FRAG_PATH, shaderc::ShaderKind::Fragment, "main", None);
                             let fragment_shd =
                                 device.create_shader(&code, vk::ShaderStageFlags::FRAGMENT, None);
 
@@ -334,15 +263,6 @@ fn main() {
                                 .create_graphics_pipeline(state, &playout, &renderpass, 0)
                                 .unwrap();
 
-                            let code =
-                                // HLSL::new(COMP_PATH, shaderc::ShaderKind::Compute, "main", None);
-                                SPV::new(COMP_PATH_SPV, "main");
-                            let compute_shd =
-                                device.create_shader(&code, vk::ShaderStageFlags::COMPUTE, None);
-
-                            let layouts = [&comp_dlayout];
-                            let cplayout = device.create_pipeline_layout(&layouts, &[], None);
-                            compute_pipeline = cplayout.create_compute_pipeline(&compute_shd, None);
                         }
                     }
                 }
@@ -377,19 +297,12 @@ fn main() {
                 let u_data = [UniformData {
                     projection: camera.perspective(fov, aspect),
                     view: camera.view(*delta_time),
-                    object_count: object_count as u32,
-                    target_count: target_count as u32,
-                    delta_time: *delta_time,
-                    frame,
                 }];
                 uniform.copy_from_ram(&u_data).unwrap();
 
                 *ImageResourceSource::layout(&color_rsc) = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
                 let cmd = exe.next_cmd(vk::CommandBufferLevel::PRIMARY);
                 cmd.begin(None).unwrap();
-                cmd.bind_pipeline(&compute_pipeline);
-                cmd.bind_set(&comp_dset, 0, &compute_pipeline);
-                cmd.dispatch(object_count, 1, 1);
                 cmd.begin_render_pass(&framebuffer);
                 cmd.bind_pipeline(&graphics);
                 cmd.bind_vertex_buffer(&v_buffer);
@@ -399,7 +312,7 @@ fn main() {
                     device.device().cmd_draw_indexed(
                         cmd.cmd(),
                         index_data.len() as u32,
-                        object_count,
+                        1,
                         0,
                         0,
                         0,
@@ -435,7 +348,6 @@ fn main() {
                 swapchain.wait_present(index as u32, Some(&waits));
 
                 exe.reset_cmdpool();
-                frame += 1;
             }
             _ => {}
         }

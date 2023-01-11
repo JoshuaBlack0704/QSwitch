@@ -16,5 +16,5 @@ pub mod memory;
 pub mod pipelines;
 pub mod queue;
 pub mod shader;
-pub mod shapes;
+// pub mod shapes;
 pub mod sync;

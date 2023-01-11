@@ -1,0 +1,15 @@
+[package]
+name = "qprimitives"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ash = {version = "0.37.1+1.3.235", features = ["linked", "debug"]}
+glam = {version = "0.22.0", features = ["scalar-math"]}
+qvk = {path = "../qvk"}
+
+[profile.release]
+lto = true
+strip = true

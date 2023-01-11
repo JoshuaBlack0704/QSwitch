@@ -15,6 +15,10 @@ shaderc = "0.8.1"
 glam = {version = "0.22.0", features = ["scalar-math"]}
 rand = "0.8.5"
 
+[dev-dependencies]
+qgen = {path = "../qgen"}
+qprimitives = {path= "../qprimitives"}
+
 [profile.release]
 lto = true
 strip = true
