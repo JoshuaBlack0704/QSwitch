@@ -7,7 +7,6 @@ use qprimitives::{Primiative, ShapeVertex, Shape};
 ///Resolution must be >= 1
 ///Width and depth are in units of quads
 pub fn make_terrain(width: u32, depth: u32, max_height: f32, scale: f64, noise_fn: &impl NoiseFn<f64,2>, shift: Option<Vec3>, vertex_data: &mut Vec<ShapeVertex>, index_data: &mut Vec<u32>){
-    let color = Vec3::new(1.0,1.0,1.0);
     //The first thing we need to do is generate the vertices
     let mut vertices = Vec::with_capacity((width * depth) as usize);
     for z in 0..depth+1{
@@ -41,8 +40,21 @@ pub fn make_terrain(width: u32, depth: u32, max_height: f32, scale: f64, noise_f
             let v3 = vertices[x + (width+1)*(z+1)];
             let v4 = vertices[x+1 + (width+1)*(z+1)];
 
-            let top_primative = Primiative::new(v4,v3,v1,color);
-            let bottom_primative = Primiative::new(v4,v1,v2,color);
+            let average = (v1.y + v2.y + v3.y)/3.0;
+            let ratio = average/max_height;
+            let color;
+            if ratio < 0.02{
+                color = Vec3::new(0.0,0.0,1.0);
+            }
+            else if ratio > 0.02 && ratio < 0.5{
+                color = Vec3::new(0.0,1.0,0.0);
+            }
+            else{
+                color = Vec3::new(1.0,1.0,1.0);
+            }
+
+            let top_primative = Primiative::from_positions(v4,v3,v1,color);
+            let bottom_primative = Primiative::from_positions(v4,v1,v2,color);
 
             primatives.push(top_primative);
             primatives.push(bottom_primative);
