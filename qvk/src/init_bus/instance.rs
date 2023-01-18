@@ -2,9 +2,10 @@ use std::{ffi::{CString, CStr}, sync::Arc};
 
 use ash::vk::{self, InstanceCreateInfoBuilder};
 use log::{info, debug};
+use qcom::bus::Bus;
 use raw_window_handle::RawDisplayHandle;
 
-use crate::init_bus::Instance;
+use crate::{init_bus::Instance, bus::{QvkBusMessage, LOG_CHANNEL}};
 
 use super::{InstanceBuilder, InstanceExtension};
 
@@ -61,7 +62,7 @@ impl InstanceBuilder{
             .engine_version(self.engine_version)
             .build()
     }
-    pub fn build(mut self) -> Arc<Instance> {
+    pub fn build<B:Bus<QvkBusMessage>>(mut self, log_bus: &B) -> Arc<Instance> {
         let entry = ash::Entry::linked();
         let app_info = self.app_info();
         
@@ -108,6 +109,7 @@ impl InstanceBuilder{
         let instance =
             unsafe { entry.create_instance(&info, None) }.expect("Could not create instance");
         info!("Created instance {:?}", instance.handle());
+        log_bus.broadcast(QvkBusMessage::InstanceHandle(instance.handle()), qcom::bus::Channel::Channel(LOG_CHANNEL));
 
         Arc::new(Instance { entry, instance })
     }
@@ -119,15 +121,25 @@ impl InstanceExtension{
     }
 }
 
+#[cfg(debug_assertions)]
+fn validate() -> bool{
+    true
+}
+#[cfg(not(debug_assertions))]
+fn validate() -> bool{
+    false
+}
+
 impl Default for InstanceBuilder{
     fn default() -> Self {
+        
         Self{
             app_name: CString::new("Default").unwrap(),
             engine_name: CString::new("Default").unwrap(),
             app_version: 0,
             engine_version: 0,
             api_version: vk::API_VERSION_1_3,
-            use_validation: false,
+            use_validation: validate(),
             validation_enables: None,
             validation_disables: None,
             use_debug: false,

@@ -1,286 +1,289 @@
-use async_trait::async_trait;
+
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::Arc, time::Instant,
 };
 use tokio::sync::RwLock;
+use rand::{self, thread_rng, Rng};
 
-pub type CHANNEL = usize;
+#[derive(Clone, Copy)]
+pub enum Channel {
+    Channel(u32),
+    All,
+}
 pub trait BusProducer<M>: Send + Sync {
-    fn accpects_message(&self, msg: &M) -> bool;
-    fn handle_message(&self, src: &dyn Bus<M>, msg: M) -> Option<M>;
+    fn accepts_message(&self, msg: &M) -> bool;
+    fn handle_message(&self, src: &dyn Bus<M>, msg: &M) -> Option<M>;
 }
 pub trait BusListener<M>: Send + Sync{
-    fn handle_message(&self, src: &dyn Bus<M>, msg: M);
+    fn handle_transaction(&self, src: &dyn Bus<M>, transaction: &BusTransaction<M>);
+}
+pub trait BustInterceptor<M>: Send + Sync{
+    fn accepts_message(&self, msg: &M) -> bool;
+    fn intercept_message(&self, src: &dyn Bus<M>, msg: M) -> M; 
 }
 
-#[async_trait]
-pub trait Bus<M> {
-    /// Adds a producer to the bus
-    fn bind_producer(&self, producer: Arc<dyn BusProducer<M>>, channel: Option<CHANNEL>);
-    /// Async adds a producer to the bus
-    async fn bind_producer_async(&self, producer: Arc<dyn BusProducer<M>>, channel: Option<CHANNEL>);
+#[derive(Clone)]
+pub enum BusTransaction<M>{
+    Broadcast(BroadcastTransaction<M>),
+    Intercept(InterceptionTransaction<M>),
+}
+
+#[derive(Clone)]
+pub struct BroadcastTransaction<M>{
+    pub bus_uuid: u64,
+    pub transaction_uuid: u64,
+    pub instant: Instant,
+    pub channel: Channel,
+    pub queried_producers: Vec<Arc<dyn BusProducer<M>>>,
+    pub accepted_producers: Vec<Arc<dyn BusProducer<M>>>,
+    pub msg: M,
+    pub replies: Vec<M>,
+}
+
+#[derive(Clone)]
+pub struct InterceptionTransaction<M>{
+    pub bus_uuid: u64,
+    pub transaction_uuid: u64,
+    pub instant: Instant,
+    pub channel: Channel,
+    pub interceptor: Arc<dyn BustInterceptor<M>>,
+    pub original_msg: M,
+    pub mutated_msg: M,
+}
+
+pub trait Bus<M: Clone>: Send + Sync {
+    fn bind_producer(&self, producer: Arc<dyn BusProducer<M>>, channel: u32);
+    fn bind_listener(&self, listener: Arc<dyn BusListener<M>>, channel: u32);
+    fn bind_interceptor(&self, interceptor: Arc<dyn BustInterceptor<M>>, channel: u32);
     
-    /// Adds a passive listener to the bus
-    fn bind_listener(&self, listener: Arc<dyn BusListener<M>>, channel: Option<CHANNEL>);
-    /// Async adds a producer to the bus
-    async fn bind_listener_async(&self, listener: Arc<dyn BusListener<M>>, channel: Option<CHANNEL>);
+    /// Given a channel, should return all matching producers
+    fn get_producers(&self, channel: Channel) -> Vec<Arc<dyn BusProducer<M>>>;
+    /// Given a channel, should return all matching listeners
+    fn get_listeners(&self, channel: Channel) -> Vec<Arc<dyn BusListener<M>>>;
+    /// Given a channel, should return all matching interceptors
+    fn get_interceptors(&self, channel: Channel) -> Vec<Arc<dyn BustInterceptor<M>>>;
+    /// Should transform self into a trait object
+    fn as_trait_object(&self) -> &dyn Bus<M>;
+    /// You decide what the uuid represents
+    fn get_uuid(&self) -> u64;
 
-    /// Removes all bounded producers
-    fn clear(&self);
-    /// Async Removes all bounded producers
-    async fn clear_async(&self);
+    fn notify_listeners(&self, transaction: &BusTransaction<M>, channel: Channel){
+        let listeners = self.get_listeners(channel);
+        for l in listeners.iter(){
+            l.handle_transaction(self.as_trait_object(), transaction);
+        }
+    }
 
-    /// Tests all bindings in the bus for response willingness, stopping and returning the response of the first to
-    /// accept the message
-    fn send(&self, msg: M, channel: Option<CHANNEL>) -> Option<M>;
-    /// Async Tests all bindings in the bus for response willingness, stopping and returning the response of the first to
-    /// accept the message
-    async fn send_async(&self, msg: M, channel: Option<CHANNEL>) -> Option<M>;
+    fn intercept_message(&self, mut msg: M, channel: Channel, external_trans_id: Option<u64>) -> M{
+        let interceptors = self.get_interceptors(channel);
+        let _msg = msg.clone();
+        for i in interceptors.iter().filter(|i| i.accepts_message(&_msg)){
+            let original_msg = msg.clone();
+            msg = i.intercept_message(self.as_trait_object(), msg.clone());
+            let transaction_uuid = match external_trans_id{
+                Some(uuid) => uuid,
+                None => thread_rng().gen::<u64>(),
+            };
+            let transaction = BusTransaction::Intercept(InterceptionTransaction::<M>{
+                bus_uuid: self.get_uuid(),
+                transaction_uuid,
+                instant: Instant::now(),
+                channel,
+                interceptor: i.clone(),
+                original_msg,
+                mutated_msg: msg.clone(),
+            });
 
-    /// Sends msg to all bindings, returning any respones it gets
-    fn broadcast(&self, msg: M, channel: Option<CHANNEL>) -> Vec<M>;
-    /// Async Sends msg to all bindings, returning any respones it gets
-    async fn broadcast_async(&self, msg: M, channel: Option<CHANNEL>) -> Vec<M>;
+            self.notify_listeners(&transaction, channel);
+        }
+        msg
+    }
 
-    /// Gets all producers who say they can handle the message
-    fn get_acceptors(&self, msg: M, channel: Option<CHANNEL>) -> Vec<Arc<dyn BusProducer<M>>>;
-    /// Async Gets all producers who say they can handle the message
-    async fn get_acceptors_async(
-        &self,
-        msg: M,
-        channel: Option<CHANNEL>,
-    ) -> Vec<Arc<dyn BusProducer<M>>>;
+    /// Will send msg to all producers that match the channel query and return any responses
+    fn broadcast(&self, mut msg: M, channel: Channel) -> BroadcastTransaction<M>{
+        let transaction_uuid = thread_rng().gen::<u64>();
+        msg = self.intercept_message(msg, channel, Some(transaction_uuid));
+        let producers = self.get_producers(channel);
+        let accepted:Vec<Arc<dyn BusProducer<M>>> = producers.iter().filter(|p| p.accepts_message(&msg)).map(|p| p.clone()).collect();
+        let mut replies = Vec::with_capacity(producers.len());
+
+        for p in accepted.iter(){
+            if let Some(response) = p.handle_message(self.as_trait_object(), &msg){
+                replies.push(response);
+            }
+        }
+
+        
+        let transaction = BroadcastTransaction::<M>{
+            bus_uuid: self.get_uuid(),
+            transaction_uuid,
+            instant: Instant::now(),
+            channel,
+            queried_producers: producers.clone(),
+            accepted_producers: accepted.clone(),
+            msg,
+            replies: replies.clone(),
+        };
+
+        let ltrans = BusTransaction::Broadcast(transaction.clone());
+
+        self.notify_listeners(&ltrans, channel);
+
+        transaction
+    }
+
+    
 }
 pub struct BusSystem<M> {
-    channeled_producers: RwLock<HashMap<CHANNEL, Vec<Arc<dyn BusProducer<M>>>>>,
-    producers: RwLock<Vec<Arc<dyn BusProducer<M>>>>,
-    channeled_listeners: RwLock<HashMap<CHANNEL, Vec<Arc<dyn BusListener<M>>>>>,
-    listeners: RwLock<Vec<Arc<dyn BusListener<M>>>>,
+    uuid: u64,
+    producers: RwLock<HashMap<u32, Vec<Arc<dyn BusProducer<M>>>>>,
+    listeners: RwLock<HashMap<u32, Vec<Arc<dyn BusListener<M>>>>>,
+    interceptors: RwLock<HashMap<u32, Vec<Arc<dyn BustInterceptor<M>>>>>,
 }
 
-#[async_trait]
-impl<M: Clone + Send + Sync> Bus<M> for Arc<BusSystem<M>> {
-    fn bind_producer(&self, producer: Arc<dyn BusProducer<M>>, channel: Option<CHANNEL>) {
-        if let Some(c) = channel {
-            let mut channels = self.channeled_producers.blocking_write();
-            if let Some(elements) = channels.get_mut(&c) {
-                elements.push(producer);
-                return;
+impl<M> BusSystem<M>{
+    pub fn new() -> Arc<BusSystem<M>> {
+        Arc::new(
+            Self{
+                producers: RwLock::new(HashMap::new()),
+                listeners: RwLock::new(HashMap::new()),
+                interceptors: RwLock::new(HashMap::new()),
+                uuid: thread_rng().gen::<u64>(),
             }
-            let _ = channels.insert(c, vec![producer]);
-            return;
-        }
-
-        let mut elements = self.producers.blocking_write();
-        elements.push(producer);
+        )
     }
-
-    async fn bind_producer_async(&self, producer: Arc<dyn BusProducer<M>>, channel: Option<CHANNEL>) {
-        if let Some(c) = channel {
-            let mut channels = self.channeled_producers.write().await;
-            if let Some(elements) = channels.get_mut(&c) {
-                elements.push(producer);
-                return;
-            }
-            let _ = channels.insert(c, vec![producer]);
-            return;
+    pub fn bind_producer(&self, producer: Arc<dyn BusProducer<M>>, channel: u32){
+        let mut producers = self.producers.blocking_write();
+        if let Some(ps) = producers.get_mut(&channel){
+            ps.push(producer);
         }
-
-        let mut elements = self.producers.write().await;
-        elements.push(producer);
+        else{
+            producers.insert(channel, vec![producer]);
+        }
+        
     }
-
-    fn bind_listener(&self, listener: Arc<dyn BusListener<M>>, channel: Option<CHANNEL>) {
-        if let Some(c) = channel {
-            let mut channels = self.channeled_listeners.blocking_write();
-            if let Some(listeners) = channels.get_mut(&c) {
-                listeners.push(listener);
-                return;
-            }
-            let _ = channels.insert(c, vec![listener]);
-            return;
-        }
-
+    pub fn bind_listener(&self, listener: Arc<dyn BusListener<M>>, channel: u32){
         let mut listeners = self.listeners.blocking_write();
-        listeners.push(listener);
-    }
-
-    async fn bind_listener_async(&self, listener: Arc<dyn BusListener<M>>, channel: Option<CHANNEL>) {
-        if let Some(c) = channel {
-            let mut channels = self.channeled_listeners.write().await;
-            if let Some(listeners) = channels.get_mut(&c) {
-                listeners.push(listener);
-                return;
-            }
-            let _ = channels.insert(c, vec![listener]);
-            return;
+        if let Some(ps) = listeners.get_mut(&channel){
+            ps.push(listener);
         }
-
-        let mut listeners = self.listeners.write().await;
-        listeners.push(listener);
-    }
-
-    fn clear(&self) {
-        self.channeled_producers.blocking_write().clear();
-        self.producers.blocking_write().clear();
-    }
-
-    async fn clear_async(&self) {
-        self.channeled_producers.write().await.clear();
-        self.producers.write().await.clear();
-    }
-
-    fn send(&self, msg: M, channel: Option<CHANNEL>) -> Option<M> {
-        if let Some(c) = channel {
-            let channels = self.channeled_producers.blocking_read();
-            if let Some(p) = channels.get(&c) {
-                for p in p.iter() {
-                    if p.accpects_message(&msg) {
-                        return p.handle_message(self, msg);
-                    }
-                }
-            }
+        else{
+            listeners.insert(channel, vec![listener]);
         }
+        
+    }
+    pub fn bind_interceptor(&self, interceptor: Arc<dyn BustInterceptor<M>>, channel: u32){
+        let mut interceptors = self.interceptors.blocking_write();
+        if let Some(ps) = interceptors.get_mut(&channel){
+            ps.push(interceptor);
+        }
+        else{
+            interceptors.insert(channel, vec![interceptor]);
+        }
+        
+    }
+}
 
+impl<M: Clone + Send + Sync> Bus<M> for Arc<BusSystem<M>> {
+    fn bind_producer(&self, producer: Arc<dyn BusProducer<M>>, channel: u32){
+        let mut producers = self.producers.blocking_write();
+        if let Some(ps) = producers.get_mut(&channel){
+            ps.push(producer);
+        }
+        else{
+            producers.insert(channel, vec![producer]);
+        }
+        
+    }
+    fn bind_listener(&self, listener: Arc<dyn BusListener<M>>, channel: u32){
+        let mut listeners = self.listeners.blocking_write();
+        if let Some(ps) = listeners.get_mut(&channel){
+            ps.push(listener);
+        }
+        else{
+            listeners.insert(channel, vec![listener]);
+        }
+        
+    }
+    fn bind_interceptor(&self, interceptor: Arc<dyn BustInterceptor<M>>, channel: u32){
+        let mut interceptors = self.interceptors.blocking_write();
+        if let Some(ps) = interceptors.get_mut(&channel){
+            ps.push(interceptor);
+        }
+        else{
+            interceptors.insert(channel, vec![interceptor]);
+        }
+        
+    }
+    fn get_producers(&self, channel: Channel) -> Vec<Arc<dyn BusProducer<M>>> {
         let producers = self.producers.blocking_read();
-        for p in producers.iter() {
-            if p.accpects_message(&msg) {
-                return p.handle_message(self, msg);
-            }
+        match channel{
+            Channel::Channel(c) => {
+                if let Some(ps) = producers.get(&c){
+                    return ps.clone();
+                }
+
+                vec![]
+            },
+            Channel::All => {
+                let mut ps = Vec::with_capacity(producers.len());
+                for p in producers.values(){
+                    ps.extend_from_slice(p);
+                }
+                ps
+            },
         }
 
-        None
+        
     }
 
-    async fn send_async(&self, msg: M, channel: Option<CHANNEL>) -> Option<M> {
-        if let Some(c) = channel {
-            let channels = self.channeled_producers.read().await;
-            if let Some(p) = channels.get(&c) {
-                for p in p.iter() {
-                    if p.accpects_message(&msg) {
-                        return p.handle_message(self, msg);
-                    }
+    fn get_listeners(&self, channel: Channel) -> Vec<Arc<dyn BusListener<M>>> {
+        let listeners = self.listeners.blocking_read();
+        match channel{
+            Channel::Channel(c) => {
+                if let Some(ps) = listeners.get(&c){
+                    return ps.clone();
                 }
-            }
-            return None;
+
+                vec![]
+            },
+            Channel::All => {
+                let mut ps = Vec::with_capacity(listeners.len());
+                for p in listeners.values(){
+                    ps.extend_from_slice(p);
+                }
+                ps
+            },
         }
 
-        let producers = self.producers.read().await;
-        for p in producers.iter() {
-            if p.accpects_message(&msg) {
-                return p.handle_message(self, msg);
-            }
-        }
-
-        None
     }
 
-    fn broadcast(&self, msg: M, channel: Option<CHANNEL>) -> Vec<M> {
-        let mut responses = vec![];
-        if let Some(c) = channel {
-            let channels = self.channeled_producers.blocking_read();
-            if let Some(p) = channels.get(&c) {
-                for p in p.iter() {
-                    if p.accpects_message(&msg) {
-                        if let Some(r) = p.handle_message(self, msg.clone()) {
-                            responses.push(r);
-                        }
-                    }
-                }
-            }
-            return responses;
-        }
-
-        let producers = self.producers.blocking_read();
-        for p in producers.iter() {
-            if p.accpects_message(&msg) {
-                if let Some(r) = p.handle_message(self, msg.clone()) {
-                    responses.push(r);
-                }
-            }
-        }
-
-        responses
+    fn as_trait_object(&self) -> &dyn Bus<M> {
+        self
     }
 
-    async fn broadcast_async(&self, msg: M, channel: Option<CHANNEL>) -> Vec<M> {
-        let mut responses = vec![];
-        if let Some(c) = channel {
-            let channels = self.channeled_producers.read().await;
-            if let Some(p) = channels.get(&c) {
-                for p in p.iter() {
-                    if p.accpects_message(&msg) {
-                        if let Some(r) = p.handle_message(self, msg.clone()) {
-                            responses.push(r);
-                        }
-                    }
+    fn get_interceptors(&self, channel: Channel) -> Vec<Arc<dyn BustInterceptor<M>>> {
+        let interceptors = self.interceptors.blocking_read();
+        match channel{
+            Channel::Channel(c) => {
+                if let Some(ps) = interceptors.get(&c){
+                    return ps.clone();
                 }
-            }
-            return responses;
-        }
 
-        let producers = self.producers.read().await;
-        for p in producers.iter() {
-            if p.accpects_message(&msg) {
-                if let Some(r) = p.handle_message(self, msg.clone()) {
-                    responses.push(r);
+                vec![]
+            },
+            Channel::All => {
+                let mut ps = Vec::with_capacity(interceptors.len());
+                for p in interceptors.values(){
+                    ps.extend_from_slice(p);
                 }
-            }
+                ps
+            },
         }
-
-        responses
     }
 
-    fn get_acceptors(&self, msg: M, channel: Option<CHANNEL>) -> Vec<Arc<dyn BusProducer<M>>> {
-        let mut eligible_producers = vec![];
-        if let Some(c) = channel {
-            let channels = self.channeled_producers.blocking_read();
-            if let Some(p) = channels.get(&c) {
-                for p in p.iter() {
-                    if p.accpects_message(&msg) {
-                        eligible_producers.push(p.clone())
-                    }
-                }
-            }
-            return eligible_producers;
-        }
-
-        let producers = self.producers.blocking_read();
-        for p in producers.iter() {
-            if p.accpects_message(&msg) {
-                eligible_producers.push(p.clone());
-            }
-        }
-
-        eligible_producers
-    }
-
-    async fn get_acceptors_async(
-        &self,
-        msg: M,
-        channel: Option<CHANNEL>,
-    ) -> Vec<Arc<dyn BusProducer<M>>> {
-        let mut eligible_producers = vec![];
-        if let Some(c) = channel {
-            let channels = self.channeled_producers.read().await;
-            if let Some(p) = channels.get(&c) {
-                for p in p.iter() {
-                    if p.accpects_message(&msg) {
-                        eligible_producers.push(p.clone())
-                    }
-                }
-            }
-            return eligible_producers;
-        }
-
-        let producers = self.producers.read().await;
-        for p in producers.iter() {
-            if p.accpects_message(&msg) {
-                eligible_producers.push(p.clone());
-            }
-        }
-
-        eligible_producers
+    fn get_uuid(&self) -> u64 {
+        self.uuid
     }
 }
