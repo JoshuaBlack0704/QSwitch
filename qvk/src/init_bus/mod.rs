@@ -7,6 +7,7 @@ pub enum InstanceExtension{
     
 }
 pub trait InstanceSource{
+    fn get_instance(&self) -> &ash::Instance;
     
 }
 pub struct InstanceBuilder{

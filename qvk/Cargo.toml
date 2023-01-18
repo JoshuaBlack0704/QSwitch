@@ -15,6 +15,7 @@ shaderc = "0.8.1"
 glam = {version = "0.22.0", features = ["scalar-math"]}
 rand = "0.8.5"
 qcom = {path = "../qcom"}
+tokio = {version = "1.24.2", features = ["full"]}
 
 [dev-dependencies]
 qgen = {path = "../qgen"}

@@ -1096,8 +1096,6 @@ name = "qcom"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "rand 0.8.5",
- "tokio",
 ]
 
 [[package]]
@@ -1153,6 +1151,7 @@ dependencies = [
  "rand 0.8.5",
  "raw-window-handle 0.5.0",
  "shaderc",
+ "tokio",
  "winit",
 ]
 

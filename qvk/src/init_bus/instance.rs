@@ -2,12 +2,12 @@ use std::{ffi::{CString, CStr}, sync::Arc};
 
 use ash::vk::{self, InstanceCreateInfoBuilder};
 use log::{info, debug};
-use qcom::bus::Bus;
+use qcom::bus::{Bus, BusElement, BusTransaction};
 use raw_window_handle::RawDisplayHandle;
 
-use crate::{init_bus::Instance, bus::{QvkBusMessage, LOG_CHANNEL}};
+use crate::bus::{QvkBus, QvkBusMessage};
 
-use super::{InstanceBuilder, InstanceExtension};
+use super::{InstanceBuilder, InstanceExtension, Instance, InstanceSource};
 
 impl InstanceBuilder{
     pub fn app_name(mut self, name: CString) -> InstanceBuilder {
@@ -62,7 +62,7 @@ impl InstanceBuilder{
             .engine_version(self.engine_version)
             .build()
     }
-    pub fn build<B:Bus<QvkBusMessage>>(mut self, log_bus: &B) -> Arc<Instance> {
+    pub fn build(mut self, qvk_bus: &Arc<QvkBus>) {
         let entry = ash::Entry::linked();
         let app_info = self.app_info();
         
@@ -108,10 +108,10 @@ impl InstanceBuilder{
 
         let instance =
             unsafe { entry.create_instance(&info, None) }.expect("Could not create instance");
-        info!("Created instance {:?}", instance.handle());
-        log_bus.broadcast(QvkBusMessage::InstanceHandle(instance.handle()), qcom::bus::Channel::Channel(LOG_CHANNEL));
+        let _ = qvk_bus.broadcast(crate::bus::QvkBusMessage::InstanceHandle(instance.handle()));
 
-        Arc::new(Instance { entry, instance })
+        let instance = Arc::new(Instance { entry, instance });
+        qvk_bus.bind_instance(Arc::new(instance));
     }
     
 }
@@ -146,5 +146,39 @@ impl Default for InstanceBuilder{
             window_extensions: None,
             instance_extensions: vec![],
         }
+    }
+}
+
+impl InstanceSource for Instance{
+    fn get_instance(&self) -> &ash::Instance {
+        &self.instance
+    }
+}
+
+impl BusElement<QvkBusMessage> for Arc<Instance>{
+    fn accepts_transaction(&self, _src: &dyn Bus<QvkBusMessage>, transaction: &qcom::bus::BusTransaction<QvkBusMessage>) -> bool {
+        if let BusTransaction::InProgress(msg) = transaction{
+            if let QvkBusMessage::Instance(_) = msg{
+                return true;
+            }
+            return false;
+        }
+        false
+    }
+
+    fn handle_transaction(&self, _src: &dyn Bus<QvkBusMessage>, transaction: &mut qcom::bus::BusTransaction<QvkBusMessage>) -> Option<QvkBusMessage> {
+        
+        let msg = match transaction{
+            BusTransaction::InProgress(msg) => msg,
+            _ => panic!("Instance cannot handle finished transactions"),
+        };
+
+        let instance = match msg{
+            QvkBusMessage::GetInstance => {self.clone()},
+            _ => panic!("Instance can only handle GetInstance messages")
+        };
+
+
+        Some(QvkBusMessage::Instance(instance))
     }
 }
