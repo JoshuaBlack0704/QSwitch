@@ -8,7 +8,6 @@ pub enum InstanceExtension{
 }
 pub trait InstanceSource{
     fn get_instance(&self) -> &ash::Instance;
-    
 }
 pub struct InstanceBuilder{
     pub app_name: CString,
@@ -26,4 +25,31 @@ pub struct InstanceBuilder{
 pub struct Instance{
     entry: ash::Entry,
     instance: ash::Instance,
+}
+
+pub mod device;
+pub enum DeviceExtension{
+    Name(*const i8),
+}
+pub enum DeviceFeatures{}
+pub trait DeviceSource{}
+pub struct DeviceBuilder<'a>{
+    pub user_device_select: bool,
+    pub surface_support: Option<&'a winit::window::Window>,
+    pub features: vk::PhysicalDeviceFeatures,
+    pub extended_features: Vec<DeviceFeatures>,
+    pub extensions: Vec<DeviceExtension>,
+}
+pub struct Device{
+    device: ash::Device,
+}
+#[derive(Clone)]
+pub struct PhysicalDeviceData {
+    pub physical_device: vk::PhysicalDevice,
+    pub properties: vk::PhysicalDeviceProperties,
+    pub queue_properties: Vec<vk::QueueFamilyProperties>,
+    pub raytracing_properties: vk::PhysicalDeviceRayTracingPipelinePropertiesKHR,
+    pub acc_structure_properties: vk::PhysicalDeviceAccelerationStructurePropertiesKHR,
+    pub mem_props: vk::PhysicalDeviceMemoryProperties,
+    pub mem_budgets: vk::PhysicalDeviceMemoryBudgetPropertiesEXT,
 }

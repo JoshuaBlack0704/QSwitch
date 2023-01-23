@@ -8,76 +8,80 @@ use qcom::bus::{BusElement, Bus};
 use crate::init_bus::InstanceSource;
 #[derive(Clone)]
 pub enum QvkBusMessage{
-    InstanceHandle(vk::Instance),
     GetInstance,
     Instance(Arc<dyn InstanceSource>)
 }
+#[derive(Clone)]
+pub enum QvkBusId{
+    Bus(String),
+    Transaction(u64),
+}
 
-pub type QvkElement = Arc<dyn BusElement<QvkBusMessage>>;
+pub type QvkElement = Arc<dyn BusElement<QvkBusId,QvkBusMessage>>;
 pub struct QvkBus{
-    globals: RwLock<Vec<QvkElement>>,
-    instance: RwLock<Option<QvkElement>>,
+    uuid: u64,
+    qvk_elements: RwLock<Vec<QvkElement>>,
 }
 
 impl QvkBus{
     pub fn new() -> Arc<QvkBus> {
         Arc::new(
             Self{
-                globals: RwLock::new(vec![]),
-                instance: RwLock::new(None),
+                
+                qvk_elements: RwLock::new(vec![]),
+                uuid: thread_rng().gen::<u64>(),
             }
         )
     }
-    pub fn bind_global(&self, global: QvkElement){
-        let mut globals = self.globals.blocking_write();
-        globals.push(global);
-    }
-    pub fn bind_instance(&self, instance: QvkElement){
-        let mut i = self.instance.blocking_write();
-        if let Some(_) = *i{
-            panic!("Cannot add bind instance to QvkBus twice");
-        }
 
-        *i = Some(instance);
+    pub fn bind_element(&self, qvk_element: QvkElement){
+        let mut elements = self.qvk_elements.blocking_write();
+        elements.push(qvk_element);
+    }
+
+    pub fn get_instance(self: Arc<Self>) -> Arc<dyn InstanceSource>{
+        match self.exchange(QvkBusMessage::GetInstance)
+            .expect("No instance source bound to the qvk bus")
+            .reply.expect("Bound qvk instance did not return anything"){
+            QvkBusMessage::Instance(i) => i,
+            _ => panic!("Bound qvk instance returned wrong message type")
+        }
     }
 }
 
-impl Bus<QvkBusMessage> for Arc<QvkBus>{
-    fn as_trait_object(&self) -> &dyn Bus<QvkBusMessage> {
+
+impl Bus<QvkBusId,QvkBusMessage> for Arc<QvkBus>{
+    fn as_trait_object(&self) -> &dyn Bus<QvkBusId,QvkBusMessage> {
         self
     }
 
-    fn get_elements(&self, msg: &QvkBusMessage) -> Vec<Arc<dyn BusElement<QvkBusMessage>>> {
-        match msg{
-            QvkBusMessage::InstanceHandle(_) => {
-                return self.globals.blocking_read().clone();
-            },
-            QvkBusMessage::GetInstance => {
-                let instance = self.instance.blocking_read();
-                match &(*instance){
-                    Some(i) => vec![i.clone()],
-                    None => vec![],
-                }
-            },
-            _ => vec![]
-        }
+    fn get_elements(&self, _msg: &QvkBusMessage) -> Vec<Arc<dyn BusElement<QvkBusId,QvkBusMessage>>> {
+        self.qvk_elements.blocking_read().clone()
     }
 
-    fn get_transaction_uuid(&self) -> fn() -> u64 {
-        || {thread_rng().gen::<u64>()}
+    fn get_transaction_uuid(&self) -> QvkBusId {
+        QvkBusId::Transaction(thread_rng().gen::<u64>())
     }
 
-    fn get_uuid(&self) -> fn() -> u64 {
-        || {thread_rng().gen::<u64>()}
+    fn get_uuid(&self) -> QvkBusId {
+        QvkBusId::Bus(format!("Main qvk bus: {}", self.uuid))
     }
 }
 
 impl ToString for QvkBusMessage{
     fn to_string(&self) -> String {
         match self{
-            QvkBusMessage::InstanceHandle(i) => format!("Created instance {:?}", i),
-            QvkBusMessage::GetInstance => format!("Crequesting instance"),
+            QvkBusMessage::GetInstance => format!("Requesting instance"),
             QvkBusMessage::Instance(i) => format!("Replied with instance {:?}", i.get_instance().handle()),
+        }
+    }
+}
+
+impl ToString for QvkBusId{
+    fn to_string(&self) -> String {
+        match self{
+            QvkBusId::Bus(s) => s.clone(),
+            QvkBusId::Transaction(uuid) => uuid.to_string(),
         }
     }
 }
